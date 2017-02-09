@@ -492,7 +492,7 @@ GridStats Grid::stats() {
 	int k = 1;
 	// Welford's method for variance.
 	// i has the index of the first dpata element.
-	for (; i < gp.size(); ++i) {
+	for (i = 0; i < gp.size(); ++i) {
 		if ((v = getFloat(i)) != nodata) {
 			double oldm = m;
 			m = m + (v - m) / k;
@@ -542,9 +542,6 @@ void Grid::floodFill(int col, int row,
 	int *outarea) {
 
 	const GridProps& gp = props();
-
-	if(!gp.isInt() || !other.props().isInt())
-		g_argerr("Flood fill is only implemented for integer rasters.");
 
 	int cols = gp.cols();
 	int rows = gp.rows();
@@ -1242,8 +1239,7 @@ Raster::Raster(const std::string &filename, bool writable) :
 
 	// Attempt to open the dataset.
 	GDALAllRegister();
-	m_ds = (GDALDataset *) GDALOpen(filename.c_str(),
-			writable ? GA_Update : GA_ReadOnly);
+	m_ds = (GDALDataset *) GDALOpen(filename.c_str(), writable ? GA_Update : GA_ReadOnly);
 	if (m_ds == NULL)
 		g_runerr("Failed to open raster.");
 
@@ -1313,8 +1309,10 @@ void Raster::fillInt(int value, int band) {
 	for(int i = 0; i < m_bcols * m_brows; ++i)
 		*(((int *) buf.buf) + i) = value;
 	GDALRasterBand *bnd = m_ds->GetRasterBand(band);
-	for (int r = 0; r < m_brows; ++r) {
-		for (int c = 0; c < m_bcols; ++c) {
+	int cols = props().cols();
+	int rows = props().rows();
+	for (int r = 0; r < rows / m_brows; ++r) {
+		for (int c = 0; c < cols / m_bcols; ++c) {
 			if (bnd->WriteBlock(c, r, buf.buf) != CE_None)
 				g_runerr("Fill error.");
 		}
@@ -1326,8 +1324,10 @@ void Raster::fillFloat(double value, int band) {
 	for(int i = 0; i < m_bcols * m_brows; ++i)
 		*(((double *) buf.buf) + i) = value;
 	GDALRasterBand *bnd = m_ds->GetRasterBand(band);
-	for (int r = 0; r < m_brows; ++r) {
-		for (int c = 0; c < m_bcols; ++c) {
+	int cols = props().cols();
+	int rows = props().rows();
+	for (int r = 0; r < rows / m_brows; ++r) {
+		for (int c = 0; c < cols / m_bcols; ++c) {
 			if (bnd->WriteBlock(c, r, buf.buf) != CE_None)
 				g_runerr("Fill error.");
 		}
@@ -1455,7 +1455,7 @@ double Raster::getFloat(int col, int row, int band) {
 }
 
 double Raster::getFloat(long idx, int band) {
-	return getFloat((int) idx % m_props.cols(), (int) idx / m_props.rows(), band);
+	return getFloat((int) idx % m_props.cols(), (int) idx / m_props.cols(), band);
 }
 
 
@@ -1482,7 +1482,7 @@ int Raster::getInt(int col, int row, int band) {
 }
 
 int Raster::getInt(long idx, int band) {
-	return getInt((int) idx % m_props.cols(), (int) idx / m_props.rows(), band);
+	return getInt((int) idx % m_props.cols(), (int) idx / m_props.cols(), band);
 }
 
 int Raster::getInt(double x, double y, int band) {
@@ -1490,7 +1490,7 @@ int Raster::getInt(double x, double y, int band) {
 }
 
 void Raster::setInt(long idx, int v, int band) {
-	setInt((int) idx % m_props.cols(), (int) idx / m_props.rows(), v, band);
+	setInt((int) idx % m_props.cols(), (int) idx / m_props.cols(), v, band);
 }
 
 void Raster::setInt(double x, double y, int v, int band) {
@@ -1518,7 +1518,7 @@ void Raster::setFloat(int col, int row, double v, int band) {
 }
 
 void Raster::setFloat(long idx, double v, int band) {
-	setFloat((int) idx % m_props.cols(), (int) idx / m_props.rows(), v, band);
+	setFloat((int) idx % m_props.cols(), (int) idx / m_props.cols(), v, band);
 }
 
 void Raster::setFloat(double x, double y, double v, int band) {
@@ -1561,6 +1561,9 @@ public:
 
 void Raster::polygonize(const std::string &filename, const std::string &layerName,
 		const std::string &driver, uint16_t srid, uint16_t band, Status *status, bool *cancel) {
+
+	if(cancel == nullptr)
+		cancel = &_cancel;
 
 	// Remove the original file; some can't be overwritten directly.
 	Util::rm(filename);
@@ -1708,7 +1711,8 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 			for(const uint64_t &id : remove)
 				polys.erase(id);
 
-			status->update((float) ++stat / rows);
+			if(status)
+				status->update((float) ++stat / rows);
 		}
 
 		// If the thread completes and polygons are left over, merge into the
