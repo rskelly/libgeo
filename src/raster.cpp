@@ -447,6 +447,10 @@ bool TargetOperator::fill(int value) const {
 	return value == m_match;
 }
 
+bool TargetOperator::fill(double value) const {
+	return (int) value == m_match;
+}
+
 TargetOperator::~TargetOperator() {}
 
 Grid::Grid() {

@@ -176,6 +176,7 @@ namespace geotools {
         class G_DLL_EXPORT FillOperator {
         public:
             virtual bool fill(int value) const = 0;
+            virtual bool fill(double value) const = 0;
             virtual ~FillOperator() = 0;
         };
 
@@ -186,6 +187,7 @@ namespace geotools {
             TargetOperator(int match);
 
             bool fill(int value) const;
+            bool fill(double value) const;
 
             ~TargetOperator();
         };
