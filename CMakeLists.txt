@@ -74,7 +74,7 @@ if(OPENMP_FOUND)
 	set (CMAKE_C_FLAGS "${CMAKE_CXX_FLAGS} -fopenmp")
 endif()
 
-project (geotools)
+project (geolibs)
 
 # Configure directories
 link_directories(. ${Boost_LIBRARY_DIRS} ${LIB_PATH})
@@ -92,7 +92,7 @@ add_library (db STATIC src/db.cpp)
 target_link_libraries (db ${GDAL_LIBRARY} geotools)
 
 add_library (raster STATIC src/raster.cpp)
-target_link_libraries (raster ${GDAL_LIBRARY} util geotools db)
+target_link_libraries (raster ${GDAL_LIBRARY} ${GEOS_LIBRARY} util geotools db)
 
 # Install ###########################################################################################################
 
