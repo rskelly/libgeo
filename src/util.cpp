@@ -10,10 +10,10 @@
 
 #include <ogr_spatialref.h>
 
-#include "geotools.hpp"
+#include "geo.hpp"
 #include "util.hpp"
 
-using namespace geotools::util;
+using namespace geo::util;
 
 void Callbacks::stepCallback(float status) const {
 	g_debug("Step: " << (int) (status * 100.0f) << "%");

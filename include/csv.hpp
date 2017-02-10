@@ -15,9 +15,10 @@
 #include <sstream>
 #include <unordered_map>
 
-#include "geotools.hpp"
+#include "geo.hpp"
 
-namespace geotools {
+namespace geo {
+
     namespace csv {
 
         class CSVReader {

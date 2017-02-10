@@ -23,12 +23,12 @@
 #include <ogr_spatialref.h>
 #include <eigen3/Eigen/Core>
 
-#include "geotools.hpp"
+#include "geo.hpp"
 #include "util.hpp"
 
-using namespace geotools::util;
+using namespace geo::util;
 
-namespace geotools {
+namespace geo {
 
     namespace raster {
 
@@ -275,7 +275,7 @@ namespace geotools {
             // Callback is an optional function reference with a single float
             // between 0 and 1, for status tracking.
             void smooth(Grid &smoothed, double sigma, int size, int band = 1,
-                geotools::util::Callbacks *status = nullptr, 
+                geo::util::Callbacks *status = nullptr, 
                 bool *cancel = nullptr);
 
             // The radius is given with cells as the unit, but
@@ -295,7 +295,7 @@ namespace geotools {
             void *m_grid;
             bool m_mmapped;
             GridProps m_props;
-            std::unique_ptr<geotools::util::MappedFile> m_mappedFile;
+            std::unique_ptr<geo::util::MappedFile> m_mappedFile;
             std::unique_ptr<boost::interprocess::mapped_region> m_region;
             std::unique_ptr<boost::interprocess::file_mapping> m_mapping;
 
@@ -453,7 +453,7 @@ namespace geotools {
             // Vectorize the raster.
             void polygonize(const std::string &filename, const std::string &layerName, 
                 const std::string &driver, uint16_t srid = 0, uint16_t band = 1,
-				geotools::util::Status *status = nullptr, bool *cancel = nullptr);
+				geo::util::Status *status = nullptr, bool *cancel = nullptr);
 
             ~Raster();
 
@@ -461,7 +461,7 @@ namespace geotools {
 
     } // raster
 
-} // geotools
+} // geo
 
 
 #endif

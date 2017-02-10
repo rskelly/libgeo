@@ -24,7 +24,7 @@
 #include <boost/algorithm/string/case_conv.hpp>
 #include <boost/algorithm/string/join.hpp>
 
-#include "geotools.hpp"
+#include "geo.hpp"
 
 #ifdef _MSC_VER
 #include <float.h>
@@ -37,7 +37,7 @@ namespace std {
 }
 #endif
 
-namespace geotools {
+namespace geo {
 
     namespace util {
 
@@ -100,9 +100,9 @@ namespace geotools {
 
             bool contains(double x, double y, double z) const;
 
-            bool contains(const geotools::util::Bounds &b, int dims = 2) const;
+            bool contains(const geo::util::Bounds &b, int dims = 2) const;
 
-            bool intersects(const geotools::util::Bounds &b, int dims = 2) const;
+            bool intersects(const geo::util::Bounds &b, int dims = 2) const;
 
             Bounds intersection(const Bounds &other) const;
 
@@ -148,7 +148,7 @@ namespace geotools {
 
             double toY(int row, double resolution) const;
 
-            void extend(const geotools::util::Bounds &b);
+            void extend(const geo::util::Bounds &b);
 
             void extendX(double x);
 
@@ -290,6 +290,6 @@ namespace geotools {
 
     } // util
 
-} // geotools
+} // geo
 
 #endif

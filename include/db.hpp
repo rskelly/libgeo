@@ -13,12 +13,12 @@
 #include <gdal_priv.h>
 #include <ogrsf_frmts.h>
 
-#include "geotools.hpp"
+#include "geo.hpp"
 #include "util.hpp"
 
-using namespace geotools::util;
+using namespace geo::util;
 
-namespace geotools {
+namespace geo {
 
     namespace db {
 
@@ -99,7 +99,7 @@ namespace geotools {
 
     } // db
 
-} // geotools
+} // geo
 
 #endif
 

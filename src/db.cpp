@@ -1,8 +1,8 @@
 #include "db.hpp"
 
-using namespace geotools::db;
+using namespace geo::db;
 
-namespace geotools {
+namespace geo {
 
 	namespace db {
 
@@ -61,9 +61,9 @@ namespace geotools {
 
 		} // util
 	} // db
-} // geotools
+} // geo
 
-using namespace geotools::db::util;
+using namespace geo::db::util;
 
 DB::DB(const std::string &file, const std::string &layer, const std::string &driver,
 		const std::unordered_map<std::string, FieldType> &fields,

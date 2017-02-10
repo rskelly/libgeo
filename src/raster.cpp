@@ -23,17 +23,17 @@
 
 #include "omp.h"
 
-#include "geotools.hpp"
+#include "geo.hpp"
 #include "util.hpp"
 #include "raster.hpp"
 #include "db.hpp"
 
-using namespace geotools::util;
-using namespace geotools::raster;
+using namespace geo::util;
+using namespace geo::raster;
 
 bool _cancel = false;
 
-namespace geotools {
+namespace geo {
 
 	namespace raster {
 
@@ -233,9 +233,9 @@ namespace geotools {
 
 		} //util
 	} // raster
-} // geotools
+} // geo
 
-using namespace geotools::raster::util;
+using namespace geo::raster::util;
 
 GridProps::GridProps() :
 		m_cols(0), m_rows(0),

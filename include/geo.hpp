@@ -1,5 +1,5 @@
-#ifndef __GEOTOOLS_H__
-#define __GEOTOOLS_H__
+#ifndef __GEO_H__
+#define __GEO_H__
 
 #include <limits>
 #include <exception>
