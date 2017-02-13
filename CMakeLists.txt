@@ -53,22 +53,23 @@ endif()
 project (libgeo)
 
 # Configure directories
-link_directories(. ${Boost_LIBRARY_DIRS} ${LIB_PATH})
-include_directories(include ${Boost_INCLUDE_DIRS} ${GDAL_INCLUDE_DIR} ${Qt5_DIR}/include ${Qt5Core_INCLUDE_DIRS} ${Qt5Widgets_INCLUDE_DIRS} ${Qt5Gui_INCLUDE_DIRS} ${INC_PATH})
 
+link_directories(. ${Boost_LIBRARY_DIRS} ${LIB_PATH})
 
 # Build support libraries ############################################################################################
 
 add_library (geo STATIC src/geo.cpp)
+target_include_directories(geo PUBLIC include)
+
 
 add_library (util STATIC src/util.cpp)
+target_include_directories(util PUBLIC include ${Boost_INCLUDE_DIRS})
 target_link_libraries (util ${Boost_LIBRARIES} geo)
 
 add_library (db STATIC src/db.cpp)
-target_link_libraries (db ${GDAL_LIBRARY} geo)
+target_include_directories(db PUBLIC include ${GDAL_INCLUDE_DIR})
+target_link_libraries (db ${GDAL_LIBRARY} util geo)
 
 add_library (raster STATIC src/raster.cpp)
+target_include_directories(raster PUBLIC include ${GDAL_INCLUDE_DIR})
 target_link_libraries (raster ${GDAL_LIBRARY} ${GEOS_LIBRARY} util geo db)
-
-# Install ###########################################################################################################
-
