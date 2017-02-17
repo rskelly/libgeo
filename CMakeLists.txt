@@ -22,13 +22,10 @@ elseif(${WIN32})
 	set (Boost_NO_SYSTEM_PATHS  ON)
 	set (BOOST_INCLUDEDIR "E:\\boost_1_63_0")
 	set (BOOST_LIBRARYDIR "E:\\boost_1_63_0\\lib64-msvc-14.0")
-	set (CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH};C:\\Qt\\5.7\\msvc2015_64\\lib\\cmake\\Qt5Widgets")
 	set (LIB_PATH "E:\\opt\\lib")
 	set (INC_PATH "E:\\opt\\include")
 	set (GDAL_INCLUDE_DIR "E:\\opt\\include")
 	set (GDAL_LIBRARY "E:\\opt\\lib\\gdal_i.lib")
-	set (libLAS_INCLUDE_DIR "E:\\opt\\include")
-	set (libLAS_LIBRARY_DIRS "E:\\opt\\lib")
 else()
 	option(CGAL_DISABLE_ROUNDING_MATH_CHECK "Disable rounding math check in CGAL. This permits Valgrind to run." ON)
 	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-pragmas")
@@ -43,7 +40,6 @@ set (CMAKE_CXX_EXTENSIONS OFF)
 find_package (OpenMP REQUIRED)
 find_package (Boost COMPONENTS system filesystem date_time REQUIRED)
 find_package (GDAL 2.1 REQUIRED)
-find_package (libLAS 1.8) # Will fail on windows with gisinternals linkage; ignore.
 
 if(OPENMP_FOUND)
 	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_C_FLAGS} -fopenmp")
@@ -66,9 +62,11 @@ add_library (util STATIC src/util.cpp)
 target_include_directories(util PUBLIC include ${Boost_INCLUDE_DIRS})
 target_link_libraries (util ${Boost_LIBRARIES} geo)
 
+
 add_library (db STATIC src/db.cpp)
 target_include_directories(db PUBLIC include ${GDAL_INCLUDE_DIR})
 target_link_libraries (db ${GDAL_LIBRARY} util geo)
+
 
 add_library (raster STATIC src/raster.cpp)
 target_include_directories(raster PUBLIC include ${GDAL_INCLUDE_DIR})
