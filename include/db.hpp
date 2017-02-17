@@ -1,20 +1,23 @@
-#ifndef __SQLITE_HPP__
-#define __SQLITE_HPP__
+#ifndef __DB_HPP__
+#define __DB_HPP__
+#include <map>
 
-#include <sqlite3.h>
-#include <spatialite.h>
-
-#include <sstream>
-#include <iomanip>
-#include <vector>
+#include "geo.hpp"
+#include "util.hpp"
 
 #include <ogr_core.h>
 #include <ogr_feature.h>
 #include <gdal_priv.h>
 #include <ogrsf_frmts.h>
 
-#include "geo.hpp"
-#include "util.hpp"
+#include <string>
+#include <sstream>
+#include <map>
+#include <iomanip>
+#include <list>
+#include <vector>
+#include <set>
+#include <unordered_map>
 
 using namespace geo::util;
 

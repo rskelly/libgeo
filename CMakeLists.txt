@@ -1,13 +1,11 @@
 cmake_minimum_required(VERSION 3.1)
 
+enable_language(C)
+enable_language(CXX)
+set (CMAKE_CXX_STANDARD 11)
+set (CMAKE_CXX_STANDARD_REQUIRED ON)
+set (CMAKE_CXX_EXTENSIONS OFF)
 set (CMAKE_POSITION_INDEPENDENT_CODE ON)
-
-set (Boost_DEBUG OFF)
-set (Boost_USE_STATIC_LIBS OFF)
-set (Boost_USE_STATIC_RUNTIME OFF)
-
-set (GEOS_LIBRARY geos)
-
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -pedantic -D_GLIBCXX_PARALLEL")
 
 if (${APPLE})
@@ -31,20 +29,20 @@ else()
 	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-pragmas")
 endif()
 
-enable_language(C)
-enable_language(CXX)
-set (CMAKE_CXX_STANDARD 11)
-set (CMAKE_CXX_STANDARD_REQUIRED ON)
-set (CMAKE_CXX_EXTENSIONS OFF)
+set (Boost_DEBUG OFF)
+set (Boost_USE_STATIC_LIBS ON)
+set (Boost_USE_STATIC_RUNTIME ON)
 
 find_package (OpenMP REQUIRED)
 find_package (Boost COMPONENTS system filesystem date_time REQUIRED)
 find_package (GDAL 2.1 REQUIRED)
+set (GEOS_LIBRARY geos)
 
 if(OPENMP_FOUND)
 	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_C_FLAGS} -fopenmp")
 	set (CMAKE_C_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_C_FLAGS} -fopenmp")
 endif()
+
 
 project (libgeo)
 
@@ -59,15 +57,15 @@ target_include_directories(geo PUBLIC include)
 
 
 add_library (util STATIC src/util.cpp)
-target_include_directories(util PUBLIC include ${Boost_INCLUDE_DIRS})
-target_link_libraries (util ${Boost_LIBRARIES} geo)
+target_include_directories(util PUBLIC include ${Boost_INCLUDE_DIRS} ${GDAL_INCLUDE_DIR})
+target_link_libraries (util ${Boost_LIBRARIES} ${GDAL_LIBRARY} geo)
 
 
 add_library (db STATIC src/db.cpp)
-target_include_directories(db PUBLIC include ${GDAL_INCLUDE_DIR})
+target_include_directories(db PUBLIC include ${Boost_INCLUDE_DIRS} ${GDAL_INCLUDE_DIR})
 target_link_libraries (db ${GDAL_LIBRARY} util geo)
 
 
 add_library (raster STATIC src/raster.cpp)
-target_include_directories(raster PUBLIC include ${GDAL_INCLUDE_DIR})
+target_include_directories(raster PUBLIC include ${Boost_INCLUDE_DIRS} ${GDAL_INCLUDE_DIR})
 target_link_libraries (raster ${GDAL_LIBRARY} ${GEOS_LIBRARY} util geo db)

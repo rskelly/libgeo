@@ -1,3 +1,8 @@
+#include "util.hpp"
+#include "geo.hpp"
+
+#include <ogr_spatialref.h>
+
 #include <set>
 #include <list>
 #include <sstream>
@@ -7,11 +12,6 @@
 #include <cmath>
 #include <string>
 #include <tuple>
-
-#include <ogr_spatialref.h>
-
-#include "geo.hpp"
-#include "util.hpp"
 
 using namespace geo::util;
 
@@ -368,8 +368,8 @@ void Util::parseRanges(std::set<double> &values, const char *str, double step) {
 					second = first;
 					first = tmp;
 				}
-				for (double i = first; i <= second; i += step)
-					values.insert(i);
+				for (double j = first; j <= second; j += step)
+					values.insert(j);
 				range = false;
 			}
 			if (c == '\0')
@@ -404,8 +404,8 @@ void Util::parseRanges(std::set<int> &values, const char *str) {
 					second = first;
 					first = tmp;
 				}
-				for (int i = first; i <= second; ++i)
-					values.insert(i);
+				for (int j = first; j <= second; ++j)
+					values.insert(j);
 				range = false;
 			}
 			if (c == '\0')
@@ -492,30 +492,12 @@ void Util::copyfile(std::string &srcfile, std::string &dstfile) {
 }
 
 // Load the samples from a csv file. The file must have x, y and z headers.
-
-void Util::loadXYZSamples(std::string &datafile,
-		std::vector<std::tuple<double, double, double> > &samples) {
+void Util::loadXYZSamples(std::string&,	std::vector<std::tuple<double, double, double> >&) {
 	g_runerr("Not implemented");
-	/*
-	 io::CSVReader<3> in(datafile.c_str());
-	 in.read_header(io::ignore_extra_column, "x", "y", "z");
-	 double x, y, z;
-	 while (in.read_row(x, y, z))
-	 samples.push_back(std::make_tuple(x, y, z));
-	 */
 }
 
-void Util::loadIDXYZSamples(std::string &datafile,
-		std::vector<std::tuple<std::string, double, double, double> > &samples) {
+void Util::loadIDXYZSamples(std::string&, std::vector<std::tuple<std::string, double, double, double> >&) {
 	g_runerr("Not implemented");
-	/*
-	 io::CSVReader<4> in(datafile.c_str());
-	 in.read_header(io::ignore_extra_column, "id", "x", "y", "z");
-	 std::string id;
-	 double x, y, z;
-	 while (in.read_row(id, x, y, z))
-	 samples.push_back(std::make_tuple(id, x, y, z));
-	 */
 }
 
 void Util::status(int step, int of, const std::string &message, bool end) {

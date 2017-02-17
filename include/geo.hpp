@@ -58,6 +58,7 @@ extern int g__loglevel;
                 } \
         }
 #endif
+
 #define g_trace(x) g_log("TRACE:   " << x, G_LOG_TRACE)
 #define g_debug(x) g_log("DEBUG:   " << x, G_LOG_DEBUG)
 #define g_warn(x)  g_log("WARNING: " << x, G_LOG_WARN)

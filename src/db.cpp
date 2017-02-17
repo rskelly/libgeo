@@ -1,6 +1,9 @@
 #include "db.hpp"
+#include "util.hpp"
+#include "geo.hpp"
 
 using namespace geo::db;
+using namespace geo::util;
 
 namespace geo {
 
@@ -49,6 +52,7 @@ namespace geo {
 				case FieldType::FTString: return OFTString;
 				case FieldType::FTDouble: return OFTReal;
 				case FieldType::FTBlob: return OFTBinary;
+				case FieldType::FTUnknown:
 				default:
 					g_argerr("Unknown or unimplemented type: " << type);
 				}
@@ -221,7 +225,7 @@ void DB::createGeomIndex() {
 }
 
 uint64_t DB::getGeomCount() const {
-	return m_layer->GetFeatureCount(1);
+	return (uint64_t) m_layer->GetFeatureCount(1);
 }
 
 void DB::execute(std::string &sql) {

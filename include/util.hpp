@@ -1,6 +1,26 @@
 #ifndef __UTIL_HPP__
 #define __UTIL_HPP__
 
+#include "geo.hpp"
+
+#include <boost/interprocess/file_mapping.hpp>
+#include <boost/interprocess/mapped_region.hpp>
+#include <boost/filesystem.hpp>
+#include <boost/algorithm/string/predicate.hpp>
+#include <boost/algorithm/string/case_conv.hpp>
+#include <boost/algorithm/string/join.hpp>
+
+#ifdef _MSC_VER
+#include <float.h>
+namespace std {
+
+	inline bool isnan(double value) {
+		return _isnan(value) == 1;
+	}
+
+}
+#endif
+
 #include <set>
 #include <list>
 #include <fstream>
@@ -16,26 +36,6 @@
 #include <string>
 #include <vector>
 #include <tuple>
-
-#include <boost/interprocess/file_mapping.hpp>
-#include <boost/interprocess/mapped_region.hpp>
-#include <boost/filesystem.hpp>
-#include <boost/algorithm/string/predicate.hpp>
-#include <boost/algorithm/string/case_conv.hpp>
-#include <boost/algorithm/string/join.hpp>
-
-#include "geo.hpp"
-
-#ifdef _MSC_VER
-#include <float.h>
-namespace std {
-
-    inline bool isnan(double value) {
-        return _isnan(value) == 1;
-    }
-    
-}
-#endif
 
 namespace geo {
 
