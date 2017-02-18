@@ -30,8 +30,8 @@ else()
 endif()
 
 set (Boost_DEBUG OFF)
-set (Boost_USE_STATIC_LIBS ON)
-set (Boost_USE_STATIC_RUNTIME ON)
+set (Boost_USE_STATIC_LIBS OFF)
+set (Boost_USE_STATIC_RUNTIME OFF)
 
 find_package (OpenMP REQUIRED)
 find_package (Boost COMPONENTS system filesystem date_time REQUIRED)
