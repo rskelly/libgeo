@@ -211,26 +211,129 @@ namespace geo {
             // the creation of ranges with fractional intermediate values.
             // e.g., 1-4,7,9-11 gives {1, 2, 3, 4, 7, 9, 10, 11}
             template <class T>
-            static void parseFloatRanges(T iter, const char *str, double step = 1.0);
+            static void parseFloatRanges(T iter, const std::string &str, double step = 1.0) {
+                std::stringstream ss;
+                double first = 0, second = 0;
+                bool range = false;
+                int i = 0;
+                char c = str[i++];
+                while (true) {
+                    if (c == '-') {
+                        range = true;
+                        first = atof(ss.str().c_str());
+                        ss.str(std::string());
+                    } else if (c == ',' || c == '\0') {
+                        if (!range) {
+                            *iter = atof(ss.str().c_str());
+                            ++iter;
+                            ss.str(std::string());
+                        } else {
+                            second = atof(ss.str().c_str());
+                            ss.str(std::string());
+                            step = g_abs(step);
+                            if (first > second) {
+                                double tmp = second;
+                                second = first;
+                                first = tmp;
+                            }
+                            for (double j = first; j <= second; j += step) {
+                                *iter = j;
+                                ++iter;
+                            }
+                            range = false;
+                        }
+                        if (c == '\0')
+                            break;
+                    } else {
+                        ss << c;
+                    }
+                    c = str[i++];
+                }
+            }
 
             template <class T>
-            static void parseIntRanges(T iter, const char *str);
+            static void parseIntRanges(T iter, const std::string &str) {
+                std::stringstream ss;
+                int first = 0, second = 0;
+                bool range = false;
+                int i = 0;
+                char c = str[i++];
+                while (true) {
+                    if (c == '-') {
+                        range = true;
+                        first = atoi(ss.str().c_str());
+                        ss.str(std::string());
+                    } else if (c == ',' || c == '\0') {
+                        if (!range) {
+                            iter = atoi(ss.str().c_str());
+                            ++iter;
+                            ss.str(std::string());
+                        } else {
+                            second = atoi(ss.str().c_str());
+                            ss.str(std::string());
+                            if (first > second) {
+                                int tmp = second;
+                                second = first;
+                                first = tmp;
+                            }
+                            for (int j = first; j <= second; ++j) {
+                                *iter = j;
+                                ++iter;
+                            }
+                            range = false;
+                        }
+                        if (c == '\0')
+                            break;
+                    } else {
+                        ss << c;
+                    }
+                    c = str[i++];
+                }
+            }
 
             // Split a comma-delimited string into a list of unique integers.
             template <class T>
-            static void intSplit(T iter, const std::string &str, const std::string &delim = ",");
+            static void intSplit(T iter, const std::string &str, const std::string &delim = ",") {
+                std::stringstream ss(str);
+                std::string item;
+                while (std::getline(ss, item, *(delim.c_str()))) {
+                    *iter = atoi(item.c_str());
+                    ++iter;
+                }
+            }
 
             // Return true if the integer is in the list, or the list is empty.
             template <class T, class U>
-            static bool inList(T begin, T end, U value);
+            static bool inList(T begin, T end, U value) {
+                while(begin != end) {
+                    if(value == *begin)
+                        return true;
+                    ++begin;
+                } 
+                return false;
+            }
 
             // Split a string with the given delimiter
             template <class T>
-            static void splitString(T iter, const std::string &str, const std::string &delim = ",");
+            static void splitString(T iter, const std::string &str, const std::string &delim = ",") {
+                std::stringstream ss(str);
+                std::string item;
+                while (std::getline(ss, item, *(delim.c_str()))) {
+                    *iter = item;
+                    ++iter;
+                }
+            }
 
             // Join the string with the given delimiter
             template <class T>
-            static std::string join(T begin, T end, const std::string &delim = ",");
+            static std::string join(T begin, T end, const std::string &delim = ",") {
+                std::vector<std::string> lst;
+                while(begin != end) {
+                    lst.push_back(*begin);
+                    ++begin;
+                }
+                return boost::algorithm::join(lst, delim);
+            }
 
             // Lowercase the string.
             static std::string& lower(std::string &str);
@@ -270,7 +373,35 @@ namespace geo {
             // the files by that extension (case-insensitive). If dir is a file, it is added to the list.
             // Returns the number of files found.
             template <class T>
-            static size_t dirlist(T iter, const std::string &dir, const std::string &ext = std::string());
+            static size_t dirlist(T iter, const std::string &dir, const std::string &ext = std::string()) {
+                using namespace boost::filesystem;
+                using namespace boost::algorithm;
+                int i = 0;
+                if (is_regular_file(dir)) {
+                    *iter = dir;
+                    ++iter;
+                    ++i;
+                } else {
+                    directory_iterator end;
+                    directory_iterator di(dir);
+                    for (; di != end; ++di) {
+                        if (!ext.empty()) {
+                            std::string p(di->path().string());
+                            to_lower(p);
+                            if (ends_with(p, ext)) {
+                                *iter = p;
+                                ++iter;
+                                ++i;
+                            }
+                        } else {
+                            *iter = di->path().string();
+                            ++iter;
+                            ++i;
+                        }
+                    }
+                }
+                return i;
+            }
 
             // Returns a memory-mapped file.
             static std::unique_ptr<MappedFile> mapFile(const std::string &filename, 
