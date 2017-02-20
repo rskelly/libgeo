@@ -176,7 +176,7 @@ std::map<std::string, std::set<std::string> > DB::extensions() {
 				const char *ext = drv->GetMetadataItem(GDAL_DMD_EXTENSION);
 				if(ext != NULL ) {
 					std::list<std::string> lst;
-					Util::splitString(std::string(ext), lst);
+					Util::splitString(std::back_inserter(lst), std::string(ext));
 					for(const std::string &item : lst)
 						extensions[desc].insert(Util::lower(item));
 				}

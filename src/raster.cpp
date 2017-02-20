@@ -1128,7 +1128,7 @@ std::map<std::string, std::set<std::string> > Raster::extensions() {
 				const char* ext = drv->GetMetadataItem(GDAL_DMD_EXTENSION);
 				if(ext != NULL ) {
 					std::list<std::string> lst;
-					Util::splitString(std::string(ext), lst);
+					Util::splitString(std::back_inserter(lst), std::string(ext));
 					for(const std::string &item : lst)
 						extensions[desc].insert(Util::lower(item));
 				}
@@ -1294,14 +1294,14 @@ void Raster::setInt(int col, int row, int v, int band) {
 		if(!rb)
 			g_argerr("No such band: " << band);
 		if(CPLE_None != rb->ReadBlock(bcol, brow, m_block))
-			g_runerr("Failed to read from: " << filename());
+			g_runerr("Failed to read block from: " << filename());
 		m_bcol = bcol;
 		m_brow = brow;
 	}
 	int idx = (row - brow * m_brows) * m_bcols + (col - bcol * m_bcols);
 	writeToBlock(m_block, getGDType(), v, idx);
 	if(CPLE_None != rb->WriteBlock(bcol, brow, m_block))
-		g_runerr("Failed to write to: " << filename());
+		g_runerr("Failed to write block to: " << filename());
 }
 
 void Raster::fillInt(int value, int band) {

@@ -288,7 +288,7 @@ void Bounds::print(std::ostream &str) const {
 
 void Bounds::fromString(const std::string &str) {
 	std::vector<std::string> parts;
-	Util::splitString(str, parts);
+	Util::splitString(std::back_inserter(parts), str);
 	if (parts.size() < 4)
 		g_runerr("Bounds string must be 4 or 6 comma-separated doubles.");
 	m_minx = atof(parts[0].c_str());
@@ -344,7 +344,8 @@ double Util::computeArea(double x1, double y1, double z1, double x2, double y2,
 	return std::sqrt(s * (s - side0) * (s - side1) * (s - side2));
 }
 
-void Util::parseRanges(std::set<double> &values, const char *str, double step) {
+template <class T>
+void Util::parseFloatRanges(T iter, const char *str, double step) {
 	std::stringstream ss;
 	double first = 0, second = 0;
 	bool range = false;
@@ -357,7 +358,8 @@ void Util::parseRanges(std::set<double> &values, const char *str, double step) {
 			ss.str(std::string());
 		} else if (c == ',' || c == '\0') {
 			if (!range) {
-				values.insert(atof(ss.str().c_str()));
+				*iter = atof(ss.str().c_str());
+				++iter;
 				ss.str(std::string());
 			} else {
 				second = atof(ss.str().c_str());
@@ -368,8 +370,10 @@ void Util::parseRanges(std::set<double> &values, const char *str, double step) {
 					second = first;
 					first = tmp;
 				}
-				for (double j = first; j <= second; j += step)
-					values.insert(j);
+				for (double j = first; j <= second; j += step) {
+					*iter = j;
+					++iter;
+				}
 				range = false;
 			}
 			if (c == '\0')
@@ -381,7 +385,8 @@ void Util::parseRanges(std::set<double> &values, const char *str, double step) {
 	}
 }
 
-void Util::parseRanges(std::set<int> &values, const char *str) {
+template <class T>
+void Util::parseIntRanges(T iter, const char *str) {
 	std::stringstream ss;
 	int first = 0, second = 0;
 	bool range = false;
@@ -394,7 +399,8 @@ void Util::parseRanges(std::set<int> &values, const char *str) {
 			ss.str(std::string());
 		} else if (c == ',' || c == '\0') {
 			if (!range) {
-				values.insert(atoi(ss.str().c_str()));
+				iter = atoi(ss.str().c_str());
+				++iter;
 				ss.str(std::string());
 			} else {
 				second = atoi(ss.str().c_str());
@@ -404,8 +410,10 @@ void Util::parseRanges(std::set<int> &values, const char *str) {
 					second = first;
 					first = tmp;
 				}
-				for (int j = first; j <= second; ++j)
-					values.insert(j);
+				for (int j = first; j <= second; ++j) {
+					*iter = j;
+					++iter;
+				}
 				range = false;
 			}
 			if (c == '\0')
@@ -417,110 +425,50 @@ void Util::parseRanges(std::set<int> &values, const char *str) {
 	}
 }
 
-void Util::splitString(const std::string &str, std::list<std::string> &lst) {
+template <class T>
+void Util::splitString(T iter, const std::string &str, const std::string &delim) {
 	std::stringstream ss(str);
 	std::string item;
-	while (std::getline(ss, item, ','))
-		lst.push_back(item);
+	while (std::getline(ss, item, *(delim.c_str()))) {
+		*iter = item;
+		++iter;
+	}
 }
 
-void Util::splitString(const std::string &str, std::vector<std::string> &lst) {
-	std::stringstream ss(str);
-	std::string item;
-	while (std::getline(ss, item, ','))
-		lst.push_back(item);
-}
-
-std::string Util::join(const std::vector<std::string> &lst, const std::string &delim) {
+template <class T>
+std::string Util::join(T begin, T end, const std::string &delim) {
+	std::vector<std::string> lst;
+	while(begin != end) {
+		lst.push_back(*begin);
+		++begin;
+	}
 	return boost::algorithm::join(lst, delim);
 }
 
-/**
- // Split a comma-delimited string into a set of unique integers.
- */
-void Util::intSplit(std::set<int> &values, const char *str) {
+template <class T>
+void Util::intSplit(T iter, const std::string &str, const std::string &delim) {
 	std::stringstream ss(str);
 	std::string item;
-	while (std::getline(ss, item, ','))
-		values.insert(atoi(item.c_str()));
+	while (std::getline(ss, item, *(delim.c_str()))) {
+		*iter = atoi(item.c_str());
+		++iter;
+	}
 }
 
-// TODO: Template
-
-void Util::intSplit(std::set<uint8_t> &values, const char *str) {
-	std::stringstream ss(str);
-	std::string item;
-	while (std::getline(ss, item, ','))
-		values.insert((uint8_t) atoi(item.c_str()));
-}
-
-/**
- // Split a comma-delimited string into a set of unique integers.
- */
-void Util::intSplit(std::list<int> &values, const char *val) {
-	std::stringstream ss(val);
-	std::string item;
-	while (std::getline(ss, item, ','))
-		values.push_back(atoi(item.c_str()));
-}
-
-/**
- // Split a comma-delimited string into a set of unique integers.
- */
-void Util::intSplit(std::vector<int> &values, const char *str) {
-	std::stringstream ss(str);
-	std::string item;
-	while (std::getline(ss, item, ','))
-		values.push_back(atoi(item.c_str()));
-}
-
-/**
- // Return true if the integer is in the set, or the set is empty.
- */
-bool Util::inList(std::set<int> &values, int value) {
-	return values.size() == 0 || values.find(value) != values.end();
-}
-
-bool Util::inList(std::vector<int> &values, int value) {
-	return std::find(values.begin(), values.end(), value) != values.end();
+template <class T, class U>
+bool Util::inList(T begin, T end, U value) {
+	while(begin != end) {
+		if(value == *begin)
+			return true;
+		++begin;
+	} 
+	return false;
 }
 
 void Util::copyfile(std::string &srcfile, std::string &dstfile) {
 	std::ifstream src(srcfile.c_str(), std::ios::binary);
 	std::ofstream dst(dstfile.c_str(), std::ios::binary);
 	dst << src.rdbuf();
-}
-
-// Load the samples from a csv file. The file must have x, y and z headers.
-void Util::loadXYZSamples(std::string&,	std::vector<std::tuple<double, double, double> >&) {
-	g_runerr("Not implemented");
-}
-
-void Util::loadIDXYZSamples(std::string&, std::vector<std::tuple<std::string, double, double, double> >&) {
-	g_runerr("Not implemented");
-}
-
-void Util::status(int step, int of, const std::string &message, bool end) {
-#pragma omp critical(__status)
-	{
-		if (step < 0)
-			step = 0;
-		if (of <= 0)
-			of = 1;
-		if (step > of)
-			of = step;
-		float status = (float) (step * 100) / of;
-		std::stringstream out;
-		out << "Status: " << std::fixed << std::setprecision(2) << status
-				<< "% " << message << std::right << std::setw(100)
-				<< std::setfill(' ');
-		if (end)
-			out << std::endl;
-		else
-			out << '\r';
-		std::cerr << out.str();
-		std::cerr.flush();
-	}
 }
 
 bool Util::exists(const std::string &name) {
@@ -558,12 +506,15 @@ std::string Util::extension(const std::string &filename) {
 
 }
 
-size_t Util::dirlist(const std::string &dir, std::vector<std::string> &files,
-		const std::string &ext) {
+template <class T>
+size_t Util::dirlist(T iter, const std::string &dir, const std::string &ext) {
 	using namespace boost::filesystem;
 	using namespace boost::algorithm;
+	int i = 0;
 	if (is_regular_file(dir)) {
-		files.push_back(dir);
+		*iter = dir;
+		++iter;
+		++i;
 	} else {
 		directory_iterator end;
 		directory_iterator di(dir);
@@ -571,14 +522,19 @@ size_t Util::dirlist(const std::string &dir, std::vector<std::string> &files,
 			if (!ext.empty()) {
 				std::string p(di->path().string());
 				to_lower(p);
-				if (ends_with(p, ext))
-					files.push_back(p);
+				if (ends_with(p, ext)) {
+					*iter = p;
+					++iter;
+					++i;
+				}
 			} else {
-				files.push_back(di->path().string());
+				*iter = di->path().string();
+				++iter;
+				++i;
 			}
 		}
 	}
-	return files.size();
+	return i;
 }
 
 std::string& Util::lower(std::string &str) {
@@ -601,10 +557,6 @@ std::string Util::upper(const std::string &str) {
 	std::string n(str);
 	std::transform(n.begin(), n.end(), n.begin(), ::toupper);
 	return n;
-}
-
-const std::string Util::tmpFile() {
-	return Util::tmpFile("");
 }
 
 const std::string Util::tmpFile(const std::string &root) {

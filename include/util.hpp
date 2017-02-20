@@ -206,76 +206,73 @@ namespace geo {
                 double x2, double y2, double z2, 
                 double x3, double y3, double z3);
 
-            static void parseRanges(std::set<double> &values, const char *str, double step = 1.0);
+            // Parse a string of numbers, commas and dashes, representing numbers and
+            // ranges of numbers, into a list of doubles. The step parameter allows
+            // the creation of ranges with fractional intermediate values.
+            // e.g., 1-4,7,9-11 gives {1, 2, 3, 4, 7, 9, 10, 11}
+            template <class T>
+            static void parseFloatRanges(T iter, const char *str, double step = 1.0);
 
-            static void parseRanges(std::set<int> &values, const char *str);
+            template <class T>
+            static void parseIntRanges(T iter, const char *str);
 
-            // Split a comma-delimited string into a set of unique integers.
-            static void intSplit(std::set<int> &values, const char *str);
+            // Split a comma-delimited string into a list of unique integers.
+            template <class T>
+            static void intSplit(T iter, const std::string &str, const std::string &delim = ",");
 
-            // Split a comma-delimited string into a set of unique integers.
-            static void intSplit(std::list<int> &values, const char *val);
+            // Return true if the integer is in the list, or the list is empty.
+            template <class T, class U>
+            static bool inList(T begin, T end, U value);
 
-            // Split a comma-delimited string into a set of unique integers.
-            static void intSplit(std::vector<int> &values, const char *str);
+            // Split a string with the given delimiter
+            template <class T>
+            static void splitString(T iter, const std::string &str, const std::string &delim = ",");
 
-            static void intSplit(std::set<uint8_t> &values, const char *str);
+            // Join the string with the given delimiter
+            template <class T>
+            static std::string join(T begin, T end, const std::string &delim = ",");
 
-            // Return true if the integer is in the set, or the set is empty.
-            static bool inList(std::set<int> &values, int value);
-
-            static bool inList(std::vector<int> &values, int value);
-
-            static void splitString(const std::string &str, std::list<std::string> &lst);
-
-            // TODO: Use back inserter.
-            static void splitString(const std::string &str, std::vector<std::string> &lst);
-
-            static std::string join(const std::vector<std::string> &lst, const std::string &delim);
-
+            // Lowercase the string.
             static std::string& lower(std::string &str);
 
+            // Uppercase the string.
             static std::string& upper(std::string &str);
 
+            // Lowercase and return a copy of the string.
             static std::string lower(const std::string &str);
 
+            // Uppercase and return a copy of the string.
             static std::string upper(const std::string &str);
 
-            // Prints out a status message; a percentage representing current
-            // of total steps.
-            static void status(int current, int total);
-
+            // Move the file.
             static void copyfile(std::string &srcfile, std::string &dstfile);
 
-            // Load the samples from a csv file. The file must have x, y and z headers.
-            static void loadXYZSamples(std::string &datafile, std::vector<std::tuple<double, double, double> > &samples);
-
-            static void loadIDXYZSamples(std::string &datafile, std::vector<std::tuple<std::string, double, double, double> > &samples);
-            
-            static void status(int step, int of, const std::string &message = "", bool end = false);
-
-            static const std::string tmpFile(const std::string &root);
-
-            static const std::string tmpFile();
+            // Create a temporary file at the given root folder. If no root is given,
+            // a relative path is created.
+            static const std::string tmpFile(const std::string &root = "");
 
             // Returns true if the file exists.
             static bool exists(const std::string &name);
 
-            // Returns true if the path exists, even if the file does not.
+            // Returns true if the parent folder exists.
             static bool pathExists(const std::string &name);
             
+            // Remove a file.
             static bool rm(const std::string &name);
 
+            // Make a directory.
             static bool mkdir(const std::string &dir);
 
+            // Get the file extension.
             static std::string extension(const std::string &filename);
 
-            // Populates the vector with the files contained in dir. If ext is specified, filters
+            // Populates the list with the files contained in dir. If ext is specified, filters
             // the files by that extension (case-insensitive). If dir is a file, it is added to the list.
             // Returns the number of files found.
-            static size_t dirlist(const std::string &dir, std::vector<std::string> &files, 
-                const std::string &ext = std::string());
+            template <class T>
+            static size_t dirlist(T iter, const std::string &dir, const std::string &ext = std::string());
 
+            // Returns a memory-mapped file.
             static std::unique_ptr<MappedFile> mapFile(const std::string &filename, 
                 uint64_t size, bool remove = true);
 
