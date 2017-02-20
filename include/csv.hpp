@@ -28,7 +28,6 @@ namespace geo {
             std::vector<std::string> m_header;
             char *m_buf;
             uint32_t m_buflen;
-            uint8_t m_type;
 
             void parseBuf(std::vector<std::string> &out) {
                 out.clear();
@@ -73,8 +72,7 @@ namespace geo {
             CSVReader(const std::string &filename, uint32_t buflen = 2048) : 
                 m_filename(filename),
                 m_buf(nullptr),
-                m_buflen(buflen),
-				m_type(0) {
+                m_buflen(buflen) {
             }
             bool next(std::unordered_map<std::string, std::string> &row) {
                 if(!m_str.get()) {
