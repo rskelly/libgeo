@@ -20,6 +20,7 @@
 #include <geos/geom/Geometry.h>
 #include <geos/geom/Polygon.h>
 #include <geos/geom/CoordinateSequence.h>
+#include <geos/operation/union/CascadedPolygonUnion.h>
 
 #include "omp.h"
 
@@ -1529,22 +1530,29 @@ class Poly {
 public:
 	int thread;
 	int minRow, maxRow;
-	std::unique_ptr<geos::geom::Geometry> poly;
-	Poly(geos::geom::Geometry *poly, int thread, int row) :
-		thread(thread), minRow(row), maxRow(row) {
-		this->poly.reset(poly);
+	std::vector<geos::geom::Polygon*> polys;
+
+	Poly(geos::geom::Polygon* poly, int thread, int row) :
+			thread(thread), minRow(row), maxRow(row) {
+		polys.push_back(poly);
 	}
-	void update(const geos::geom::Geometry *upoly, int minRow, int maxRow) {
-		geos::geom::Geometry *u = poly->Union(upoly);
-		delete poly.release();
-		delete upoly;
-		poly.reset(u);
+
+	void update(geos::geom::Polygon* upoly, int minRow, int maxRow) {
+		polys.push_back(upoly);
 		update(minRow, maxRow);
 	}
+
+	void update(const std::vector<geos::geom::Polygon*> &upolys, int minRow, int maxRow) {
+		for(geos::geom::Polygon* u : upolys)
+			polys.push_back(u);
+		update(minRow, maxRow);
+	}
+
 	void update(int minRow, int maxRow) {
 		if(minRow < this->minRow) this->minRow = minRow;
 		if(maxRow > this->maxRow) this->maxRow = maxRow;
 	}
+	
 	// Returns true if the range of rows given by start and end was finalized
 	// within the given thread. The checked range includes one row above and one below,
 	// which is required to guarantee that a polygon is completed.
@@ -1556,6 +1564,17 @@ public:
 				return false;
 		}
 		return true;
+	}
+
+	std::unique_ptr<geos::geom::Polygon> getUnion() {
+		geos::geom::Polygon* u = dynamic_cast<geos::geom::Polygon*>(geos::operation::geounion::CascadedPolygonUnion::Union(&polys));
+		std::unique_ptr<geos::geom::Polygon> p(u);
+		return std::move(p);
+	}
+
+	~Poly() {
+		for(int i = 0; i < polys.size(); ++i)
+			delete polys[i];
 	}
 };
 
@@ -1695,9 +1714,12 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 			{
 				for(const auto &it : polys) {
 					if(it.second->isRangeFinalized(finalRows)) {
+						// Add to the removal list
 						remove.insert(it.first);
+						// Retrieve the unioned geometry.
+						OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx, (GEOSGeom) it.second->getUnion().get());
+						// Create and append the feature.
 						OGRFeature feat(layer->GetLayerDefn());
-						OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx, (GEOSGeom) it.second->poly.get());
 						feat.SetGeometry(geom);
 						feat.SetField("id", (GIntBig) it.first);
 						feat.SetFID(++fid);
@@ -1722,7 +1744,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 			for(auto &it : polys) {
 				if(extraPolys.find(it.first) != extraPolys.end()) {
 					std::unique_ptr<Poly> &p = it.second;
-					extraPolys[it.first]->update(p->poly.release(), p->minRow, p->maxRow);
+					extraPolys[it.first]->update(p->polys, p->minRow, p->maxRow);
 				} else {
 					extraPolys[it.first] = std::move(it.second);
 				}
@@ -1735,8 +1757,10 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 		if(*cancel)
 			break;
 		const std::unique_ptr<Poly> &p = it.second;
+		// Get the unioned geometry
+		OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx, (GEOSGeom) p->getUnion().get());
+		// Create and append the feature.
 		OGRFeature feat(layer->GetLayerDefn());
-		OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx, (GEOSGeom) p->poly.get());
 		feat.SetGeometry(geom);
 		feat.SetField("id", (GIntBig) it.first);
 		feat.SetFID(++fid);
