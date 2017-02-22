@@ -56,7 +56,7 @@ namespace geo {
 
 			// Callback for polygonization.
 			int polyProgress(double dfComplete, const char *pszMessage, void *pProgressArg) {
-				PolyProgressData *data = (PolyProgressData *) pProgressArg;
+				PolyProgressData *data = (PolyProgressData*) pProgressArg;
 				if (data) {
 					if(data->status)
 						data->status->update((float) dfComplete);
@@ -230,6 +230,20 @@ namespace geo {
 					break;
 				}
 				return DataType::None;
+			}
+
+			geos::geom::Geometry* mergeMultiPoly(geos::geom::Geometry* g) {
+				if(g->getNumGeometries() > 1) {
+					geos::geom::GeometryCollection* gc = dynamic_cast<geos::geom::GeometryCollection*>(g);
+					geos::geom::Geometry* u = gc->getGeometryN(0)->clone();
+					for(int i = 1; i < gc->getNumGeometries(); ++i) {
+						geos::geom::Geometry* u0 = u->Union(gc->getGeometryN(i));
+						delete u;
+						u = u0;
+					}
+					g = u->clone();
+				}
+				return g;
 			}
 
 		} //util
@@ -1380,6 +1394,8 @@ void Raster::writeMemRaster(MemRaster &grd,
 	if(srcBand < 1 || srcBand > m_props.bands())
 		g_argerr("Invalid source band: " << srcBand);
 
+	std::cerr << "a " << cols << ", " << rows << "\n";
+
 	cols = g_abs(cols);
 	rows = g_abs(rows);
 	if(cols == 0) cols = grd.props().cols();
@@ -1388,6 +1404,8 @@ void Raster::writeMemRaster(MemRaster &grd,
 	rows = g_min(m_props.rows() - srcRow, rows);
 	cols = g_min(grd.props().cols() - dstCol, cols);
 	rows = g_min(grd.props().rows() - dstRow, rows);
+
+	std::cerr << "b " << cols << ", " << rows << "\n";
 
 	const GridProps& gp = grd.props();
 	DataType type = gp.dataType();
@@ -1530,21 +1548,26 @@ class Poly {
 public:
 	int thread;
 	int minRow, maxRow;
-	std::vector<geos::geom::Polygon*> polys;
+	std::unique_ptr<geos::geom::Geometry> poly;
 
-	Poly(geos::geom::Polygon* poly, int thread, int row) :
+	Poly(std::unique_ptr<geos::geom::Geometry> &poly, int thread, int row) :
 			thread(thread), minRow(row), maxRow(row) {
-		polys.push_back(poly);
+		this->poly.reset(poly.release());
 	}
 
-	void update(geos::geom::Polygon* upoly, int minRow, int maxRow) {
-		polys.push_back(upoly);
+	void update(const std::unique_ptr<geos::geom::Geometry> &upoly, int minRow, int maxRow) {
+		geos::geom::Geometry* u = poly->Union(upoly.get());
+		delete poly.release();
+		poly.reset(u);
 		update(minRow, maxRow);
 	}
 
-	void update(const std::vector<geos::geom::Polygon*> &upolys, int minRow, int maxRow) {
-		for(geos::geom::Polygon* u : upolys)
-			polys.push_back(u);
+	void update(const std::vector<std::unique_ptr<geos::geom::Geometry> > &upolys, int minRow, int maxRow) {
+		for(const std::unique_ptr<geos::geom::Geometry>& upoly : upolys) {
+			geos::geom::Geometry* u = poly->Union(upoly.get());
+			delete poly.release();
+			poly.reset(u);
+		}
 		update(minRow, maxRow);
 	}
 
@@ -1554,28 +1577,19 @@ public:
 	}
 	
 	// Returns true if the range of rows given by start and end was finalized
-	// within the given thread. The checked range includes one row above and one below,
+	// within the given thread, or by a thread whose block is completed. 
+	// The checked range includes one row above and one below,
 	// which is required to guarantee that a polygon is completed.
 	bool isRangeFinalized(const std::vector<int> &finalRows) const {
 		int start = g_max(minRow - 1, 0);
 		int end = g_min(maxRow + 2, (int) finalRows.size());
 		for (int i = start; i < end; ++i) {
-			if (finalRows[i] != thread) 
+			if (finalRows[i] != -2 && finalRows[i] != thread) 
 				return false;
 		}
 		return true;
 	}
 
-	std::unique_ptr<geos::geom::Polygon> getUnion() {
-		geos::geom::Polygon* u = dynamic_cast<geos::geom::Polygon*>(geos::operation::geounion::CascadedPolygonUnion::Union(&polys));
-		std::unique_ptr<geos::geom::Polygon> p(u);
-		return std::move(p);
-	}
-
-	~Poly() {
-		for(int i = 0; i < polys.size(); ++i)
-			delete polys[i];
-	}
 };
 
 void Raster::polygonize(const std::string &filename, const std::string &layerName,
@@ -1645,12 +1659,17 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 		// Keeps polygons created in thread.
 		std::unordered_map<uint64_t, std::unique_ptr<Poly> > polys;
 		int thread = omp_get_thread_num();
+		// To track the first and last rows in this thread's block.
+		int first = -1, last;
 
 		#pragma omp for
 		for(int r = 0; r < rows; ++r) {
 
 			if(*cancel)
 				continue;
+
+			if(first == -1) first = r;
+			last = r;
 
 			// Write into the buffer.
 			#pragma omp critical(__read_raster)
@@ -1686,7 +1705,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 						seq->add(geos::geom::Coordinate(x0, y1));
 						seq->add(geos::geom::Coordinate(x0, y0));
 						geos::geom::LinearRing* ring = gf->createLinearRing(seq);
-						geos::geom::Polygon* p = gf->createPolygon(ring, nullptr);
+						std::unique_ptr<geos::geom::Geometry> p(gf->createPolygon(ring, nullptr));
 							
 						// If it's already in the list, union it, otherwise add it.
 						if(polys.find(id0) == polys.end()) {
@@ -1716,8 +1735,9 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 					if(it.second->isRangeFinalized(finalRows)) {
 						// Add to the removal list
 						remove.insert(it.first);
+						geos::geom::Geometry* g = mergeMultiPoly(it.second->poly.get());
 						// Retrieve the unioned geometry.
-						OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx, (GEOSGeom) it.second->getUnion().get());
+						OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx, (GEOSGeom) g);
 						// Create and append the feature.
 						OGRFeature feat(layer->GetLayerDefn());
 						feat.SetGeometry(geom);
@@ -1737,6 +1757,17 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 				status->update((float) ++stat / rows);
 		}
 
+		// When a block of rows is completed, set the finalization
+		// thread ID to -2, so all threads know this block is
+		// finalized.
+		#pragma omp critical(__finalize_rows)
+		{
+			for(int j = first; j < last; ++j) {
+				if(finalRows[j] == thread)
+					finalRows[j] = -2;
+			}
+		}
+
 		// If the thread completes and polygons are left over, merge into the
 		// extra dict.
 		#pragma omp critical(__merge_polys)
@@ -1744,7 +1775,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 			for(auto &it : polys) {
 				if(extraPolys.find(it.first) != extraPolys.end()) {
 					std::unique_ptr<Poly> &p = it.second;
-					extraPolys[it.first]->update(p->polys, p->minRow, p->maxRow);
+					extraPolys[it.first]->update(p->poly, p->minRow, p->maxRow);
 				} else {
 					extraPolys[it.first] = std::move(it.second);
 				}
@@ -1756,9 +1787,9 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 	for(const auto &it : extraPolys) {
 		if(*cancel)
 			break;
-		const std::unique_ptr<Poly> &p = it.second;
-		// Get the unioned geometry
-		OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx, (GEOSGeom) p->getUnion().get());
+		geos::geom::Geometry* g = mergeMultiPoly(it.second->poly.get());
+		// Retrieve the unioned geometry.
+		OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx, (GEOSGeom) g);
 		// Create and append the feature.
 		OGRFeature feat(layer->GetLayerDefn());
 		feat.SetGeometry(geom);
