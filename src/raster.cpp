@@ -1045,28 +1045,19 @@ void MemRaster::writeToRaster(Raster &grd,
 	GDALDataType gtype = dataType2GDT(type);
 	int typeSize = getTypeSize(type);
 
-	if(srcCol == 0) {
-		int offset = (srcRow * gp.cols() + srcCol) * typeSize;
-		char* data = ((char*) grid()) + offset;
-		GDALRasterBand *band = grd.m_ds->GetRasterBand(dstBand);
+	Buffer buf(cols * rows * typeSize);
+	GDALRasterBand *band = grd.m_ds->GetRasterBand(dstBand);
 
-		if(CPLE_None != band->RasterIO(GF_Write, dstCol, dstRow, cols, rows, data,
-				gp.cols(), rows, gtype, 0, 0, 0))
-			g_runerr("Failed to write to: " << grd.filename());
-	} else {
-		Buffer buf(cols * rows * typeSize);
-		GDALRasterBand *band = grd.m_ds->GetRasterBand(dstBand);
+	char* input  = (char*) grid();
+	char* output = (char*) buf.buf;
+	int gcols = gp.cols();
+	for(int r = 0; r < rows; ++r)
+		std::memcpy(output + r * cols * typeSize, input + ((srcRow + r) * gcols + srcCol) * typeSize, cols * typeSize);
 
-		char* input  = (char*) grid();
-		char* output = (char*) buf.buf;
-		int gcols = gp.cols();
-		for(int r = 0; r < rows; ++r)
-			std::memcpy(output + r * cols * typeSize, input + ((srcRow + r) * gcols + srcCol) * typeSize, cols * typeSize);
+	if(CPLE_None != band->RasterIO(GF_Write, dstCol, dstRow, cols, rows, output,
+			cols, rows, gtype, 0, 0, 0))
+		g_runerr("Failed to write to: " << grd.filename());
 
-		if(CPLE_None != band->RasterIO(GF_Write, dstCol, dstRow, cols, rows, output,
-				cols, rows, gtype, 0, 0, 0))
-			g_runerr("Failed to read from: " << grd.filename());
-	}
 }
 
 void MemRaster::writeToMemRaster(MemRaster &grd,
@@ -1074,9 +1065,6 @@ void MemRaster::writeToMemRaster(MemRaster &grd,
 		int srcCol, int srcRow,
 		int dstCol, int dstRow,
 		int srcBand, int dstBand) {
-
-	if(srcBand < 1 || srcBand > m_props.bands())
-		g_argerr("Invalid source band: " << srcBand);
 
 	cols = g_abs(cols);
 	rows = g_abs(rows);
@@ -1394,8 +1382,6 @@ void Raster::writeToMemRaster(MemRaster &grd,
 	if(srcBand < 1 || srcBand > m_props.bands())
 		g_argerr("Invalid source band: " << srcBand);
 
-	std::cerr << "a " << cols << ", " << rows << "\n";
-
 	cols = g_abs(cols);
 	rows = g_abs(rows);
 	if(cols == 0) cols = grd.props().cols();
@@ -1405,36 +1391,24 @@ void Raster::writeToMemRaster(MemRaster &grd,
 	cols = g_min(grd.props().cols() - dstCol, cols);
 	rows = g_min(grd.props().rows() - dstRow, rows);
 
-	std::cerr << "b " << cols << ", " << rows << "\n";
-
 	const GridProps& gp = grd.props();
 	DataType type = gp.dataType();
 	GDALDataType gtype = dataType2GDT(type);
 	int typeSize = getTypeSize(type);
 
-	if(dstCol == 0) {
-		int offset = (dstRow * gp.cols() + dstCol) * typeSize;
-		char *grid = ((char *) grd.grid()) + offset;
-		GDALRasterBand *band = m_ds->GetRasterBand(srcBand);
+	Buffer buf(cols * rows * typeSize);
+	GDALRasterBand *band = m_ds->GetRasterBand(srcBand);
 
-		if(CPLE_None != band->RasterIO(GF_Read, srcCol, srcRow, cols, rows, grid,
-				gp.cols(), rows, gtype, 0, 0, 0))
-			g_runerr("Failed to read from: " << filename());
-	} else {
-		Buffer buf(cols * rows * typeSize);
-		GDALRasterBand *band = m_ds->GetRasterBand(srcBand);
+	if(CPLE_None != band->RasterIO(GF_Read, srcCol, srcRow, cols, rows, buf.buf,
+			cols, rows, gtype, 0, 0, 0))
+		g_runerr("Failed to read from: " << filename());
 
-		if(CPLE_None != band->RasterIO(GF_Read, srcCol, srcRow, cols, rows, buf.buf,
-				cols, rows, gtype, 0, 0, 0))
-			g_runerr("Failed to read from: " << filename());
+	char* output = (char*) grd.grid();
+	char* input  = (char*) buf.buf;
+	int gcols = gp.cols();
+	for(int r = 0; r < rows; ++r)
+		std::memcpy(output + ((dstRow + r) * gcols + dstCol) * typeSize , input + r * cols * typeSize, cols * typeSize);
 
-		char* output = (char*) grd.grid();
-		char* input  = (char*) buf.buf;
-		int gcols = gp.cols();
-		for(int r = 0; r < rows; ++r)
-			std::memcpy(output + ((dstRow + r) * gcols + dstCol) * typeSize , input + r * cols * typeSize, cols * typeSize);
-
-	}
 }
 
 void Raster::writeTo(Grid &grd,
