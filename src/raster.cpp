@@ -736,7 +736,7 @@ void Grid::voidFillIDW(double radius, int count, double exp, int band) {
 				g_warn("Pixel not filled at " << c << "," << r << ". Consider larger radius or smaller count.");
 		}
 	}
-	write(tmp);
+	writeTo(tmp);
 }
 
 void Grid::smooth(Grid &smoothed, double sigma, int size, int band,
@@ -799,7 +799,7 @@ void Grid::smooth(Grid &smoothed, double sigma, int size, int band,
 			int readOffset = b > 0 ? b - size / 2 : 0;  // If this is the first row, read from zero, otherwise -(size / 2)
 			int writeOffset = b > 0 ? 0 : size / 2;     // If this is the first row, write to (size / 2), otherwise 0.
 			#pragma omp critical(__smooth_read)
-			write(buf, pr.cols(), pr.rows(), 0, readOffset, 0, writeOffset, band);
+			writeTo(buf, pr.cols(), pr.rows(), 0, readOffset, 0, writeOffset, band);
 
 			if(status)
 				status->statusCallback("Processing...");
@@ -833,7 +833,7 @@ void Grid::smooth(Grid &smoothed, double sigma, int size, int band,
 			}
 
 			#pragma omp critical(__smooth_write)
-			smooth.write(smoothed, pr.cols(), g_min(bufSize, smoothed.props().rows() - b), 0, size / 2, 0, b); // Always write to b and read from (size / 2)
+			smooth.writeTo(smoothed, pr.cols(), g_min(bufSize, smoothed.props().rows() - b), 0, size / 2, 0, b); // Always write to b and read from (size / 2)
 		}
 	}
 
@@ -1022,14 +1022,14 @@ void MemRaster::fromMatrix(
 	}
 }
 
-void MemRaster::writeRaster(Raster &grd,
+void MemRaster::writeToRaster(Raster &grd,
 			int cols, int rows,
 			int srcCol, int srcRow,
 			int dstCol, int dstRow,
 			int srcBand, int dstBand) {
 
 	if(dstBand < 1 || dstBand > grd.m_props.bands())
-		g_argerr("Invalid destination band: " << srcBand);
+		g_argerr("Invalid destination band: " << dstBand);
 
 	cols = g_abs(cols);
 	rows = g_abs(rows);
@@ -1069,7 +1069,7 @@ void MemRaster::writeRaster(Raster &grd,
 	}
 }
 
-void MemRaster::writeMemRaster(MemRaster &grd,
+void MemRaster::writeToMemRaster(MemRaster &grd,
 		int cols, int rows,
 		int srcCol, int srcRow,
 		int dstCol, int dstRow,
@@ -1114,17 +1114,17 @@ void MemRaster::writeMemRaster(MemRaster &grd,
 	}
 }
 
-void MemRaster::write(Grid &grd,
+void MemRaster::writeTo(Grid &grd,
 		int cols, int rows,
 		int srcCol, int srcRow,
 		int dstCol, int dstRow,
 		int srcBand, int dstBand) {
 	if(dynamic_cast<MemRaster*>(&grd)) {
-		writeMemRaster(dynamic_cast<MemRaster&>(grd), cols, rows, srcCol, srcRow, dstCol, dstRow, srcBand, dstBand);
+		writeToMemRaster(dynamic_cast<MemRaster&>(grd), cols, rows, srcCol, srcRow, dstCol, dstRow, srcBand, dstBand);
 	} else if(dynamic_cast<Raster*>(&grd)) {
-		writeRaster(dynamic_cast<Raster&>(grd), cols, rows, srcCol, srcRow, dstCol, dstRow, srcBand, dstBand);
+		writeToRaster(dynamic_cast<Raster&>(grd), cols, rows, srcCol, srcRow, dstCol, dstRow, srcBand, dstBand);
 	} else {
-		g_runerr("writeToBlock not implemented to handle this type of grid.");
+		g_runerr("writeTo not implemented to handle this type of grid.");
 	}
 }
 
@@ -1349,7 +1349,7 @@ void Raster::fillFloat(double value, int band) {
 	}
 }
 
-void Raster::writeRaster(Raster &grd,
+void Raster::writeToRaster(Raster &grd,
 			int cols, int rows,
 			int srcCol, int srcRow,
 			int dstCol, int dstRow,
@@ -1377,15 +1377,15 @@ void Raster::writeRaster(Raster &grd,
 	int typeSize = getTypeSize(type);
 	Buffer buf(cols * rows * typeSize);
 
-	if(CPLE_None != grd.m_ds->GetRasterBand(srcBand)->RasterIO(GF_Read, srcCol, srcRow, cols, rows,
+	if(CPLE_None != m_ds->GetRasterBand(srcBand)->RasterIO(GF_Read, srcCol, srcRow, cols, rows,
 			buf.buf, cols, rows, gtype, 0, 0, 0))
 		g_runerr("Failed to read from: " << grd.filename());
-	if(CPLE_None != m_ds->GetRasterBand(dstBand)->RasterIO(GF_Write, dstCol, dstRow, cols, rows,
+	if(CPLE_None != grd.m_ds->GetRasterBand(dstBand)->RasterIO(GF_Write, dstCol, dstRow, cols, rows,
 			buf.buf, cols, rows, gtype, 0, 0, 0))
 		g_runerr("Failed to write to: " << filename());
 }
 
-void Raster::writeMemRaster(MemRaster &grd,
+void Raster::writeToMemRaster(MemRaster &grd,
 		int cols, int rows,
 		int srcCol, int srcRow,
 		int dstCol, int dstRow,
@@ -1437,17 +1437,17 @@ void Raster::writeMemRaster(MemRaster &grd,
 	}
 }
 
-void Raster::write(Grid &grd,
+void Raster::writeTo(Grid &grd,
 		int cols, int rows,
 		int srcCol, int srcRow,
 		int dstCol, int dstRow,
 		int srcBand, int dstBand) {
 	if(dynamic_cast<MemRaster*>(&grd)) {
-		writeMemRaster(dynamic_cast<MemRaster&>(grd), cols, rows, srcCol, srcRow, dstCol, dstRow, srcBand, dstBand);
+		writeToMemRaster(dynamic_cast<MemRaster&>(grd), cols, rows, srcCol, srcRow, dstCol, dstRow, srcBand, dstBand);
 	} else if(dynamic_cast<Raster*>(&grd)) {
-		writeRaster(dynamic_cast<Raster&>(grd), cols, rows, srcCol, srcRow, dstCol, dstRow, srcBand, dstBand);
+		writeToRaster(dynamic_cast<Raster&>(grd), cols, rows, srcCol, srcRow, dstCol, dstRow, srcBand, dstBand);
 	} else {
-		g_runerr("writeToBlock not implemented to handle this type of grid.");
+		g_runerr("writeTo not implemented to handle this type of grid.");
 	}
 }
 
@@ -1673,7 +1673,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 
 			// Write into the buffer.
 			#pragma omp critical(__read_raster)
-			write(rowBuf, cols, 1, 0, r, 0, 0, band);
+			writeTo(rowBuf, cols, 1, 0, r, 0, 0, band);
 
 			for(int c = 0; c < cols; ++c) {
 

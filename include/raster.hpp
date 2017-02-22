@@ -224,8 +224,8 @@ namespace geo {
             virtual void setFloat(long idx, double value, int band = 1) = 0;
             virtual void setFloat(int col, int row, double value, int band = 1) = 0;
 
-            // Write data from Grid instance.
-            virtual void write(Grid &grd,
+            // Write data from the current Grid instance to the given grid.
+            virtual void writeTo(Grid &grd,
             		int cols = 0, int rows = 0,
             		int srcCol = 0, int srcRow = 0,
 					int dstCol = 0, int dstRow = 0,
@@ -336,18 +336,17 @@ namespace geo {
             void setFloat(long idx, double value, int band = 1);
             void setFloat(int col, int row, double value, int band = 1);
 
-			// Write data from Grid instance.
-			void write(Grid &grd,
+			void writeTo(Grid &grd,
 					int cols = 0, int rows = 0,
 					int srcCol = 0, int srcRow = 0,
 					int dstCol = 0, int dstRow = 0,
 					int srcBand = 1, int dstBand = 1);
-            void writeMemRaster(MemRaster &grd,
+            void writeToMemRaster(MemRaster &grd,
             		int cols = 0, int rows = 0,
             		int srcCol = 0, int srcRow = 0,
 					int dstCol = 0, int dstRow = 0,
             		int srcBand = 1, int dstBand = 1);
-            void writeRaster(Raster &grd,
+            void writeToRaster(Raster &grd,
             		int cols = 0, int rows = 0,
             		int srcCol = 0, int srcRow = 0,
 					int dstCol = 0, int dstRow = 0,
@@ -409,18 +408,17 @@ namespace geo {
             void fillInt(int value, int band = 1);
             void fillFloat(double value, int band = 1);
 
-			// Write data from Grid instance.
-			void write(Grid &grd,
+			void writeTo(Grid &grd,
 					int cols = 0, int rows = 0,
 					int srcCol = 0, int srcRow = 0,
 					int dstCol = 0, int dstRow = 0,
 					int srcBand = 1, int dstBand = 1);
-            void writeMemRaster(MemRaster &grd,
+            void writeToMemRaster(MemRaster &grd,
             		int cols = 0, int rows = 0,
             		int srcCol = 0, int srcRow = 0,
 					int dstCol = 0, int dstRow = 0,
             		int srcBand = 1, int dstBand = 1);
-            void writeRaster(Raster &grd,
+            void writeToRaster(Raster &grd,
             		int cols = 0, int rows = 0,
             		int srcCol = 0, int srcRow = 0,
 					int dstCol = 0, int dstRow = 0,
