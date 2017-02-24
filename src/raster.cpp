@@ -1620,7 +1620,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 		std::unordered_map<uint64_t, std::unique_ptr<Poly> > polys;
 		int thread = omp_get_thread_num();
 		// To track the first and last rows in this thread's block.
-		int first = -1, last;
+		int first = -1, last = 0;
 
 		#pragma omp for
 		for(int r = 0; r < rows; ++r) {
