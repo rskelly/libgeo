@@ -19,8 +19,8 @@
 #include <geos/geom/CoordinateSequenceFactory.h>
 #include <geos/geom/Geometry.h>
 #include <geos/geom/Polygon.h>
+#include <geos/geom/LinearRing.h>
 #include <geos/geom/CoordinateSequence.h>
-#include <geos/operation/union/CascadedPolygonUnion.h>
 
 #include "omp.h"
 
@@ -31,6 +31,8 @@
 
 using namespace geo::util;
 using namespace geo::raster;
+using namespace geos::geom;
+
 
 bool _cancel = false;
 
@@ -40,6 +42,49 @@ namespace geo {
 
 		namespace util {
 
+			class Poly {
+			public:
+				int thread;
+				int minRow, maxRow;
+				Geometry* poly;
+
+				Poly(Geometry *poly, int thread, int row) :
+						thread(thread), minRow(row), maxRow(row), poly(nullptr) {
+					this->poly = poly;
+				}
+
+				void update(Geometry* u, int minRow, int maxRow) {
+					Geometry* p = this->poly;
+					poly = p->Union(u);
+					delete p;
+					update(minRow, maxRow);
+				}
+
+				void update(int minRow, int maxRow) {
+					if(minRow < this->minRow) this->minRow = minRow;
+					if(maxRow > this->maxRow) this->maxRow = maxRow;
+				}
+
+				// Returns true if the range of rows given by start and end was finalized
+				// within the given thread, or by a thread whose block is completed.
+				// The checked range includes one row above and one below,
+				// which is required to guarantee that a polygon is completed.
+				bool isRangeFinalized(const std::vector<int> &finalRows) const {
+					int start = g_max(minRow - 1, 0);
+					int end = g_min(maxRow + 2, (int) finalRows.size());
+					for (int i = start; i < end; ++i) {
+						if (finalRows[i] != -2 && finalRows[i] != thread)
+							return false;
+					}
+					return true;
+				}
+
+				~Poly() {
+					if(poly)
+						delete poly;
+				}
+
+			};
 			// Keeps track of polygonization progress and provides a cancellation mechanism.
 			class PolyProgressData {
 			public:
@@ -232,25 +277,9 @@ namespace geo {
 				return DataType::None;
 			}
 
-			geos::geom::Geometry* mergeMultiPoly(geos::geom::Geometry* g) {
-				if(g->getNumGeometries() > 1) {
-					geos::geom::GeometryCollection* gc = dynamic_cast<geos::geom::GeometryCollection*>(g);
-					geos::geom::Geometry* u = gc->getGeometryN(0)->clone();
-					for(int i = 1; i < gc->getNumGeometries(); ++i) {
-						geos::geom::Geometry* u0 = u->Union(gc->getGeometryN(i));
-						delete u;
-						u = u0;
-					}
-					g = u->clone();
-				}
-				return g;
-			}
-
 		} //util
 	} // raster
 } // geo
-
-using namespace geo::raster::util;
 
 GridProps::GridProps() :
 		m_cols(0), m_rows(0),
@@ -738,6 +767,8 @@ void Grid::voidFillIDW(double radius, int count, double exp, int band) {
 	}
 	writeTo(tmp);
 }
+
+using namespace geo::raster::util;
 
 void Grid::smooth(Grid &smoothed, double sigma, int size, int band,
 		Callbacks *status, bool *cancel) {
@@ -1518,54 +1549,6 @@ void Raster::setFloat(double x, double y, double v, int band) {
 	setFloat(m_props.toCol(x), m_props.toRow(y), v, band);
 }
 
-class Poly {
-public:
-	int thread;
-	int minRow, maxRow;
-	std::unique_ptr<geos::geom::Geometry> poly;
-
-	Poly(std::unique_ptr<geos::geom::Geometry> &poly, int thread, int row) :
-			thread(thread), minRow(row), maxRow(row) {
-		this->poly.reset(poly.release());
-	}
-
-	void update(const std::unique_ptr<geos::geom::Geometry> &upoly, int minRow, int maxRow) {
-		geos::geom::Geometry* u = poly->Union(upoly.get());
-		delete poly.release();
-		poly.reset(u);
-		update(minRow, maxRow);
-	}
-
-	void update(const std::vector<std::unique_ptr<geos::geom::Geometry> > &upolys, int minRow, int maxRow) {
-		for(const std::unique_ptr<geos::geom::Geometry>& upoly : upolys) {
-			geos::geom::Geometry* u = poly->Union(upoly.get());
-			delete poly.release();
-			poly.reset(u);
-		}
-		update(minRow, maxRow);
-	}
-
-	void update(int minRow, int maxRow) {
-		if(minRow < this->minRow) this->minRow = minRow;
-		if(maxRow > this->maxRow) this->maxRow = maxRow;
-	}
-	
-	// Returns true if the range of rows given by start and end was finalized
-	// within the given thread, or by a thread whose block is completed. 
-	// The checked range includes one row above and one below,
-	// which is required to guarantee that a polygon is completed.
-	bool isRangeFinalized(const std::vector<int> &finalRows) const {
-		int start = g_max(minRow - 1, 0);
-		int end = g_min(maxRow + 2, (int) finalRows.size());
-		for (int i = start; i < end; ++i) {
-			if (finalRows[i] != -2 && finalRows[i] != thread) 
-				return false;
-		}
-		return true;
-	}
-
-};
-
 void Raster::polygonize(const std::string &filename, const std::string &layerName,
 		const std::string &driver, uint16_t srid, uint16_t band, Status *status, bool *cancel) {
 
@@ -1618,10 +1601,13 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 
 	// For creating GEOS objects.
 	GEOSContextHandle_t gctx = OGRGeometry::createGEOSContext();
-	const geos::geom::GeometryFactory* gf = geos::geom::GeometryFactory::getDefaultInstance();
+	const GeometryFactory* gf = GeometryFactory::getDefaultInstance();
 
 	if(OGRERR_NONE != layer->StartTransaction())
 		g_runerr("Failed to start transation.");
+
+	// TODO: Perturbation to allow polygon union without multis.
+	double yShift0 = props().resolutionY() > 0 ? -0.00000001 : 0.00000001;
 
 	#pragma omp parallel
 	{
@@ -1657,7 +1643,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 
 				// Get the coord of one corner of the polygon.
 				double x0 = gp.toX(c);
-				double y0 = gp.toY(r);
+				double y0 = gp.toY(r) + yShift0;
 
 				// Scan right...
 				while(++c <= cols) {
@@ -1672,21 +1658,22 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 						double y1 = gp.toY(r) + gp.resolutionY();
 
 						// Build the geometry.
-						geos::geom::CoordinateSequence* seq = gf->getCoordinateSequenceFactory()->create((size_t) 0, 2);
-						seq->add(geos::geom::Coordinate(x0, y0));
-						seq->add(geos::geom::Coordinate(x1, y0));
-						seq->add(geos::geom::Coordinate(x1, y1));
-						seq->add(geos::geom::Coordinate(x0, y1));
-						seq->add(geos::geom::Coordinate(x0, y0));
-						geos::geom::LinearRing* ring = gf->createLinearRing(seq);
-						std::unique_ptr<geos::geom::Geometry> p(gf->createPolygon(ring, nullptr));
-							
+						CoordinateSequence* seq = gf->getCoordinateSequenceFactory()->create((size_t) 0, 2);
+						seq->add(Coordinate(x0, y0));
+						seq->add(Coordinate(x1, y0));
+						seq->add(Coordinate(x1, y1));
+						seq->add(Coordinate(x0, y1));
+						seq->add(Coordinate(x0, y0));
+						LinearRing* ring = gf->createLinearRing(seq);
+						Geometry* geom = gf->createPolygon(ring, nullptr);
+
 						// If it's already in the list, union it, otherwise add it.
 						if(polys.find(id0) == polys.end()) {
-							std::unique_ptr<Poly> pp(new Poly(p, thread, r));
-							polys[id0] = std::move(pp);
+							std::unique_ptr<Poly> p(new Poly(geom, thread, r));
+							polys[id0] = std::move(p);
 						} else {
-							polys[id0]->update(p, r, r);
+							polys[id0]->update(geom, r, r);
+							delete geom;
 						}
 
 						--c; // Back up the counter by one, to start with the new ID.
@@ -1709,9 +1696,8 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 					if(it.second->isRangeFinalized(finalRows)) {
 						// Add to the removal list
 						remove.insert(it.first);
-						geos::geom::Geometry* g = mergeMultiPoly(it.second->poly.get());
 						// Retrieve the unioned geometry.
-						OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx, (GEOSGeom) g);
+						OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx, (GEOSGeom) it.second->poly);
 						// Create and append the feature.
 						OGRFeature feat(layer->GetLayerDefn());
 						feat.SetGeometry(geom);
@@ -1761,9 +1747,8 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 	for(const auto &it : extraPolys) {
 		if(*cancel)
 			break;
-		geos::geom::Geometry* g = mergeMultiPoly(it.second->poly.get());
 		// Retrieve the unioned geometry.
-		OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx, (GEOSGeom) g);
+		OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx, (GEOSGeom) it.second->poly);
 		// Create and append the feature.
 		OGRFeature feat(layer->GetLayerDefn());
 		feat.SetGeometry(geom);
