@@ -930,8 +930,7 @@ void MemRaster::init(const GridProps &pr, bool mapped) {
 		m_props = GridProps(pr);
 		m_mmapped = mapped;
 		m_grid = nullptr;
-		int size = (m_props.isInt() ? sizeof(int) : sizeof(double))
-				* pr.cols() * pr.rows();
+		int size = (m_props.isInt() ? sizeof(int) : sizeof(double)) * pr.cols() * pr.rows();
 		m_mappedFile.release();
 		if (mapped) {
 			const std::string filename = Util::tmpFile("/tmp");
@@ -1072,16 +1071,15 @@ void MemRaster::writeToRaster(Raster &grd,
 	rows = g_min(grd.m_props.rows() - dstRow, rows);
 
 	const GridProps& gp = m_props;
-	DataType type = gp.dataType();
-	GDALDataType gtype = dataType2GDT(type);
-	int typeSize = getTypeSize(type);
+	GDALDataType gtype = dataType2GDT(DataType::Int32); // TODO: The type of the buffer, not the type of the memraster.
+	int typeSize = getTypeSize(DataType::Int32);
+	int gcols = gp.cols();
 
 	Buffer buf(cols * rows * typeSize);
 	GDALRasterBand *band = grd.m_ds->GetRasterBand(dstBand);
 
 	char* input  = (char*) grid();
 	char* output = (char*) buf.buf;
-	int gcols = gp.cols();
 	for(int r = 0; r < rows; ++r)
 		std::memcpy(output + r * cols * typeSize, input + ((srcRow + r) * gcols + srcCol) * typeSize, cols * typeSize);
 
@@ -1426,6 +1424,7 @@ void Raster::writeToMemRaster(MemRaster &grd,
 	DataType type = gp.dataType();
 	GDALDataType gtype = dataType2GDT(type);
 	int typeSize = getTypeSize(type);
+	int gcols = gp.cols();
 
 	Buffer buf(cols * rows * typeSize);
 	GDALRasterBand *band = m_ds->GetRasterBand(srcBand);
@@ -1436,7 +1435,6 @@ void Raster::writeToMemRaster(MemRaster &grd,
 
 	char* output = (char*) grd.grid();
 	char* input  = (char*) buf.buf;
-	int gcols = gp.cols();
 	for(int r = 0; r < rows; ++r)
 		std::memcpy(output + ((dstRow + r) * gcols + dstCol) * typeSize , input + r * cols * typeSize, cols * typeSize);
 
