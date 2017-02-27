@@ -110,122 +110,6 @@ namespace geo {
 				return 1;
 			}
 
-			inline void writeToBlock(void *block, GDALDataType type, double value, int idx) {
-				switch(type) {
-				case GDT_Float32:
-					*(((float *) block) + idx) = (float) value;
-					break;
-				case GDT_Float64:
-					*(((double *) block) + idx) = (double) value;
-					break;
-				case GDT_UInt32:
-					*(((uint32_t *) block) + idx) = (uint32_t) value;
-					break;
-				case GDT_UInt16:
-					*(((uint16_t *) block) + idx) = (uint16_t) value;
-					break;
-				case GDT_Int32:
-					*(((int32_t *) block) + idx) = (int32_t) value;
-					break;
-				case GDT_Int16:
-					*(((int16_t *) block) + idx) = (int16_t) value;
-					break;
-				case GDT_Byte:
-					*(((uint8_t *) block) + idx) = (uint8_t) value;
-					break;
-				default:
-					g_runerr("Data type not implemented: " << type);
-					break;
-				}
-			}
-
-			inline void writeToBlock(void *block, GDALDataType type, int value, int idx) {
-				switch(type) {
-				case GDT_Float32:
-					*(((float *) block) + idx) = (float) value;
-					break;
-				case GDT_Float64:
-					*(((double *) block) + idx) = (double) value;
-					break;
-				case GDT_UInt32:
-					*(((uint32_t *) block) + idx) = (uint32_t) value;
-					break;
-				case GDT_UInt16:
-					*(((uint16_t *) block) + idx) = (uint16_t) value;
-					break;
-				case GDT_Int32:
-					*(((int32_t *) block) + idx) = (int32_t) value;
-					break;
-				case GDT_Int16:
-					*(((int16_t *) block) + idx) = (int16_t) value;
-					break;
-				case GDT_Byte:
-					*(((uint8_t *) block) + idx) = (uint8_t) value;
-					break;
-				default:
-					g_runerr("Data type not implemented: " << type);
-					break;
-				}
-			}
-
-			inline void readFromBlock(void *block, GDALDataType type, double *value, int idx) {
-				switch(type) {
-				case GDT_Float32:
-					*value = (double) *(((float *) block) + idx);
-					break;
-				case GDT_Float64:
-					*value = (double) *(((double *) block) + idx);
-					break;
-				case GDT_UInt32:
-					*value = (double) *(((uint32_t *) block) + idx);
-					break;
-				case GDT_UInt16:
-					*value= (double) *(((uint16_t *) block) + idx);
-					break;
-				case GDT_Int32:
-					*value = (double) *(((int32_t *) block) + idx);
-					break;
-				case GDT_Int16:
-					*value = (double) *(((int16_t *) block) + idx);
-					break;
-				case GDT_Byte:
-					*value = (double) *(((uint8_t *) block) + idx);
-					break;
-				default:
-					g_runerr("Data type not implemented: " << type);
-					break;
-				}
-			}
-
-			inline void readFromBlock(void *block, GDALDataType type, int *value, int idx) {
-				switch(type) {
-				case GDT_Float32:
-					*value = (int) *(((float *) block) + idx);
-					break;
-				case GDT_Float64:
-					*value = (int) *(((double *) block) + idx);
-					break;
-				case GDT_UInt32:
-					*value = (int) *(((uint32_t *) block) + idx);
-					break;
-				case GDT_UInt16:
-					*value= (int) *(((uint16_t *) block) + idx);
-					break;
-				case GDT_Int32:
-					*value = (int) *(((int32_t *) block) + idx);
-					break;
-				case GDT_Int16:
-					*value = (int) *(((int16_t *) block) + idx);
-					break;
-				case GDT_Byte:
-					*value = (int) *(((uint8_t *) block) + idx);
-					break;
-				default:
-					g_runerr("Data type not implemented: " << type);
-					break;
-				}
-			}
-
 			int getTypeSize(DataType type) {
 				switch(type) {
 				case DataType::Byte: return sizeof(uint8_t);
@@ -275,6 +159,18 @@ namespace geo {
 					break;
 				}
 				return DataType::None;
+			}
+
+			inline void writeToBlock(void* block, GDALDataType type, void* value, int idx) {
+				int size = getTypeSize(gdt2DataType(type));
+				char* data = (char*) block;
+				std::memcpy(data + idx * size, value, size);
+			}
+
+			inline void readFromBlock(void* block, GDALDataType type, void* value, int idx) {
+				int size = getTypeSize(gdt2DataType(type));
+				char* data = (char*) block;
+				std::memcpy(value, data + idx * size, size);
 			}
 
 		} //util
@@ -928,9 +824,14 @@ void MemRaster::init(const GridProps &pr, bool mapped) {
 	if (pr.cols() != m_props.cols() || pr.rows() != m_props.rows()) {
 		freeMem();
 		m_props = GridProps(pr);
+		if(m_props.isInt()) {
+			m_props.setDataType(DataType::Int32);
+		} else {
+			m_props.setDataType(DataType::Float64);
+		}
 		m_mmapped = mapped;
 		m_grid = nullptr;
-		int size = (m_props.isInt() ? sizeof(int) : sizeof(double)) * pr.cols() * pr.rows();
+		int size = getTypeSize(m_props.dataType()) * pr.cols() * pr.rows();
 		m_mappedFile.release();
 		if (mapped) {
 			const std::string filename = Util::tmpFile("/tmp");
@@ -1071,8 +972,8 @@ void MemRaster::writeToRaster(Raster &grd,
 	rows = g_min(grd.m_props.rows() - dstRow, rows);
 
 	const GridProps& gp = m_props;
-	GDALDataType gtype = dataType2GDT(DataType::Int32); // TODO: The type of the buffer, not the type of the memraster.
-	int typeSize = getTypeSize(DataType::Int32);
+	GDALDataType gtype = dataType2GDT(gp.dataType()); // TODO: The type of the buffer, not the type of the memraster.
+	int typeSize = getTypeSize(gp.dataType());
 	int gcols = gp.cols();
 
 	Buffer buf(cols * rows * typeSize);
@@ -1206,6 +1107,8 @@ Raster::Raster(const std::string &filename, const GridProps &props) :
 		m_bcol(-1), m_brow(-1),
 		m_band(1),
 		m_block(nullptr),
+		m_dirty(false), 
+		m_bband(0),
 		m_type(GDT_Unknown) {
 
 	if (props.resolutionX() == 0 || props.resolutionY() == 0)
@@ -1235,6 +1138,7 @@ Raster::Raster(const std::string &filename, const GridProps &props) :
 	const char *create = drv->GetMetadataItem(GDAL_DCAP_CREATE);
 	if(create == NULL || std::strncmp(create, "YES", 3) != 0)
 		g_runerr("The " << drvName << " driver does not support dataset creation. Please specify a different driver.");
+	Util::rm(filename);
 	m_ds = drv->Create(
 			filename.c_str(), m_props.cols(), m_props.rows(), m_props.bands(),
 			dataType2GDT(m_props.dataType()), opts);
@@ -1262,6 +1166,8 @@ Raster::Raster(const std::string &filename, bool writable) :
 		m_bcol(-1), m_brow(-1),
 		m_band(1),
 		m_block(nullptr),
+		m_dirty(false),
+		m_bband(0),
 		m_type(GDT_Unknown) {
 
 	if (filename.empty())
@@ -1316,26 +1222,6 @@ std::string Raster::filename() const {
 	return m_filename;
 }
 
-void Raster::setInt(int col, int row, int v, int band) {
-	if (!m_props.writable())
-		g_runerr("This raster is not writable.");
-	int bcol = col / m_bcols;
-	int brow = row / m_brows;
-	GDALRasterBand *rb = m_ds->GetRasterBand(band);
-	if(bcol != m_bcol || brow != m_brow || band != m_band) {
-		if(!rb)
-			g_argerr("No such band: " << band);
-		if(CPLE_None != rb->ReadBlock(bcol, brow, m_block))
-			g_runerr("Failed to read block from: " << filename());
-		m_bcol = bcol;
-		m_brow = brow;
-	}
-	int idx = (row - brow * m_brows) * m_bcols + (col - bcol * m_bcols);
-	writeToBlock(m_block, getGDType(), v, idx);
-	if(CPLE_None != rb->WriteBlock(bcol, brow, m_block))
-		g_runerr("Failed to write block to: " << filename());
-}
-
 void Raster::fillInt(int value, int band) {
 	Buffer buf(m_bcols * m_brows * getTypeSize(m_props.dataType()));
 	for(int i = 0; i < m_bcols * m_brows; ++i)
@@ -1371,6 +1257,12 @@ void Raster::writeToRaster(Raster &grd,
 			int srcCol, int srcRow,
 			int dstCol, int dstRow,
 			int srcBand, int dstBand) {
+
+	if(m_dirty) {
+		if(CPLE_None != m_ds->GetRasterBand(m_bband)->WriteBlock(m_bcol, m_brow, m_block))
+			g_runerr("Failed to flush to: " << filename());
+		m_dirty = false;
+	}
 
 	if (&grd == this)
 		g_runerr("Recursive call to readBlock.");
@@ -1408,6 +1300,12 @@ void Raster::writeToMemRaster(MemRaster &grd,
 		int dstCol, int dstRow,
 		int srcBand, int dstBand) {
 
+	if(m_dirty) {
+		if(CPLE_None != m_ds->GetRasterBand(m_bband)->WriteBlock(m_bcol, m_brow, m_block))
+			g_runerr("Failed to flush to: " << filename());
+		m_dirty = false;
+	}
+
 	if(srcBand < 1 || srcBand > m_props.bands())
 		g_argerr("Invalid source band: " << srcBand);
 
@@ -1421,9 +1319,8 @@ void Raster::writeToMemRaster(MemRaster &grd,
 	rows = g_min(grd.props().rows() - dstRow, rows);
 
 	const GridProps& gp = grd.props();
-	DataType type = gp.dataType();
-	GDALDataType gtype = dataType2GDT(type);
-	int typeSize = getTypeSize(type);
+	GDALDataType gtype = dataType2GDT(gp.dataType());
+	int typeSize = getTypeSize(gp.dataType());
 	int gcols = gp.cols();
 
 	Buffer buf(cols * rows * typeSize);
@@ -1462,6 +1359,11 @@ double Raster::getFloat(int col, int row, int band) {
 	int bcol = col / m_bcols;
 	int brow = row / m_brows;
 	if(bcol != m_bcol || brow != m_brow) {
+		if(m_dirty) {
+			if(CPLE_None != m_ds->GetRasterBand(m_bband)->WriteBlock(m_bcol, m_brow, m_block))
+				g_runerr("Failed to flush to: " << filename());
+			m_dirty = false;
+		}
 		GDALRasterBand *rb = m_ds->GetRasterBand(band);
 		if(!rb)
 			g_argerr("No such band: " << band);
@@ -1469,9 +1371,10 @@ double Raster::getFloat(int col, int row, int band) {
 			g_runerr("Failed to read from: " << filename());
 		m_bcol = bcol;
 		m_brow = brow;
+		m_bband = band;
 	}
 	int idx = (row - brow * m_brows) * m_bcols + (col - bcol * m_bcols);
-	double v;
+	double v = 0;
 	readFromBlock(m_block, getGDType(), &v, idx);
 	return v;
 }
@@ -1489,6 +1392,11 @@ int Raster::getInt(int col, int row, int band) {
 	int bcol = col / m_bcols;
 	int brow = row / m_brows;
 	if(bcol != m_bcol || brow != m_brow) {
+		if(m_dirty) {
+			if(CPLE_None != m_ds->GetRasterBand(m_bband)->WriteBlock(m_bcol, m_brow, m_block))
+				g_runerr("Failed to flush to: " << filename());
+			m_dirty = false;
+		}
 		GDALRasterBand *rb = m_ds->GetRasterBand(band);
 		if(!rb)
 			g_argerr("No such band: " << band);
@@ -1496,9 +1404,10 @@ int Raster::getInt(int col, int row, int band) {
 			g_runerr("Failed to read from: " << filename());
 		m_bcol = bcol;
 		m_brow = brow;
+		m_bband = band;
 	}
-	int idx = (row - brow * m_brows) * m_bcols + (col - bcol * m_bcols);
-	int v;
+	int idx = (row % m_brows) * m_bcols + (col % m_bcols);
+	int v = 0;
 	readFromBlock(m_block, getGDType(), &v, idx);
 	return v;
 }
@@ -1524,19 +1433,49 @@ void Raster::setFloat(int col, int row, double v, int band) {
 		g_runerr("This raster is not writable.");
 	int bcol = col / m_bcols;
 	int brow = row / m_brows;
-	GDALRasterBand *rb = m_ds->GetRasterBand(band);
 	if(bcol != m_bcol || brow != m_brow || band != m_band) {
+		if(m_dirty) {
+			if(CPLE_None != m_ds->GetRasterBand(m_bband)->WriteBlock(m_bcol, m_brow, m_block))
+				g_runerr("Failed to flush to: " << filename());
+			m_dirty = false;
+		}
+		GDALRasterBand *rb = m_ds->GetRasterBand(band);
 		if(!rb)
 			g_argerr("No such band: " << band);
 		if(CPLE_None != rb->ReadBlock(bcol, brow, m_block))
 			g_runerr("Failed to read from: " << filename());
 		m_bcol = bcol;
 		m_brow = brow;
+		m_bband = band;
 	}
-	int idx = (row - brow * m_brows) * m_bcols + (col - bcol * m_bcols);
-	writeToBlock(m_block, getGDType(), v, idx);
-	if(CPLE_None != rb->WriteBlock(bcol, brow, m_block))
-		g_runerr("Failed to write to: " << filename());
+	int idx = (row % m_brows) * m_bcols + (col % m_bcols);
+	writeToBlock(m_block, getGDType(), &v, idx);
+	m_dirty = true;
+}
+
+void Raster::setInt(int col, int row, int v, int band) {
+	if (!m_props.writable())
+		g_runerr("This raster is not writable.");
+	int bcol = col / m_bcols;
+	int brow = row / m_brows;
+	if(bcol != m_bcol || brow != m_brow || band != m_band) {
+		if(m_dirty) {
+			if(CPLE_None != m_ds->GetRasterBand(m_bband)->WriteBlock(m_bcol, m_brow, m_block))
+				g_runerr("Failed to flush to: " << filename());
+			m_dirty = false;
+		}
+		GDALRasterBand *rb = m_ds->GetRasterBand(band);
+		if(!rb)
+			g_argerr("No such band: " << band);
+		if(CPLE_None != rb->ReadBlock(bcol, brow, m_block))
+			g_runerr("Failed to read from: " << filename());
+		m_bcol = bcol;
+		m_brow = brow;
+		m_bband = band;
+	}
+	int idx = (row % m_brows) * m_bcols + (col % m_bcols);
+	writeToBlock(m_block, getGDType(), &v, idx);
+	m_dirty = true;
 }
 
 void Raster::setFloat(long idx, double v, int band) {

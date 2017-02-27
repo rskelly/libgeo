@@ -368,6 +368,8 @@ namespace geo {
             int m_bcol, m_brow;			// The current loaded block position.
             int m_band;
     		void *m_block;
+            bool m_dirty;
+            int m_bband;
             std::string m_filename;     // Raster filename
             GridProps m_props;
             GDALDataType m_type;        // GDALDataType -- limits the possible template types.
