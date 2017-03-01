@@ -161,16 +161,64 @@ namespace geo {
 				return DataType::None;
 			}
 
-			inline void writeToBlock(void* block, GDALDataType type, void* value, int idx) {
-				int size = getTypeSize(gdt2DataType(type));
-				char* data = (char*) block;
-				std::memcpy(data + idx * size, value, size);
+			template <class T>
+			inline void writeToBlock(void *block, GDALDataType type, T value, int idx) {
+				switch (type) {
+				case GDT_Float32:
+					*(((float *)block) + idx) = (float)value;
+					break;
+				case GDT_Float64:
+					*(((double *)block) + idx) = (double)value;
+					break;
+				case GDT_UInt32:
+					*(((uint32_t *)block) + idx) = (uint32_t)value;
+					break;
+				case GDT_UInt16:
+					*(((uint16_t *)block) + idx) = (uint16_t)value;
+					break;
+				case GDT_Int32:
+					*(((int32_t *)block) + idx) = (int32_t)value;
+					break;
+				case GDT_Int16:
+					*(((int16_t *)block) + idx) = (int16_t)value;
+					break;
+				case GDT_Byte:
+					*(((uint8_t *)block) + idx) = (uint8_t)value;
+					break;
+				default:
+					g_runerr("Data type not implemented: " << type);
+					break;
+				}
 			}
 
-			inline void readFromBlock(void* block, GDALDataType type, void* value, int idx) {
-				int size = getTypeSize(gdt2DataType(type));
-				char* data = (char*) block;
-				std::memcpy(value, data + idx * size, size);
+			template <class T>
+			inline void readFromBlock(void* block, GDALDataType type, T* value, int idx) {
+				switch (type) {
+				case GDT_Float32:
+					*value = (double) *(((float *)block) + idx);
+					break;
+				case GDT_Float64:
+					*value = (double) *(((double *)block) + idx);
+					break;
+				case GDT_UInt32:
+					*value = (double) *(((uint32_t *)block) + idx);
+					break;
+				case GDT_UInt16:
+					*value = (double) *(((uint16_t *)block) + idx);
+					break;
+				case GDT_Int32:
+					*value = (double) *(((int32_t *)block) + idx);
+					break;
+				case GDT_Int16:
+					*value = (double) *(((int16_t *)block) + idx);
+					break;
+				case GDT_Byte:
+					*value = (double) *(((uint8_t *)block) + idx);
+					break;
+				default:
+					g_runerr("Data type not implemented: " << type);
+					break;
+				}
 			}
 
 		} //util
@@ -1373,7 +1421,7 @@ double Raster::getFloat(int col, int row, int band) {
 		m_brow = brow;
 		m_bband = band;
 	}
-	int idx = (row - brow * m_brows) * m_bcols + (col - bcol * m_bcols);
+	int idx = (row % m_brows) * m_bcols + (col % m_bcols);
 	double v = 0;
 	readFromBlock(m_block, getGDType(), &v, idx);
 	return v;
@@ -1449,7 +1497,7 @@ void Raster::setFloat(int col, int row, double v, int band) {
 		m_bband = band;
 	}
 	int idx = (row % m_brows) * m_bcols + (col % m_bcols);
-	writeToBlock(m_block, getGDType(), &v, idx);
+	writeToBlock(m_block, getGDType(), v, idx);
 	m_dirty = true;
 }
 
@@ -1474,7 +1522,7 @@ void Raster::setInt(int col, int row, int v, int band) {
 		m_bband = band;
 	}
 	int idx = (row % m_brows) * m_bcols + (col % m_bcols);
-	writeToBlock(m_block, getGDType(), &v, idx);
+	writeToBlock(m_block, getGDType(), v, idx);
 	m_dirty = true;
 }
 
