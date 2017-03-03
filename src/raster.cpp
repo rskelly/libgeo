@@ -161,16 +161,64 @@ namespace geo {
 				return DataType::None;
 			}
 
-			inline void writeToBlock(void* block, GDALDataType type, void* value, int idx) {
-				int size = getTypeSize(gdt2DataType(type));
-				char* data = (char*) block;
-				std::memcpy(data + idx * size, value, size);
+			template <class T>
+			inline void writeToBlock(void *block, GDALDataType type, T value, int idx) {
+				switch (type) {
+				case GDT_Float32:
+					*(((float *)block) + idx) = (float)value;
+					break;
+				case GDT_Float64:
+					*(((double *)block) + idx) = (double)value;
+					break;
+				case GDT_UInt32:
+					*(((uint32_t *)block) + idx) = (uint32_t)value;
+					break;
+				case GDT_UInt16:
+					*(((uint16_t *)block) + idx) = (uint16_t)value;
+					break;
+				case GDT_Int32:
+					*(((int32_t *)block) + idx) = (int32_t)value;
+					break;
+				case GDT_Int16:
+					*(((int16_t *)block) + idx) = (int16_t)value;
+					break;
+				case GDT_Byte:
+					*(((uint8_t *)block) + idx) = (uint8_t)value;
+					break;
+				default:
+					g_runerr("Data type not implemented: " << type);
+					break;
+				}
 			}
 
-			inline void readFromBlock(void* block, GDALDataType type, void* value, int idx) {
-				int size = getTypeSize(gdt2DataType(type));
-				char* data = (char*) block;
-				std::memcpy(value, data + idx * size, size);
+			template <class T>
+			inline void readFromBlock(void* block, GDALDataType type, T* value, int idx) {
+				switch (type) {
+				case GDT_Float32:
+					*value = (double) *(((float *)block) + idx);
+					break;
+				case GDT_Float64:
+					*value = (double) *(((double *)block) + idx);
+					break;
+				case GDT_UInt32:
+					*value = (double) *(((uint32_t *)block) + idx);
+					break;
+				case GDT_UInt16:
+					*value = (double) *(((uint16_t *)block) + idx);
+					break;
+				case GDT_Int32:
+					*value = (double) *(((int32_t *)block) + idx);
+					break;
+				case GDT_Int16:
+					*value = (double) *(((int16_t *)block) + idx);
+					break;
+				case GDT_Byte:
+					*value = (double) *(((uint8_t *)block) + idx);
+					break;
+				default:
+					g_runerr("Data type not implemented: " << type);
+					break;
+				}
 			}
 
 		} //util
@@ -418,18 +466,13 @@ GridStats Grid::stats() {
 	GridStats st;
 	long i;
 	const GridProps& gp = props();
-	double v, nodata = gp.nodata();
-	for (i = 0; i < gp.size(); ++i) {
-		if ((v = getFloat(i)) != nodata) {
-			st.min = st.max = v;
-			break;
-		}
-	}
+	double nodata = gp.nodata();
+	double v, m = 0, s = 0;
+	int k = 1;
 	st.sum = 0;
 	st.count = 0;
-	double m = 0;
-	double s = 0;
-	int k = 1;
+	st.min = G_DBL_MAX_POS;
+	st.max = G_DBL_MAX_NEG;
 	// Welford's method for variance.
 	// i has the index of the first dpata element.
 	for (i = 0; i < gp.size(); ++i) {
@@ -438,8 +481,8 @@ GridStats Grid::stats() {
 			m = m + (v - m) / k;
 			s = s + (v - m) * (v - oldm);
 			st.sum += v;
-			st.min = g_min(st.min, v);
-			st.max = g_max(st.max, v);
+			if(v < st.min) st.min = v;
+			if(v > st.max) st.max = v;
 			++st.count;
 			++k;
 		}
@@ -548,6 +591,107 @@ void Grid::floodFill(int col, int row,
 					maxc = g_max(c, maxc);
 					++area;
 					other.setInt(c, row, fill);
+					visited[idx] = true;
+					if (row > 0)
+						q.push(std::unique_ptr<Cell>(new Cell(c, row - 1)));
+					if (row < rows - 1)
+						q.push(std::unique_ptr<Cell>(new Cell(c, row + 1)));
+				} else {
+					break;
+				}
+			}
+			if(d8) {
+				if (row > 0)
+					q.push(std::unique_ptr<Cell>(new Cell(c, row - 1)));
+				if (row < rows - 1)
+					q.push(std::unique_ptr<Cell>(new Cell(c, row + 1)));
+			}
+		}
+	}
+	if(outminc != nullptr)
+		*outminc = minc;
+	if(outminr != nullptr)
+		*outminr = minr;
+	if(outmaxc != nullptr)
+		*outmaxc = maxc;
+	if(outmaxr != nullptr)
+		*outmaxr = maxr;
+	if(outarea != nullptr)
+		*outarea = area;
+}
+
+void Grid::floodFill(int col, int row,
+    FillOperator &op, Grid &other, double fill, bool d8,
+	int *outminc, int *outminr,	int *outmaxc, int *outmaxr,
+	int *outarea) {
+
+	const GridProps& gp = props();
+
+	int cols = gp.cols();
+	int rows = gp.rows();
+	int size = gp.size();
+	int minc = cols + 1;
+	int minr = rows + 1;
+	int maxc = -1;
+	int maxr = -1;
+	int area = 0;
+	std::queue<std::unique_ptr<Cell> > q;
+	q.push(std::unique_ptr<Cell>(new Cell(col, row)));
+
+	std::vector<bool> visited(size, false); // Tracks visited pixels.
+
+	while (q.size()) {
+
+		std::unique_ptr<Cell> cel = std::move(q.front());
+		row = cel->row;
+		col = cel->col;
+		q.pop();
+
+		uint64_t idx = (uint64_t) row * cols + col;
+
+		if (!visited[idx] && op.fill(getFloat(col, row))) {
+
+			minc = g_min(col, minc);
+			maxc = g_max(col, maxc);
+			minr = g_min(row, minr);
+			maxr = g_max(row, maxr);
+			++area;
+			other.setFloat(col, row, fill);
+			visited[idx] = true;
+
+			if (row > 0)
+				q.push(std::unique_ptr<Cell>(new Cell(col, row - 1)));
+			if (row < rows - 1)
+				q.push(std::unique_ptr<Cell>(new Cell(col, row + 1)));
+
+			int c;
+			for (c = col - 1; c >= 0; --c) {
+				idx = (uint64_t) row * cols + c;
+				if (!visited[idx] && op.fill(getFloat(c, row))) {
+					minc = g_min(c, minc);
+					++area;
+					other.setFloat(c, row, fill);
+					visited[idx] = true;
+					if (row > 0)
+						q.push(std::unique_ptr<Cell>(new Cell(c, row - 1)));
+					if (row < rows - 1)
+						q.push(std::unique_ptr<Cell>(new Cell(c, row + 1)));
+				} else {
+					break;
+				}
+			}
+			if(d8) {
+				if (row > 0)
+					q.push(std::unique_ptr<Cell>(new Cell(c, row - 1)));
+				if (row < rows - 1)
+					q.push(std::unique_ptr<Cell>(new Cell(c, row + 1)));
+			}
+			for (c = col + 1; c < cols; ++c) {
+				idx = (uint64_t) row * cols + c;
+				if (!visited[idx] && op.fill(getFloat(c, row))) {
+					maxc = g_max(c, maxc);
+					++area;
+					other.setFloat(c, row, fill);
 					visited[idx] = true;
 					if (row > 0)
 						q.push(std::unique_ptr<Cell>(new Cell(c, row - 1)));
@@ -1373,7 +1517,7 @@ double Raster::getFloat(int col, int row, int band) {
 		m_brow = brow;
 		m_bband = band;
 	}
-	int idx = (row - brow * m_brows) * m_bcols + (col - bcol * m_bcols);
+	int idx = (row % m_brows) * m_bcols + (col % m_bcols);
 	double v = 0;
 	readFromBlock(m_block, getGDType(), &v, idx);
 	return v;
@@ -1449,7 +1593,7 @@ void Raster::setFloat(int col, int row, double v, int band) {
 		m_bband = band;
 	}
 	int idx = (row % m_brows) * m_bcols + (col % m_bcols);
-	writeToBlock(m_block, getGDType(), &v, idx);
+	writeToBlock(m_block, getGDType(), v, idx);
 	m_dirty = true;
 }
 
@@ -1474,7 +1618,7 @@ void Raster::setInt(int col, int row, int v, int band) {
 		m_bband = band;
 	}
 	int idx = (row % m_brows) * m_bcols + (col % m_bcols);
-	writeToBlock(m_block, getGDType(), &v, idx);
+	writeToBlock(m_block, getGDType(), v, idx);
 	m_dirty = true;
 }
 

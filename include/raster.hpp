@@ -259,6 +259,12 @@ namespace geo {
 				int *outmaxc = nullptr, int *outmaxr = nullptr,
 				int *outarea = nullptr);
 
+            void floodFill(int col, int row,
+                FillOperator &op, Grid &other, double fill, bool d8 = false,
+                int *outminc = nullptr, int *outminr = nullptr,
+                int *outmaxc = nullptr, int *outmaxr = nullptr,
+                int *outarea = nullptr);
+
             // Begin flood fill at the given cell; fill cells equal to the target value.
             void floodFill(int col, int row, int target, int fill, bool d8 = false,
     				int *outminc = nullptr, int *outminr = nullptr,
