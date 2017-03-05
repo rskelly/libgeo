@@ -451,10 +451,10 @@ uint64_t MappedFile::size() {
 
 MappedFile::~MappedFile() {
 	if (m_remove)
-		file_mapping::remove(m_filename.c_str());
-	Util::rm(m_filename);
+		m_mapping->remove(m_filename.c_str());
 	delete m_region;
 	delete m_mapping;
+	Util::rm(m_filename);
 }
 
 std::unique_ptr<MappedFile> Util::mapFile(const std::string &filename,
