@@ -421,7 +421,11 @@ const std::string Util::tmpFile(const std::string &root) {
 using namespace boost::interprocess;
 
 MappedFile::MappedFile(const std::string &filename, uint64_t size, bool remove) :
-		m_filename(filename), m_size(size), m_remove(remove) {
+		m_filename(filename),
+		m_size(size),
+		m_remove(remove),
+		m_mapping(nullptr),
+		m_region(nullptr) {
 
 	using namespace boost::interprocess;
 	using namespace boost::filesystem;
@@ -450,11 +454,11 @@ uint64_t MappedFile::size() {
 }
 
 MappedFile::~MappedFile() {
-	if (m_remove)
-		m_mapping->remove(m_filename.c_str());
+	m_mapping->remove(m_filename.c_str());
 	delete m_region;
 	delete m_mapping;
-	Util::rm(m_filename);
+	if (m_remove) // TODO: Check if shared? Also, remove_file_on_destroy
+		Util::rm(m_filename);
 }
 
 std::unique_ptr<MappedFile> Util::mapFile(const std::string &filename,

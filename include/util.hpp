@@ -186,9 +186,9 @@ namespace geo {
         private:
             std::string m_filename;
             uint64_t m_size;
+            bool m_remove;
             boost::interprocess::file_mapping *m_mapping;
             boost::interprocess::mapped_region *m_region;
-            bool m_remove;
         protected:
             MappedFile(const std::string &filename, uint64_t size, bool remove);
         public:
