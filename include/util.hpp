@@ -136,6 +136,8 @@ namespace geo {
 
             double depth() const;
 
+            double volume() const;
+
             int maxCol(double resolution) const;
 
             int maxRow(double resolution) const;
@@ -387,8 +389,9 @@ namespace geo {
                     for (; di != end; ++di) {
                         if (!ext.empty()) {
                             std::string p(di->path().string());
-                            to_lower(p);
-                            if (ends_with(p, ext)) {
+                            std::string tmp = p;
+                            to_lower(tmp);
+                            if (ends_with(tmp, ext)) {
                                 *iter = p;
                                 ++iter;
                                 ++i;

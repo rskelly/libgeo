@@ -160,6 +160,10 @@ double Bounds::depth() const {
 	return maxz() - minz();
 }
 
+double Bounds::volume() const {
+	return width() * height() * depth();
+}
+
 int Bounds::maxCol(double resolution) const {
 	return (int) g_abs(width() / resolution);
 }
