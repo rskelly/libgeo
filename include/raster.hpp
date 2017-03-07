@@ -180,6 +180,7 @@ namespace geo {
             virtual const GridProps& dstProps() const = 0;
             virtual bool shouldFill(int col, int row) const = 0;
             virtual void fill(int col, int row) const = 0;
+            virtual ~FillOperator() {};
         };
 
         // Abstract class for grids (rasters).
