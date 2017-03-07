@@ -136,6 +136,8 @@ namespace geo {
 
             double depth() const;
 
+            double volume() const;
+
             int maxCol(double resolution) const;
 
             int maxRow(double resolution) const;
@@ -186,9 +188,9 @@ namespace geo {
         private:
             std::string m_filename;
             uint64_t m_size;
+            bool m_remove;
             boost::interprocess::file_mapping *m_mapping;
             boost::interprocess::mapped_region *m_region;
-            bool m_remove;
         protected:
             MappedFile(const std::string &filename, uint64_t size, bool remove);
         public:
@@ -335,6 +337,12 @@ namespace geo {
                 return boost::algorithm::join(lst, delim);
             }
 
+            // Return the system tempp directory.
+            static std::string tmpDir();
+
+            // Join the path in a system-appropriate way.
+            static std::string pathJoin(std::string& a, std::string& b);
+
             // Lowercase the string.
             static std::string& lower(std::string &str);
 
@@ -387,8 +395,9 @@ namespace geo {
                     for (; di != end; ++di) {
                         if (!ext.empty()) {
                             std::string p(di->path().string());
-                            to_lower(p);
-                            if (ends_with(p, ext)) {
+                            std::string tmp = p;
+                            to_lower(tmp);
+                            if (ends_with(tmp, ext)) {
                                 *iter = p;
                                 ++iter;
                                 ++i;

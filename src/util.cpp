@@ -160,6 +160,10 @@ double Bounds::depth() const {
 	return maxz() - minz();
 }
 
+double Bounds::volume() const {
+	return width() * height() * depth();
+}
+
 int Bounds::maxCol(double resolution) const {
 	return (int) g_abs(width() / resolution);
 }
@@ -355,6 +359,12 @@ bool Util::exists(const std::string &name) {
 	return boost::filesystem::exists(p);
 }
 
+std::string Util::pathJoin(std::string& a, std::string& b) {
+	boost::filesystem::path pa(a);
+	boost::filesystem::path pb(b);
+	return (pa / pb).string();
+}
+
 bool Util::pathExists(const std::string &name) {
 	boost::filesystem::path p(name);
 	return boost::filesystem::exists(p.remove_filename());
@@ -407,6 +417,10 @@ std::string Util::upper(const std::string &str) {
 	return n;
 }
 
+std::string Util::tmpDir() {
+	return boost::filesystem::temp_directory_path().string();
+}
+
 const std::string Util::tmpFile(const std::string &root) {
 	using namespace boost::filesystem;
 	path p = unique_path();
@@ -421,8 +435,13 @@ const std::string Util::tmpFile(const std::string &root) {
 using namespace boost::interprocess;
 
 MappedFile::MappedFile(const std::string &filename, uint64_t size, bool remove) :
-		m_filename(filename), m_size(size), m_remove(remove) {
+		m_filename(filename),
+		m_size(size),
+		m_remove(remove),
+		m_mapping(nullptr),
+		m_region(nullptr) {
 
+	//g_debug("MappedFile: " << filename << ", " << size << ", " << remove);
 	using namespace boost::interprocess;
 	using namespace boost::filesystem;
 
@@ -450,11 +469,11 @@ uint64_t MappedFile::size() {
 }
 
 MappedFile::~MappedFile() {
-	if (m_remove)
-		file_mapping::remove(m_filename.c_str());
-	Util::rm(m_filename);
+	m_mapping->remove(m_filename.c_str());
 	delete m_region;
 	delete m_mapping;
+	if (m_remove) // TODO: Check if shared? Also, remove_file_on_destroy
+		Util::rm(m_filename);
 }
 
 std::unique_ptr<MappedFile> Util::mapFile(const std::string &filename,
