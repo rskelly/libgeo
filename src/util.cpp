@@ -380,7 +380,7 @@ bool Util::mkdir(const std::string &dir) {
 	using namespace boost::filesystem;
 	path bdir(dir);
 	if (!boost::filesystem::exists(bdir))
-		return create_directory(bdir);
+		return create_directories(bdir);
 	return true;
 }
 
