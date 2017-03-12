@@ -68,6 +68,19 @@ Bounds::Bounds(double minx, double miny, double maxx, double maxy, double minz,
 				maxz) {
 }
 
+void Bounds::assign(const Bounds& bounds) {
+	set(bounds.minx(), bounds.miny() , bounds.maxx(), bounds.maxy(), bounds.minz(), bounds.maxz());
+}
+
+void Bounds::set(double _minx, double _miny, double _maxx, double _maxy, double _minz, double _maxz) {
+	m_minx = _minx;
+	m_miny = _miny;
+	m_minz = _minz;
+	m_maxx = _maxx;
+	m_maxy = _maxy;
+	m_maxz = _maxz;
+}
+
 bool Bounds::contains(double x, double y) const {
 	return x > m_minx && x < m_maxx && y > m_miny && y < m_maxy;
 }
@@ -99,6 +112,30 @@ Bounds Bounds::intersection(const Bounds &other) const {
 	return Bounds(g_max(minx(), other.minx()), g_max(miny(), other.miny()),
 			g_min(maxx(), other.maxx()), g_min(maxy(), other.maxy()));
 }
+
+void Bounds::cube() {
+	double max = g_max(width(), height());
+	if(m_maxz != G_DBL_MAX_POS) {
+		max = g_max(max, depth()) / 2.0;
+		set(midx() - max, midy() - max, midx() + max, midy() + max, midz() - max, midz() + max);
+	} else {
+		max /= 2.0;
+		set(midx() - max, midy() - max, midx() + max, midy() + max);
+	}
+}
+
+double Bounds::midx() const {
+	return m_minx + (m_maxx - m_minx) / 2.0;
+}
+
+double Bounds::midy() const {
+	return m_miny + (m_maxy - m_miny) / 2.0;
+}
+
+double Bounds::midz() const {
+	return m_minz + (m_maxz - m_minz) / 2.0;
+}
+
 
 double Bounds::minx() const {
 	return m_minx;
@@ -384,15 +421,20 @@ bool Util::mkdir(const std::string &dir) {
 	return true;
 }
 
+std::string Util::parent(const std::string& file) {
+	using namespace boost::filesystem;
+	path p(file);
+	return p.parent_path().string();
+}
+
 std::string Util::extension(const std::string &filename) {
 	using namespace boost::filesystem;
 	path p(filename);
 	std::string ext = p.extension().string();
 	if(ext.size())
 		ext = ext.substr(1);
-	lower(ext);
+	//lower(ext);
 	return ext;
-
 }
 
 std::string& Util::lower(std::string &str) {
