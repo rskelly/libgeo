@@ -68,6 +68,19 @@ Bounds::Bounds(double minx, double miny, double maxx, double maxy, double minz,
 				maxz) {
 }
 
+void Bounds::assign(const Bounds& bounds) {
+	set(bounds.minx(), bounds.miny() , bounds.maxx(), bounds.maxy(), bounds.minz(), bounds.maxz());
+}
+
+void Bounds::set(double _minx, double _miny, double _maxx, double _maxy, double _minz, double _maxz) {
+	m_minx = _minx;
+	m_miny = _miny;
+	m_minz = _minz;
+	m_maxx = _maxx;
+	m_maxy = _maxy;
+	m_maxz = _maxz;
+}
+
 bool Bounds::contains(double x, double y) const {
 	return x > m_minx && x < m_maxx && y > m_miny && y < m_maxy;
 }
@@ -99,6 +112,30 @@ Bounds Bounds::intersection(const Bounds &other) const {
 	return Bounds(g_max(minx(), other.minx()), g_max(miny(), other.miny()),
 			g_min(maxx(), other.maxx()), g_min(maxy(), other.maxy()));
 }
+
+void Bounds::cube() {
+	double max = g_max(width(), height());
+	if(m_maxz != G_DBL_MAX_POS) {
+		max = g_max(max, depth()) / 2.0;
+		set(midx() - max, midy() - max, midx() + max, midy() + max, midz() - max, midz() + max);
+	} else {
+		max /= 2.0;
+		set(midx() - max, midy() - max, midx() + max, midy() + max);
+	}
+}
+
+double Bounds::midx() const {
+	return m_minx + (m_maxx - m_minx) / 2.0;
+}
+
+double Bounds::midy() const {
+	return m_miny + (m_maxy - m_miny) / 2.0;
+}
+
+double Bounds::midz() const {
+	return m_minz + (m_maxz - m_minz) / 2.0;
+}
+
 
 double Bounds::minx() const {
 	return m_minx;
@@ -158,6 +195,10 @@ double Bounds::height() const {
 
 double Bounds::depth() const {
 	return maxz() - minz();
+}
+
+double Bounds::volume() const {
+	return width() * height() * depth();
 }
 
 int Bounds::maxCol(double resolution) const {
@@ -355,6 +396,12 @@ bool Util::exists(const std::string &name) {
 	return boost::filesystem::exists(p);
 }
 
+std::string Util::pathJoin(std::string& a, std::string& b) {
+	boost::filesystem::path pa(a);
+	boost::filesystem::path pb(b);
+	return (pa / pb).string();
+}
+
 bool Util::pathExists(const std::string &name) {
 	boost::filesystem::path p(name);
 	return boost::filesystem::exists(p.remove_filename());
@@ -370,8 +417,14 @@ bool Util::mkdir(const std::string &dir) {
 	using namespace boost::filesystem;
 	path bdir(dir);
 	if (!boost::filesystem::exists(bdir))
-		return create_directory(bdir);
+		return create_directories(bdir);
 	return true;
+}
+
+std::string Util::parent(const std::string& file) {
+	using namespace boost::filesystem;
+	path p(file);
+	return p.parent_path().string();
 }
 
 std::string Util::extension(const std::string &filename) {
@@ -380,9 +433,8 @@ std::string Util::extension(const std::string &filename) {
 	std::string ext = p.extension().string();
 	if(ext.size())
 		ext = ext.substr(1);
-	lower(ext);
+	//lower(ext);
 	return ext;
-
 }
 
 std::string& Util::lower(std::string &str) {
@@ -407,6 +459,10 @@ std::string Util::upper(const std::string &str) {
 	return n;
 }
 
+std::string Util::tmpDir() {
+	return boost::filesystem::temp_directory_path().string();
+}
+
 const std::string Util::tmpFile(const std::string &root) {
 	using namespace boost::filesystem;
 	path p = unique_path();
@@ -421,8 +477,13 @@ const std::string Util::tmpFile(const std::string &root) {
 using namespace boost::interprocess;
 
 MappedFile::MappedFile(const std::string &filename, uint64_t size, bool remove) :
-		m_filename(filename), m_size(size), m_remove(remove) {
+		m_filename(filename),
+		m_size(size),
+		m_remove(remove),
+		m_mapping(nullptr),
+		m_region(nullptr) {
 
+	//g_debug("MappedFile: " << filename << ", " << size << ", " << remove);
 	using namespace boost::interprocess;
 	using namespace boost::filesystem;
 
@@ -450,11 +511,11 @@ uint64_t MappedFile::size() {
 }
 
 MappedFile::~MappedFile() {
-	if (m_remove)
-		file_mapping::remove(m_filename.c_str());
-	Util::rm(m_filename);
+	m_mapping->remove(m_filename.c_str());
 	delete m_region;
 	delete m_mapping;
+	if (m_remove) // TODO: Check if shared? Also, remove_file_on_destroy
+		Util::rm(m_filename);
 }
 
 std::unique_ptr<MappedFile> Util::mapFile(const std::string &filename,

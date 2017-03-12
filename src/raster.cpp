@@ -423,23 +423,6 @@ Cell::Cell(int col, int row) :
 	col(col), row(row) {
 }
 
-// Implementations for TargetOperator (for flood fill)
-
-FillOperator::~FillOperator() {}
-
-TargetOperator::TargetOperator(int match) :
-		m_match(match) {
-}
-
-bool TargetOperator::fill(int value) const {
-	return value == m_match;
-}
-
-bool TargetOperator::fill(double value) const {
-	return (int) value == m_match;
-}
-
-TargetOperator::~TargetOperator() {}
 
 Grid::Grid() {
 }
@@ -466,18 +449,13 @@ GridStats Grid::stats() {
 	GridStats st;
 	long i;
 	const GridProps& gp = props();
-	double v, nodata = gp.nodata();
-	for (i = 0; i < gp.size(); ++i) {
-		if ((v = getFloat(i)) != nodata) {
-			st.min = st.max = v;
-			break;
-		}
-	}
+	double nodata = gp.nodata();
+	double v, m = 0, s = 0;
+	int k = 1;
 	st.sum = 0;
 	st.count = 0;
-	double m = 0;
-	double s = 0;
-	int k = 1;
+	st.min = G_DBL_MAX_POS;
+	st.max = G_DBL_MAX_NEG;
 	// Welford's method for variance.
 	// i has the index of the first dpata element.
 	for (i = 0; i < gp.size(); ++i) {
@@ -486,8 +464,8 @@ GridStats Grid::stats() {
 			m = m + (v - m) / k;
 			s = s + (v - m) * (v - oldm);
 			st.sum += v;
-			st.min = g_min(st.min, v);
-			st.max = g_max(st.max, v);
+			if(v < st.min) st.min = v;
+			if(v > st.max) st.max = v;
 			++st.count;
 			++k;
 		}
@@ -521,126 +499,6 @@ void Grid::logNormalize(int band) {
 	double e = std::exp(1.0) - 1.0;
 	for(long i = 0; i < gp.size(); ++i)
 		setFloat(i, std::log(1.0 + e * (getFloat(i) - n) / (x - n)));
-}
-
-
-void Grid::floodFill(int col, int row,
-    FillOperator &op, Grid &other, int fill, bool d8,
-	int *outminc, int *outminr,	int *outmaxc, int *outmaxr,
-	int *outarea) {
-
-	const GridProps& gp = props();
-
-	int cols = gp.cols();
-	int rows = gp.rows();
-	int size = gp.size();
-	int minc = cols + 1;
-	int minr = rows + 1;
-	int maxc = -1;
-	int maxr = -1;
-	int area = 0;
-	std::queue<std::unique_ptr<Cell> > q;
-	q.push(std::unique_ptr<Cell>(new Cell(col, row)));
-
-	std::vector<bool> visited(size, false); // Tracks visited pixels.
-
-	while (q.size()) {
-
-		std::unique_ptr<Cell> cel = std::move(q.front());
-		row = cel->row;
-		col = cel->col;
-		q.pop();
-
-		uint64_t idx = (uint64_t) row * cols + col;
-
-		if (!visited[idx] && op.fill(getInt(col, row))) {
-
-			minc = g_min(col, minc);
-			maxc = g_max(col, maxc);
-			minr = g_min(row, minr);
-			maxr = g_max(row, maxr);
-			++area;
-			other.setInt(col, row, fill);
-			visited[idx] = true;
-
-			if (row > 0)
-				q.push(std::unique_ptr<Cell>(new Cell(col, row - 1)));
-			if (row < rows - 1)
-				q.push(std::unique_ptr<Cell>(new Cell(col, row + 1)));
-
-			int c;
-			for (c = col - 1; c >= 0; --c) {
-				idx = (uint64_t) row * cols + c;
-				if (!visited[idx] && op.fill(getInt(c, row))) {
-					minc = g_min(c, minc);
-					++area;
-					other.setInt(c, row, fill);
-					visited[idx] = true;
-					if (row > 0)
-						q.push(std::unique_ptr<Cell>(new Cell(c, row - 1)));
-					if (row < rows - 1)
-						q.push(std::unique_ptr<Cell>(new Cell(c, row + 1)));
-				} else {
-					break;
-				}
-			}
-			if(d8) {
-				if (row > 0)
-					q.push(std::unique_ptr<Cell>(new Cell(c, row - 1)));
-				if (row < rows - 1)
-					q.push(std::unique_ptr<Cell>(new Cell(c, row + 1)));
-			}
-			for (c = col + 1; c < cols; ++c) {
-				idx = (uint64_t) row * cols + c;
-				if (!visited[idx] && op.fill(getInt(c, row))) {
-					maxc = g_max(c, maxc);
-					++area;
-					other.setInt(c, row, fill);
-					visited[idx] = true;
-					if (row > 0)
-						q.push(std::unique_ptr<Cell>(new Cell(c, row - 1)));
-					if (row < rows - 1)
-						q.push(std::unique_ptr<Cell>(new Cell(c, row + 1)));
-				} else {
-					break;
-				}
-			}
-			if(d8) {
-				if (row > 0)
-					q.push(std::unique_ptr<Cell>(new Cell(c, row - 1)));
-				if (row < rows - 1)
-					q.push(std::unique_ptr<Cell>(new Cell(c, row + 1)));
-			}
-		}
-	}
-	if(outminc != nullptr)
-		*outminc = minc;
-	if(outminr != nullptr)
-		*outminr = minr;
-	if(outmaxc != nullptr)
-		*outmaxc = maxc;
-	if(outmaxr != nullptr)
-		*outmaxr = maxr;
-	if(outarea != nullptr)
-		*outarea = area;
-}
-
-void Grid::floodFill(int col, int row, int target, int fill, bool d8,
-		int *outminc, int *outminr,
-		int *outmaxc, int *outmaxr,
-		int *outarea) {
-	TargetOperator op(target);
-	return floodFill(col, row, op, *this, fill, d8, outminc, outminr,
-			outmaxc, outmaxr, outarea);
-}
-
-void Grid::floodFill(int col, int row,
-		FillOperator &op, int fill, bool d8,
-		int *outminc, int *outminr,
-		int *outmaxc, int *outmaxr,
-		int *outarea) {
-	return floodFill(col, row, op, *this, fill, d8, outminc, outminr,
-			outmaxc, outmaxr, outarea);
 }
 
 void Grid::convert(Grid &g, int srcBand, int dstBand) {

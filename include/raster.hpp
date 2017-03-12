@@ -173,23 +173,14 @@ namespace geo {
 
         // Used by Grid::floodFill to determine whether
         // a pixel should be filled.
+        template <class T, class U>
         class G_DLL_EXPORT FillOperator {
         public:
-            virtual bool fill(int value) const = 0;
-            virtual bool fill(double value) const = 0;
-            virtual ~FillOperator() = 0;
-        };
-
-        class G_DLL_EXPORT TargetOperator : public FillOperator {
-        private:
-            int m_match;
-        public:
-            TargetOperator(int match);
-
-            bool fill(int value) const;
-            bool fill(double value) const;
-
-            ~TargetOperator();
+            virtual const GridProps& srcProps() const = 0;
+            virtual const GridProps& dstProps() const = 0;
+            virtual bool shouldFill(int col, int row) const = 0;
+            virtual void fill(int col, int row) const = 0;
+            virtual ~FillOperator() {};
         };
 
         // Abstract class for grids (rasters).
@@ -253,23 +244,108 @@ namespace geo {
             // d8       -- Whether to enable diagonal fills.
             // out*     -- Pointer to variables that hold min and max rows and columns
             //             plus the area of the fill's bounding box.
-            void floodFill(int col, int row,
-                FillOperator &op, Grid &other, int fill, bool d8 = false,
+            template <class T, class U>
+            static void floodFill(int col, int row,
+                FillOperator<T, U> &op,  bool d8 = false,
 				int *outminc = nullptr, int *outminr = nullptr,
 				int *outmaxc = nullptr, int *outmaxr = nullptr,
-				int *outarea = nullptr);
+				int *outarea = nullptr) {
 
-            // Begin flood fill at the given cell; fill cells equal to the target value.
-            void floodFill(int col, int row, int target, int fill, bool d8 = false,
-    				int *outminc = nullptr, int *outminr = nullptr,
-    				int *outmaxc = nullptr, int *outmaxr = nullptr,
-    				int *outarea = nullptr);
+                const GridProps& gp = op.srcProps();
 
-            // Begin flood fill at the given cell; fill cells that satisfy the operator.
-            void floodFill(int col, int row, FillOperator &op, int fill, bool d8 = false,
-    				int *outminc = nullptr, int *outminr = nullptr,
-    				int *outmaxc = nullptr, int *outmaxr = nullptr,
-    				int *outarea = nullptr);
+                int cols = gp.cols();
+                int rows = gp.rows();
+                int size = gp.size();
+                int minc = cols + 1;
+                int minr = rows + 1;
+                int maxc = -1;
+                int maxr = -1;
+                int area = 0;
+                std::queue<std::unique_ptr<Cell> > q;
+                q.push(std::unique_ptr<Cell>(new Cell(col, row)));
+
+                std::vector<bool> visited(size, false); // Tracks visited pixels.
+
+                while (q.size()) {
+
+                    std::unique_ptr<Cell> cel = std::move(q.front());
+                    row = cel->row;
+                    col = cel->col;
+                    q.pop();
+
+                    uint64_t idx = (uint64_t) row * cols + col;
+
+                    if (!visited[idx] && op.shouldFill(col, row)) {
+
+                        minc = g_min(col, minc);
+                        maxc = g_max(col, maxc);
+                        minr = g_min(row, minr);
+                        maxr = g_max(row, maxr);
+                        ++area;
+                        op.fill(col, row);
+                        visited[idx] = true;
+
+                        if (row > 0)
+                            q.push(std::unique_ptr<Cell>(new Cell(col, row - 1)));
+                        if (row < rows - 1)
+                            q.push(std::unique_ptr<Cell>(new Cell(col, row + 1)));
+
+                        int c;
+                        for (c = col - 1; c >= 0; --c) {
+                            idx = (uint64_t) row * cols + c;
+                            if (!visited[idx] && op.shouldFill(c, row)) {
+                                minc = g_min(c, minc);
+                                ++area;
+                                op.fill(c, row);
+                                visited[idx] = true;
+                                if (row > 0)
+                                    q.push(std::unique_ptr<Cell>(new Cell(c, row - 1)));
+                                if (row < rows - 1)
+                                    q.push(std::unique_ptr<Cell>(new Cell(c, row + 1)));
+                            } else {
+                                break;
+                            }
+                        }
+                        if(d8) {
+                            if (row > 0)
+                                q.push(std::unique_ptr<Cell>(new Cell(c, row - 1)));
+                            if (row < rows - 1)
+                                q.push(std::unique_ptr<Cell>(new Cell(c, row + 1)));
+                        }
+                        for (c = col + 1; c < cols; ++c) {
+                            idx = (uint64_t) row * cols + c;
+                            if (!visited[idx] && op.shouldFill(c, row)) {
+                                maxc = g_max(c, maxc);
+                                ++area;
+                                op.fill(c, row);
+                                visited[idx] = true;
+                                if (row > 0)
+                                    q.push(std::unique_ptr<Cell>(new Cell(c, row - 1)));
+                                if (row < rows - 1)
+                                    q.push(std::unique_ptr<Cell>(new Cell(c, row + 1)));
+                            } else {
+                                break;
+                            }
+                        }
+                        if(d8) {
+                            if (row > 0)
+                                q.push(std::unique_ptr<Cell>(new Cell(c, row - 1)));
+                            if (row < rows - 1)
+                                q.push(std::unique_ptr<Cell>(new Cell(c, row + 1)));
+                        }
+                    }
+                }
+                if(outminc != nullptr)
+                    *outminc = minc;
+                if(outminr != nullptr)
+                    *outminr = minr;
+                if(outmaxc != nullptr)
+                    *outmaxc = maxc;
+                if(outmaxr != nullptr)
+                    *outmaxr = maxr;
+                if(outarea != nullptr)
+                    *outarea = area;
+            }
 
             // Smooth the raster and write the smoothed version to the output raster.
             // Callback is an optional function reference with a single float
@@ -285,6 +361,51 @@ namespace geo {
             void voidFillIDW(double radius, int count = 4, double exp = 2.0, int band = 1);
 
         };
+
+       
+        template <class T, class U>
+        class G_DLL_EXPORT TargetFillOperator : public FillOperator<T, U> {
+        private:
+            Grid* m_src;
+            Grid* m_dst;
+            bool m_sint, m_dint;
+            T m_target;
+            U m_fill;
+        public:
+            TargetFillOperator(Grid* src, Grid* dst, T target, U fill) :
+                m_src(src), m_dst(dst), m_target(target), m_fill(fill) {
+                    m_sint = m_src->props().isInt();
+                    m_dint = m_dst->props().isInt();
+            }
+            TargetFillOperator(Grid* grd, T target, U fill) :
+                m_src(grd), m_dst(grd), m_target(target), m_fill(fill) {
+                    m_sint = m_src->props().isInt();
+                    m_dint = m_dst->props().isInt();
+            }
+            const GridProps& srcProps() const {
+                return m_src->props();
+            }
+            const GridProps& dstProps() const {
+                return m_dst->props();
+            }
+            bool shouldFill(int col, int row) const {
+                if(m_sint) {
+                    return m_src->getInt(col, row) == m_target;
+                } else {
+                    return m_src->getFloat(col, row) == m_target;
+                }
+            }
+            void fill(int col, int row) const {
+                if(m_dint) {
+                    m_dst->setInt(col, row, (int) m_fill);
+                } else {
+                    m_dst->setFloat(col, row, (double) m_fill);
+                }
+            }
+            ~TargetFillOperator() {}
+        };
+
+
 
         class Raster;
 

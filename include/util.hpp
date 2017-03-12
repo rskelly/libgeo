@@ -96,6 +96,10 @@ namespace geo {
 
             Bounds(double minx, double miny, double maxx, double maxy, double minz, double maxz);
 
+            void set(double minx, double miny, double maxx, double maxy, double minz = 0, double maxz = 0);
+
+            void assign(const Bounds& bounds);
+
             bool contains(double x, double y) const;
 
             bool contains(double x, double y, double z) const;
@@ -105,6 +109,16 @@ namespace geo {
             bool intersects(const geo::util::Bounds &b, int dims = 2) const;
 
             Bounds intersection(const Bounds &other) const;
+
+            // Enlarge dimensions so the bounds becomes a cube.
+            // If the bounds is 2D, will become a square.
+            void cube();
+
+            double midx() const;
+
+            double midy() const;
+
+            double midz() const;
 
             double minx() const;
 
@@ -135,6 +149,8 @@ namespace geo {
             double height() const;
 
             double depth() const;
+
+            double volume() const;
 
             int maxCol(double resolution) const;
 
@@ -186,9 +202,9 @@ namespace geo {
         private:
             std::string m_filename;
             uint64_t m_size;
+            bool m_remove;
             boost::interprocess::file_mapping *m_mapping;
             boost::interprocess::mapped_region *m_region;
-            bool m_remove;
         protected:
             MappedFile(const std::string &filename, uint64_t size, bool remove);
         public:
@@ -335,6 +351,12 @@ namespace geo {
                 return boost::algorithm::join(lst, delim);
             }
 
+            // Return the system tempp directory.
+            static std::string tmpDir();
+
+            // Join the path in a system-appropriate way.
+            static std::string pathJoin(std::string& a, std::string& b);
+
             // Lowercase the string.
             static std::string& lower(std::string &str);
 
@@ -366,6 +388,9 @@ namespace geo {
             // Make a directory.
             static bool mkdir(const std::string &dir);
 
+            // Get the parent directory
+            static std::string parent(const std::string& filename);
+
             // Get the file extension.
             static std::string extension(const std::string &filename);
 
@@ -387,8 +412,9 @@ namespace geo {
                     for (; di != end; ++di) {
                         if (!ext.empty()) {
                             std::string p(di->path().string());
-                            to_lower(p);
-                            if (ends_with(p, ext)) {
+                            std::string tmp = p;
+                            to_lower(tmp);
+                            if (ends_with(tmp, ext)) {
                                 *iter = p;
                                 ++iter;
                                 ++i;
