@@ -15,6 +15,7 @@
 #include <ogrsf_frmts.h>
 #include <cpl_string.h>
 #include <cpl_port.h>
+#include <cpl_string.h>
 
 #include <geos/geom/GeometryFactory.h>
 #include <geos/geom/CoordinateSequenceFactory.h>
@@ -698,7 +699,7 @@ MemRaster::MemRaster() :
 MemRaster::MemRaster(const GridProps &props, bool mapped) :
 	m_grid(nullptr),
 	m_mmapped(mapped) {
-	init(props);
+	init(props, mapped);
 }
 
 MemRaster::~MemRaster() {
@@ -738,10 +739,11 @@ void MemRaster::init(const GridProps &pr, bool mapped) {
 		}
 		m_mmapped = mapped;
 		m_grid = nullptr;
-		int size = getTypeSize(m_props.dataType()) * pr.cols() * pr.rows();
+		size_t typeSize = getTypeSize(m_props.dataType());
+		size_t size = typeSize * pr.cols() * pr.rows();
 		m_mappedFile.release();
 		if (mapped) {
-			const std::string filename = Util::tmpFile("/tmp");
+			const std::string filename = Util::tmpFile();
 			m_mappedFile = Util::mapFile(filename, size);
 			m_grid = m_mappedFile->data();
 		} else {
@@ -1424,6 +1426,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 
 	// Create an output dataset for the polygons.
 	char **dopts = NULL;
+	dopts = CSLSetNameValue(dopts, "SPATIALITE", "YES");
 	GDALDataset *ds = drv->Create(filename.c_str(), 0, 0, 0, GDT_Unknown, dopts);
 	CPLFree(dopts);
 	if(!ds)
