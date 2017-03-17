@@ -91,7 +91,10 @@ DB::DB(const std::string &file, const std::string &layer, const std::string &dri
     if(!drv)
         g_runerr("Driver not found for " << m_file << " (" << driver << ")");
 
-    m_ds = drv->Create(m_file.c_str(), 0, 0, 0, GDT_Unknown, NULL);
+	char **dopts = NULL;
+	dopts = CSLSetNameValue(dopts, "SPATIALITE", "YES");
+    m_ds = drv->Create(m_file.c_str(), 0, 0, 0, GDT_Unknown, dopts);
+    CPLFree(dopts);
     if(!m_ds)
         g_runerr("Failed to create data set for " << m_file);
 
