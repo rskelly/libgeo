@@ -9,6 +9,7 @@
 #include <boost/interprocess/mapped_region.hpp>
 #include <boost/filesystem.hpp>
 
+#include <gdal.h>
 #include <gdal_alg.h>
 #include <ogr_feature.h>
 #include <ogrsf_frmts.h>
@@ -1128,10 +1129,17 @@ std::string Raster::filename() const {
 	return m_filename;
 }
 
+void writeInt(char* buf, int size, int value) {
+	for(int i = size - 1; i >= 0; --i)
+		*(buf + i) = (value >> (size - i - 1)) & 0xff;
+
+}
+
 void Raster::fillInt(int value, int band) {
-	Buffer buf(m_bcols * m_brows * getTypeSize(m_props.dataType()));
+	int size = getTypeSize(m_props.dataType());
+	Buffer buf(m_bcols * m_brows * size);
 	for(int i = 0; i < m_bcols * m_brows; ++i)
-		*(((int *) buf.buf) + i) = value;
+		writeInt(((char*) buf.buf) + i, size, value);
 	GDALRasterBand *bnd = m_ds->GetRasterBand(band);
 	int cols = props().cols();
 	int rows = props().rows();
@@ -1144,9 +1152,15 @@ void Raster::fillInt(int value, int band) {
 }
 
 void Raster::fillFloat(double value, int band) {
-	Buffer buf(m_bcols * m_brows * getTypeSize(m_props.dataType()));
-	for(int i = 0; i < m_bcols * m_brows; ++i)
-		*(((double *) buf.buf) + i) = value;
+	int size = getTypeSize(m_props.dataType());
+	Buffer buf(m_bcols * m_brows * size);
+	if(size == 4) {
+		for(int i = 0; i < m_bcols * m_brows; ++i)
+			*(((float*) buf.buf) + i) = (float) value;
+	} else {
+		for(int i = 0; i < m_bcols * m_brows; ++i)
+			*(((double*) buf.buf) + i) = value;
+	}
 	GDALRasterBand *bnd = m_ds->GetRasterBand(band);
 	int cols = props().cols();
 	int rows = props().rows();
