@@ -1302,7 +1302,7 @@ double Raster::getFloat(int col, int row, int band) {
 }
 
 double Raster::getFloat(long idx, int band) {
-	return getFloat((int) idx % m_props.cols(), (int) idx / m_props.cols(), band);
+	return getFloat((int) (idx % m_props.cols()), (int) (idx / m_props.cols()), band);
 }
 
 
@@ -1335,7 +1335,7 @@ int Raster::getInt(int col, int row, int band) {
 }
 
 int Raster::getInt(long idx, int band) {
-	return getInt((int) idx % m_props.cols(), (int) idx / m_props.cols(), band);
+	return getInt((int) (idx % m_props.cols()), (int) (idx / m_props.cols()), band);
 }
 
 int Raster::getInt(double x, double y, int band) {
@@ -1343,7 +1343,7 @@ int Raster::getInt(double x, double y, int band) {
 }
 
 void Raster::setInt(long idx, int v, int band) {
-	setInt((int) idx % m_props.cols(), (int) idx / m_props.cols(), v, band);
+	setInt((int) (idx % m_props.cols()), (int) (idx / m_props.cols()), v, band);
 }
 
 void Raster::setInt(double x, double y, int v, int band) {
@@ -1401,7 +1401,7 @@ void Raster::setInt(int col, int row, int v, int band) {
 }
 
 void Raster::setFloat(long idx, double v, int band) {
-	setFloat((int) idx % m_props.cols(), (int) idx / m_props.cols(), v, band);
+	setFloat((int) (idx % m_props.cols()), (int) (idx / m_props.cols()), v, band);
 }
 
 void Raster::setFloat(double x, double y, double v, int band) {
