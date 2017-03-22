@@ -224,12 +224,26 @@ void DB::setCacheSize(size_t size) {
 	g_runerr("Not implemented.");
 }
 
-void DB::dropGeomIndex() {
-	g_runerr("Not implemented.");
+void DB::dropGeomIndex(const std::string& table, const std::string& column) {
+	std::string _table;
+	if(table.empty()) {
+		_table = m_layerName;
+	} else {
+		_table = table;
+	}
+	std::string sql = "SELECT DisableSpatialIndex('" + _table + "', '" + column + "'); DropTable idx_" + _table + "_Geometry; VACUUM;";
+	m_ds->ExecuteSQL(sql.c_str(), NULL, NULL);
 }
 
-void DB::createGeomIndex() {
-	g_runerr("Not implemented.");
+void DB::createGeomIndex(const std::string& table, const std::string& column) {
+	std::string _table;
+	if(table.empty()) {
+		_table = m_layerName;
+	} else {
+		_table = table;
+	}
+	std::string sql = "SELECT CreateSpatialIndex('" + _table + "', '" + column + "');";
+	m_ds->ExecuteSQL(sql.c_str(), NULL, NULL);
 }
 
 uint64_t DB::getGeomCount() const {

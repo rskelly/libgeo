@@ -82,9 +82,9 @@ namespace geo {
 
             void setCacheSize(size_t size);
 
-            void dropGeomIndex();
+            void dropGeomIndex(const std::string& table = "", const std::string& column = "GEOMETRY");
 
-            void createGeomIndex();
+            void createGeomIndex(const std::string& table = "", const std::string& column = "GEOMETRY");
 
             uint64_t getGeomCount() const;
 

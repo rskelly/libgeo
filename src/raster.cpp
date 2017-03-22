@@ -49,9 +49,10 @@ namespace geo {
 				int thread;
 				int minRow, maxRow;
 				Geometry* poly;
+				const GeometryFactory* fact;
 
-				Poly(Geometry *poly, int thread, int row) :
-						thread(thread), minRow(row), maxRow(row), poly(nullptr) {
+				Poly(Geometry* poly, int thread, int row, const GeometryFactory* fact) :
+						thread(thread), minRow(row), maxRow(row), poly(nullptr), fact(fact) {
 					this->poly = poly;
 				}
 
@@ -79,6 +80,16 @@ namespace geo {
 							return false;
 					}
 					return true;
+				}
+
+				Geometry* polyAsMulti() {
+					if(GEOS_MULTIPOLYGON != poly->getGeometryTypeId()) {
+						std::vector<geos::geom::Geometry*>* geoms = new std::vector<Geometry*>();
+						geoms->push_back(poly);
+						return fact->createMultiPolygon(geoms);
+					} else {
+						return poly;
+					}
 				}
 
 				~Poly() {
@@ -1529,7 +1540,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 
 						// If it's already in the list, union it, otherwise add it.
 						if(polys.find(id0) == polys.end()) {
-							std::unique_ptr<Poly> p(new Poly(geom, thread, r));
+							std::unique_ptr<Poly> p(new Poly(geom, thread, r, gf));
 							polys[id0] = std::move(p);
 						} else {
 							polys[id0]->update(geom, r, r);
@@ -1557,7 +1568,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 						// Add to the removal list
 						remove.insert(it.first);
 						// Retrieve the unioned geometry.
-						OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx, (GEOSGeom) it.second->poly);
+						OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx, (GEOSGeom) it.second->polyAsMulti());
 						// Create and append the feature.
 						OGRFeature feat(layer->GetLayerDefn());
 						feat.SetGeometry(geom);
@@ -1608,7 +1619,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 		if(*cancel)
 			break;
 		// Retrieve the unioned geometry.
-		OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx, (GEOSGeom) it.second->poly);
+		OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx, (GEOSGeom) it.second->polyAsMulti());
 		// Create and append the feature.
 		OGRFeature feat(layer->GetLayerDefn());
 		feat.SetGeometry(geom);
