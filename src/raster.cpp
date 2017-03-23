@@ -247,6 +247,15 @@ GridProps::GridProps() :
 		m_type(DataType::None) {	// The data type.
 }
 
+
+void GridProps::setMappedPath(const std::string& path) {
+	m_mappedPath = path;
+}
+
+std::string GridProps::mappedPath() const {
+	return m_mappedPath;
+}
+
 std::string GridProps::driver() const {
 	return m_driver;
 }
@@ -740,7 +749,7 @@ void MemRaster::init(const GridProps &pr, bool mapped) {
 		size_t size = typeSize * pr.cols() * pr.rows();
 		m_mappedFile.release();
 		if (mapped) {
-			const std::string filename = Util::tmpFile();
+			const std::string filename = Util::tmpFile(pr.mappedPath());
 			m_mappedFile = Util::mapFile(filename, size);
 			m_grid = m_mappedFile->data();
 		} else {
@@ -756,8 +765,14 @@ void MemRaster::fillFloat(double value, int band) {
 	if(m_props.isInt()) {
 		fillInt((int) value, band);
 	} else {
-		for(uint64_t i = 0; i < m_props.size(); ++i)
-			*(((double *) m_grid) + i) = value;
+		size_t chunk = m_mmapped ? m_mappedFile->pageSize() * 1024 : 2048 * 1024;
+		size_t size = m_props.size() * sizeof(double);
+		size_t last = size % chunk;
+		Buffer buf(chunk);
+		for(size_t i = 0; i < chunk / sizeof(double); ++i)
+			*((double *) buf.buf + i) = value;
+		for(uint64_t i = 0; i < size; i += chunk)
+			std::memcpy((char *) m_grid + i, buf.buf, g_min(chunk, last));
 	}
 }
 
@@ -766,9 +781,14 @@ void MemRaster::fillInt(int value, int band) {
 	if(m_props.isFloat()) {
 		fillFloat((double) value, band);
 	} else {
-		uint64_t s = m_props.size();
-		for(uint64_t i = 0; i < s; ++i)
-			*(((int *) m_grid) + i) = value;
+		size_t chunk = m_mmapped ? m_mappedFile->pageSize() * 1024 : 2048 * 1024;
+		size_t size = m_props.size() * sizeof(int);
+		size_t last = size % chunk;
+		Buffer buf(chunk);
+		for(size_t i = 0; i < chunk / sizeof(int); ++i)
+			*((int *) buf.buf + i) = value;
+		for(uint64_t i = 0; i < size; i += chunk)
+			std::memcpy((char *) m_grid + i, buf.buf, g_min(chunk, last));
 	}
 }
 

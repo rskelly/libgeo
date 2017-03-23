@@ -48,6 +48,7 @@ namespace geo {
     		DataType m_type;
     		std::string m_projection;	// The WKT representation of the projection
     		std::string m_driver;
+    		std::string m_mappedPath;   // A directory within the temp directory used for storing mapped files.
 
     	public:
 
@@ -64,6 +65,10 @@ namespace geo {
     		double nodata() const;
 
     		void setNoData(double nodata);
+
+    		void setMappedPath(const std::string& path);
+
+    		std::string mappedPath() const;
 
     		// Return the number of columns.
             int cols() const;
