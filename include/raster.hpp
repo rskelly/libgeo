@@ -94,7 +94,7 @@ namespace geo {
             double toCentroidY(int row) const;
 
             // Returns the number of pixels.
-            long size() const;
+            uint64_t size() const;
 
             // Set the data type of the raster.
     		void setDataType(DataType type);
@@ -160,7 +160,7 @@ namespace geo {
             double stdDev;
             double variance;
             double sum;
-            long count;
+            uint64_t count;
     	};
 
         // Simple class to represent a single grid cell.
@@ -204,15 +204,15 @@ namespace geo {
             virtual void fillInt(int value, int band = 1) = 0;
 
             // Return a the value held at the given index in the grid.
-            virtual int getInt(long idx, int band = 1) = 0;
+            virtual int getInt(uint64_t idx, int band = 1) = 0;
             virtual int getInt(int col, int row, int band = 1) = 0;
-            virtual double getFloat(long idx, int band = 1) = 0;
+            virtual double getFloat(uint64_t idx, int band = 1) = 0;
             virtual double getFloat(int col, int row, int band = 1) = 0;
 
             // Set the value held at  the given index in the grid.
-            virtual void setInt(long idx, int value, int band = 1) = 0;
+            virtual void setInt(uint64_t idx, int value, int band = 1) = 0;
             virtual void setInt(int col, int row, int value, int band = 1) = 0;
-            virtual void setFloat(long idx, double value, int band = 1) = 0;
+            virtual void setFloat(uint64_t idx, double value, int band = 1) = 0;
             virtual void setFloat(int col, int row, double value, int band = 1) = 0;
 
             // Write data from the current Grid instance to the given grid.
@@ -446,15 +446,15 @@ namespace geo {
             void fillInt(int value, int band = 1);
 
             // Return a the value held at the given index in the grid.
-            int getInt(long idx, int band = 1);
+            int getInt(uint64_t idx, int band = 1);
             int getInt(int col, int row, int band = 1);
-            double getFloat(long idx, int band = 1);
+            double getFloat(uint64_t idx, int band = 1);
             double getFloat(int col, int row, int band = 1);
 
             // Set the value held at  the given index in the grid.
-            void setInt(long idx, int value, int band = 1);
+            void setInt(uint64_t idx, int value, int band = 1);
             void setInt(int col, int row, int value, int band = 1);
-            void setFloat(long idx, double value, int band = 1);
+            void setFloat(uint64_t idx, double value, int band = 1);
             void setFloat(int col, int row, double value, int band = 1);
 
 			void writeTo(Grid &grd,
@@ -550,20 +550,20 @@ namespace geo {
             // Returns a pixel value.
             int getInt(double x, double y, int band = 1);
             int getInt(int col, int row, int band = 1);
-            int getInt(long idx, int band = 1);
+            int getInt(uint64_t idx, int band = 1);
 
             double getFloat(double x, double y, int band = 1);
             double getFloat(int col, int row, int band = 1);
-            double getFloat(long idx, int band = 1);
+            double getFloat(uint64_t idx, int band = 1);
 
             // Set an pixel value.
             void setInt(double x, double y, int v, int band = 1);
             void setInt(int col, int row, int v, int band = 1);
-            void setInt(long idx, int v, int band = 1);
+            void setInt(uint64_t idx, int v, int band = 1);
 
             void setFloat(double x, double y, double v, int band = 1);
             void setFloat(int col, int row, double v, int band = 1);
-            void setFloat(long idx, double v, int band = 1);
+            void setFloat(uint64_t idx, double v, int band = 1);
 
             // Returns true if the raster is square.
             bool isSquare() const;

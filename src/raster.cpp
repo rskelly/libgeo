@@ -275,8 +275,8 @@ bool GridProps::isFloat() const {
 	return !isInt();
 }
 
-long GridProps::size() const {
-	return (long) cols() * rows();
+uint64_t GridProps::size() const {
+	return (uint64_t) cols() * rows();
 }
 
 double GridProps::nodata() const {
@@ -460,7 +460,7 @@ void Grid::gaussianWeights(double *weights, int size, double sigma) {
 
 GridStats Grid::stats() {
 	GridStats st;
-	long i;
+	uint64_t i;
 	const GridProps& gp = props();
 	double nodata = gp.nodata();
 	double v, m = 0, s = 0;
@@ -495,7 +495,7 @@ void Grid::normalize(int band) {
 	double v, nodata = gp.nodata();
 	double mean = st.mean;
 	double stdDev = st.stdDev;
-	for (long i = 0; i < gp.size(); ++i) {
+	for (uint64_t i = 0; i < gp.size(); ++i) {
 		if ((v = getFloat(i, band)) != nodata && !std::isnan(v) && v < G_DBL_MAX_POS) {
 			setFloat(i, ((v - mean) / stdDev), band);
 		} else {
@@ -510,17 +510,17 @@ void Grid::logNormalize(int band) {
 	double n = st.min;
 	double x = st.max;
 	double e = std::exp(1.0) - 1.0;
-	for(long i = 0; i < gp.size(); ++i)
+	for(uint64_t i = 0; i < gp.size(); ++i)
 		setFloat(i, std::log(1.0 + e * (getFloat(i) - n) / (x - n)));
 }
 
 void Grid::convert(Grid &g, int srcBand, int dstBand) {
 	const GridProps& gp = props();
 	if(g.props().isInt()) {
-		for (long i = 0; i < gp.size(); ++i)
+		for (uint64_t i = 0; i < gp.size(); ++i)
 			g.setInt(i, getInt(i, srcBand), dstBand);
 	} else {
-		for (long i = 0; i < gp.size(); ++i)
+		for (uint64_t i = 0; i < gp.size(); ++i)
 			g.setFloat(i, getFloat(i, srcBand), dstBand);
 	}
 }
@@ -588,15 +588,10 @@ using namespace geo::raster::util;
 void Grid::smooth(Grid &smoothed, double sigma, int size, int band,
 		Callbacks *status, bool *cancel) {
 	const GridProps& gp = props();
-	if(!gp.isFloat())
-		g_runerr("Smoothing only implemented for float rasters.");
 	if (!cancel)
 		cancel = &_cancel;
-	if (status) {
+	if (status)
 		status->stepCallback(0.01f);
-		status->statusCallback("Preparing...");
-	}
-
 	if (sigma <= 0)
 		g_argerr("Sigma must be > 0.");
 	if (size < 3)
@@ -635,9 +630,6 @@ void Grid::smooth(Grid &smoothed, double sigma, int size, int band,
 		for (int i = 0; i < (rows - size) / bufSize + 1; ++i) {
 			if (*cancel) continue;
 
-			if(status)
-				status->statusCallback("Reading...");
-
 			buf.fillFloat(nd);
 			smooth.fillFloat(nd);
 
@@ -646,9 +638,6 @@ void Grid::smooth(Grid &smoothed, double sigma, int size, int band,
 			int writeOffset = b > 0 ? 0 : size / 2;     // If this is the first row, write to (size / 2), otherwise 0.
 			#pragma omp critical(__smooth_read)
 			writeTo(buf, pr.cols(), pr.rows(), 0, readOffset, 0, writeOffset, band);
-
-			if(status)
-				status->statusCallback("Processing...");
 
 			// Process the entire block, even the buffer parts.
 			for (int r = 0; r < pr.rows() - size; ++r) {
@@ -675,7 +664,6 @@ void Grid::smooth(Grid &smoothed, double sigma, int size, int band,
 			if (status) {
 				curRow += bufSize;
 				status->stepCallback(0.2f + (float) curRow / rows * 0.97f);
-				status->statusCallback("Writing...");
 			}
 
 			#pragma omp critical(__smooth_write)
@@ -686,10 +674,8 @@ void Grid::smooth(Grid &smoothed, double sigma, int size, int band,
 	if (*cancel)
 		return;
 
-	if (status) {
+	if (status)
 		status->stepCallback(1.0);
-		status->statusCallback("Closing...");
-	}
 }
 
 Grid::~Grid() {
@@ -770,7 +756,7 @@ void MemRaster::fillFloat(double value, int band) {
 	if(m_props.isInt()) {
 		fillInt((int) value, band);
 	} else {
-		for(long i = 0; i < m_props.size(); ++i)
+		for(uint64_t i = 0; i < m_props.size(); ++i)
 			*(((double *) m_grid) + i) = value;
 	}
 }
@@ -780,12 +766,13 @@ void MemRaster::fillInt(int value, int band) {
 	if(m_props.isFloat()) {
 		fillFloat((double) value, band);
 	} else {
-		for(long i = 0; i < m_props.size(); ++i)
+		uint64_t s = m_props.size();
+		for(uint64_t i = 0; i < s; ++i)
 			*(((int *) m_grid) + i) = value;
 	}
 }
 
-double MemRaster::getFloat(long idx, int band) {
+double MemRaster::getFloat(uint64_t idx, int band) {
 	checkInit();
 	if (idx < 0 || idx >= m_props.size())
 		g_argerr("Index out of bounds: " << idx << "; size: " << m_props.size());
@@ -797,11 +784,11 @@ double MemRaster::getFloat(long idx, int band) {
 }
 
 double MemRaster::getFloat(int col, int row, int band) {
-	long idx = (long) row * m_props.cols() + col;
+	uint64_t idx = (uint64_t) row * m_props.cols() + col;
 	return getFloat(idx, band);
 }
 
-int MemRaster::getInt(long idx, int band) {
+int MemRaster::getInt(uint64_t idx, int band) {
 	checkInit();
 	if (idx < 0 || idx >= m_props.size())
 		g_argerr("Index out of bounds: " << idx << "; size: " << m_props.size());
@@ -813,18 +800,19 @@ int MemRaster::getInt(long idx, int band) {
 }
 
 int MemRaster::getInt(int col, int row, int band) {
-	long idx = (long) row * m_props.cols() + col;
+	uint64_t idx = (uint64_t) row * m_props.cols() + col;
 	return getInt(idx, band);
 }
 
 void MemRaster::setFloat(int col, int row, double value, int band) {
-	long idx = (long) row * m_props.cols() + col;
+	uint64_t idx = (uint64_t) row * m_props.cols() + col;
 	setFloat(idx, value, band);
 }
 
-void MemRaster::setFloat(long idx, double value, int band) {
+void MemRaster::setFloat(uint64_t idx, double value, int band) {
 	checkInit();
-	if (idx >= m_props.size())
+	uint64_t ps = m_props.size();
+	if (idx >= ps)
 		g_argerr("Index out of bounds: " << idx << "; size: " << m_props.size()
 						<< "; value: " << value << "; col: " << (idx % m_props.cols())
 						<< "; row: " << (idx / m_props.cols()));
@@ -836,13 +824,14 @@ void MemRaster::setFloat(long idx, double value, int band) {
 }
 
 void MemRaster::setInt(int col, int row, int value, int band) {
-	long idx = (long) row * m_props.cols() + col;
+	uint64_t idx = (uint64_t) row * m_props.cols() + col;
 	setInt(idx, value, band);
 }
 
-void MemRaster::setInt(long idx, int value, int band) {
+void MemRaster::setInt(uint64_t idx, int value, int band) {
 	checkInit();
-	if (idx >= m_props.size())
+	uint64_t ps = m_props.size();
+	if (idx >= ps)
 		g_argerr("Index out of bounds: " << idx << "; size: " << m_props.size()
 						<< "; value: " << value << "; col: " << (idx % m_props.cols())
 						<< "; row: " << (idx / m_props.cols()));
@@ -1312,7 +1301,7 @@ double Raster::getFloat(int col, int row, int band) {
 	return v;
 }
 
-double Raster::getFloat(long idx, int band) {
+double Raster::getFloat(uint64_t idx, int band) {
 	return getFloat((int) (idx % m_props.cols()), (int) (idx / m_props.cols()), band);
 }
 
@@ -1345,7 +1334,7 @@ int Raster::getInt(int col, int row, int band) {
 	return v;
 }
 
-int Raster::getInt(long idx, int band) {
+int Raster::getInt(uint64_t idx, int band) {
 	return getInt((int) (idx % m_props.cols()), (int) (idx / m_props.cols()), band);
 }
 
@@ -1353,7 +1342,7 @@ int Raster::getInt(double x, double y, int band) {
 	return getInt(m_props.toCol(x), m_props.toRow(y), band);
 }
 
-void Raster::setInt(long idx, int v, int band) {
+void Raster::setInt(uint64_t idx, int v, int band) {
 	setInt((int) (idx % m_props.cols()), (int) (idx / m_props.cols()), v, band);
 }
 
@@ -1411,7 +1400,7 @@ void Raster::setInt(int col, int row, int v, int band) {
 	m_dirty = true;
 }
 
-void Raster::setFloat(long idx, double v, int band) {
+void Raster::setFloat(uint64_t idx, double v, int band) {
 	setFloat((int) (idx % m_props.cols()), (int) (idx / m_props.cols()), v, band);
 }
 
