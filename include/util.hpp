@@ -62,7 +62,7 @@ namespace geo {
             virtual ~Callbacks() = 0;
             virtual void stepCallback(float status) const = 0;
             virtual void overallCallback(float status) const = 0;
-            virtual void statusCallback(const std::string &msg) const = 0;
+            virtual void statusCallback(const std::string& msg) const = 0;
         };
 
 		// Simple class for capturing status from utility functions.
@@ -206,8 +206,9 @@ namespace geo {
             boost::interprocess::file_mapping *m_mapping;
             boost::interprocess::mapped_region *m_region;
         protected:
-            MappedFile(const std::string &filename, uint64_t size, bool remove);
+            MappedFile(const std::string& filename, uint64_t size, bool remove);
         public:
+            size_t pageSize();
             void* data();
             uint64_t size();
             ~MappedFile();
@@ -227,7 +228,7 @@ namespace geo {
             // the creation of ranges with fractional intermediate values.
             // e.g., 1-4,7,9-11 gives {1, 2, 3, 4, 7, 9, 10, 11}
             template <class T>
-            static void parseFloatRanges(T iter, const std::string &str, double step = 1.0) {
+            static void parseFloatRanges(T iter, const std::string& str, double step = 1.0) {
                 std::stringstream ss;
                 double first = 0, second = 0;
                 bool range = false;
@@ -268,7 +269,7 @@ namespace geo {
             }
 
             template <class T>
-            static void parseIntRanges(T iter, const std::string &str) {
+            static void parseIntRanges(T iter, const std::string& str) {
                 std::stringstream ss;
                 int first = 0, second = 0;
                 bool range = false;
@@ -309,7 +310,7 @@ namespace geo {
 
             // Split a comma-delimited string into a list of unique integers.
             template <class T>
-            static void intSplit(T iter, const std::string &str, const std::string &delim = ",") {
+            static void intSplit(T iter, const std::string& str, const std::string& delim = ",") {
                 std::stringstream ss(str);
                 std::string item;
                 while (std::getline(ss, item, *(delim.c_str()))) {
@@ -331,7 +332,7 @@ namespace geo {
 
             // Split a string with the given delimiter
             template <class T>
-            static void splitString(T iter, const std::string &str, const std::string &delim = ",") {
+            static void splitString(T iter, const std::string& str, const std::string& delim = ",") {
                 std::stringstream ss(str);
                 std::string item;
                 while (std::getline(ss, item, *(delim.c_str()))) {
@@ -342,7 +343,7 @@ namespace geo {
 
             // Join the string with the given delimiter
             template <class T>
-            static std::string join(T begin, T end, const std::string &delim = ",") {
+            static std::string join(T begin, T end, const std::string& delim = ",") {
                 std::vector<std::string> lst;
                 while(begin != end) {
                     lst.push_back(*begin);
@@ -355,50 +356,52 @@ namespace geo {
             static std::string tmpDir();
 
             // Join the path in a system-appropriate way.
-            static std::string pathJoin(std::string& a, std::string& b);
+            static std::string pathJoin(const std::string& a, const std::string& b);
 
             // Lowercase the string.
-            static std::string& lower(std::string &str);
+            static std::string& lower(std::string& str);
 
             // Uppercase the string.
-            static std::string& upper(std::string &str);
+            static std::string& upper(std::string& str);
 
             // Lowercase and return a copy of the string.
-            static std::string lower(const std::string &str);
+            static std::string lower(const std::string& str);
 
             // Uppercase and return a copy of the string.
-            static std::string upper(const std::string &str);
+            static std::string upper(const std::string& str);
 
             // Move the file.
-            static void copyfile(std::string &srcfile, std::string &dstfile);
+            static void copyfile(std::string& srcfile, std::string& dstfile);
 
             // Create a temporary file at the given root folder. If no root is given,
             // a relative path is created.
-            static const std::string tmpFile(const std::string &root = "");
+            static std::string tmpFile(const std::string& root = "");
 
             // Returns true if the file exists.
-            static bool exists(const std::string &name);
+            static bool exists(const std::string& name);
 
             // Returns true if the parent folder exists.
-            static bool pathExists(const std::string &name);
+            static bool pathExists(const std::string& name);
+
+            static uint64_t diskSpace(const std::string& path);
             
             // Remove a file.
-            static bool rm(const std::string &name);
+            static bool rm(const std::string& name);
 
             // Make a directory.
-            static bool mkdir(const std::string &dir);
+            static bool mkdir(const std::string& dir);
 
             // Get the parent directory
             static std::string parent(const std::string& filename);
 
             // Get the file extension.
-            static std::string extension(const std::string &filename);
+            static std::string extension(const std::string& filename);
 
             // Populates the list with the files contained in dir. If ext is specified, filters
             // the files by that extension (case-insensitive). If dir is a file, it is added to the list.
             // Returns the number of files found.
             template <class T>
-            static size_t dirlist(T iter, const std::string &dir, const std::string &ext = std::string()) {
+            static size_t dirlist(T iter, const std::string& dir, const std::string& ext = std::string()) {
                 using namespace boost::filesystem;
                 using namespace boost::algorithm;
                 int i = 0;
@@ -430,7 +433,7 @@ namespace geo {
             }
 
             // Returns a memory-mapped file.
-            static std::unique_ptr<MappedFile> mapFile(const std::string &filename, 
+            static std::unique_ptr<MappedFile> mapFile(const std::string& filename,
                 uint64_t size, bool remove = true);
 
         };

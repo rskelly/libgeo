@@ -396,7 +396,7 @@ bool Util::exists(const std::string &name) {
 	return boost::filesystem::exists(p);
 }
 
-std::string Util::pathJoin(std::string& a, std::string& b) {
+std::string Util::pathJoin(const std::string& a, const std::string& b) {
 	boost::filesystem::path pa(a);
 	boost::filesystem::path pb(b);
 	return (pa / pb).string();
@@ -463,7 +463,13 @@ std::string Util::tmpDir() {
 	return boost::filesystem::temp_directory_path().string();
 }
 
-const std::string Util::tmpFile(const std::string &root) {
+uint64_t Util::diskSpace(const std::string& path) {
+	using namespace boost::filesystem;
+	space_info si = space(path);
+	return si.available;
+}
+
+std::string Util::tmpFile(const std::string &root) {
 	using namespace boost::filesystem;
 	path p = unique_path();
 	if (!root.empty()) {
@@ -483,18 +489,25 @@ MappedFile::MappedFile(const std::string &filename, uint64_t size, bool remove) 
 		m_mapping(nullptr),
 		m_region(nullptr) {
 
-	//g_debug("MappedFile: " << filename << ", " << size << ", " << remove);
 	using namespace boost::interprocess;
 	using namespace boost::filesystem;
 
 	{
 		std::filebuf fbuf;
 		if (size > 0) {
-			fbuf.open(filename,
+			std::string dirname = Util::parent(filename);
+			Util::mkdir(dirname);
+			if(Util::diskSpace(dirname) < size)
+				g_runerr("There is not enough free space for the requested memory-mapped file.");
+			if(!fbuf.open(filename,
 					std::ios_base::in | std::ios_base::out
-							| std::ios_base::trunc | std::ios_base::binary);
-			fbuf.pubseekoff(size - 1, std::ios_base::beg);
-			fbuf.sputc(0);
+							| std::ios_base::trunc | std::ios_base::binary))
+				g_runerr("Failed to open file for memory-mapping.");
+			long res = fbuf.pubseekoff(size - 1, std::ios_base::beg);
+			if(res < 0 || (uint64_t) res < size - 1)
+				g_runerr("Failed to reserve space for memory-mapped file.");
+			if(EOF == fbuf.sputc(0))
+				g_runerr("Failed to reserve space for memory-mapped file.");
 		}
 	}
 
@@ -508,6 +521,10 @@ void* MappedFile::data() {
 
 uint64_t MappedFile::size() {
 	return m_size;
+}
+
+size_t MappedFile::pageSize() {
+	return m_region->get_page_size();
 }
 
 MappedFile::~MappedFile() {
