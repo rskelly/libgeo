@@ -467,7 +467,7 @@ void Grid::gaussianWeights(double *weights, int size, double sigma) {
 	}
 }
 
-GridStats Grid::stats() {
+GridStats Grid::stats(int band) {
 	GridStats st;
 	uint64_t i;
 	const GridProps& gp = props();
@@ -481,7 +481,7 @@ GridStats Grid::stats() {
 	// Welford's method for variance.
 	// i has the index of the first dpata element.
 	for (i = 0; i < gp.size(); ++i) {
-		if ((v = getFloat(i)) != nodata) {
+		if ((v = getFloat(i, band)) != nodata) {
 			double oldm = m;
 			m = m + (v - m) / k;
 			s = s + (v - m) * (v - oldm);
