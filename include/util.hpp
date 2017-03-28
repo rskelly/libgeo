@@ -176,7 +176,7 @@ namespace geo {
 
             void extend(double x, double y, double z);
 
-            void collapse(int dims = 2);
+            void collapse(int dims = 3);
 
             double operator[](size_t pos) const;
 
@@ -351,6 +351,10 @@ namespace geo {
                 }
                 return boost::algorithm::join(lst, delim);
             }
+
+            // The radius is the number of pixels to search *not including* the center.
+            // Therefore even and odd inputs are allowed.
+            static std::vector<std::pair<int, int> > circularKernel(int outerRadius, int innerRadius = 0);
 
             // Return the system tempp directory.
             static std::string tmpDir();
