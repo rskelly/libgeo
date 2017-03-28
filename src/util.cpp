@@ -385,24 +385,31 @@ double Util::computeArea(double x1, double y1, double z1, double x2, double y2,
 	return std::sqrt(s * (s - side0) * (s - side1) * (s - side2));
 }
 
-std::vector<std::pair<int, int> > Util::circularKernel(int outerRadius, int innerRadius) {
+std::vector<std::pair<int, int> > Util::circularKernel(int outerRadius, int innerRadius, bool includeCenter) {
 	int outr = g_sq(outerRadius);
 	int inr = g_sq(innerRadius);
 	std::vector<std::pair<int, int> > offsets;
 	for(int r = -outerRadius; r < outerRadius + 1; ++r) {
 		for(int c = -outerRadius; c < outerRadius + 1; ++c) {
 			int d0 = g_sq(c) + g_sq(r);
-			if(d0 <= outr && d0 >= inr) {
-				std::cerr << "1 ";
+			if(d0 <= outr && d0 >= inr && (includeCenter || (r != 0 && c != 0)))
 				offsets.push_back(std::make_pair(c, r));
-			} else {
-				std::cerr << "  ";
-			}
 		}
-		std::cerr << "\n";
 	}
 	return offsets;
 }
+
+std::vector<std::pair<int, int> > Util::squareKernel(int size, bool includeCenter) {
+	std::vector<std::pair<int, int> > offsets;
+	for(int r = -size / 2; r < size / 2 + 1; ++r) {
+		for(int c = -size / 2; c < size / 2 + 1; ++c) {
+			if(includeCenter || (r != 0 && c != 0))
+				offsets.push_back(std::make_pair(c, r));
+		}
+	}
+	return offsets;
+}
+
 void Util::copyfile(std::string &srcfile, std::string &dstfile) {
 	std::ifstream src(srcfile.c_str(), std::ios::binary);
 	std::ofstream dst(dstfile.c_str(), std::ios::binary);

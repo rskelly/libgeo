@@ -365,6 +365,47 @@ namespace geo {
             // falls in the radius will be included.
             void voidFillIDW(double radius, int count = 4, double exp = 2.0, int band = 1);
 
+        	typedef std::pair<int, int> element;
+
+        	template <class V>
+        	void writeAStarPath(element& start, std::unordered_map<element, element>& parents, V inserter) {
+        		*inserter = start;
+        		++inserter;
+        		while(parents.find(start) != parents.end()) {
+        			start = parents[start];
+        			*inserter = start;
+        			++inserter;
+        		}
+            }
+
+            // Finds the least-cost path from the start cell to the goal cell,
+            // using the given heuristic. Returns the optimal path between the
+            // start cell and the goal.
+            template <class U, class V>
+            void searchAStar(int startCol, int startRow, int goalCol, int goalRow, U heuristic, V inserter) {
+
+            	std::priority_queue<element, std::vector<element>, heuristic> q;
+            	std::unordered_map<element, element> parents;
+            	std::vector<std::pair<int, int> > offsets = Util::squareKernel(3, false);
+
+            	q.push(std::make_pair(startCol, startRow));
+
+            	while(!q.empty()) {
+
+            		const element& top = q.top();
+            		int qcol = top.first;
+            		int qrow = top.second;
+
+            		if(qcol == goalCol && qrow == goalRow) {
+            			writeAStarPath(parents, inserter);
+            			break;
+            		}
+
+
+            		q.pop();
+            	}
+            }
+
         };
 
        
