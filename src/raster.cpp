@@ -499,7 +499,7 @@ GridStats Grid::stats(int band) {
 }
 
 void Grid::normalize(int band) {
-	GridStats st = stats();
+	GridStats st = stats(1);
 	const GridProps& gp = props();
 	double v, nodata = gp.nodata();
 	double mean = st.mean;
@@ -514,7 +514,7 @@ void Grid::normalize(int band) {
 }
 
 void Grid::logNormalize(int band) {
-	GridStats st = stats();
+	GridStats st = stats(1);
 	const GridProps& gp = props();
 	double n = st.min;
 	double x = st.max;
