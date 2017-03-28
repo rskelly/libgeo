@@ -354,6 +354,7 @@ namespace geo {
 
             // The radius is the number of pixels to search *not including* the center.
             // Therefore even and odd inputs are allowed.
+            // Returns a vector of offsets from a centre position at 0, 0.
             static std::vector<std::pair<int, int> > circularKernel(int outerRadius, int innerRadius = 0);
 
             // Return the system tempp directory.

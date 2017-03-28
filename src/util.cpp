@@ -386,13 +386,12 @@ double Util::computeArea(double x1, double y1, double z1, double x2, double y2,
 }
 
 std::vector<std::pair<int, int> > Util::circularKernel(int outerRadius, int innerRadius) {
-	int size = outerRadius * 2 + 1;
 	int outr = g_sq(outerRadius);
 	int inr = g_sq(innerRadius);
 	std::vector<std::pair<int, int> > offsets;
-	for(int r = 0; r < size; ++r) {
-		for(int c = 0; c < size; ++c) {
-			int d0 = g_sq(outerRadius - c) + g_sq(outerRadius - r);
+	for(int r = -outerRadius; r < outerRadius + 1; ++r) {
+		for(int c = -outerRadius; c < outerRadius + 1; ++c) {
+			int d0 = g_sq(c) + g_sq(r);
 			if(d0 <= outr && d0 >= inr) {
 				std::cerr << "1 ";
 				offsets.push_back(std::make_pair(c, r));
