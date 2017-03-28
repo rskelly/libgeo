@@ -199,7 +199,7 @@ namespace geo {
             // and the std. deviation.
             static void gaussianWeights(double *weights, int size, double sigma);
 
-            GridStats stats();
+            GridStats stats(int band);
 
             // Returns the grid properties
             virtual const GridProps &props() const = 0;
