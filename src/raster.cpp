@@ -467,7 +467,7 @@ void Grid::gaussianWeights(double *weights, int size, double sigma) {
 	}
 }
 
-GridStats Grid::stats() {
+GridStats Grid::stats(int band) {
 	GridStats st;
 	uint64_t i;
 	const GridProps& gp = props();
@@ -481,7 +481,7 @@ GridStats Grid::stats() {
 	// Welford's method for variance.
 	// i has the index of the first dpata element.
 	for (i = 0; i < gp.size(); ++i) {
-		if ((v = getFloat(i)) != nodata) {
+		if ((v = getFloat(i, band)) != nodata) {
 			double oldm = m;
 			m = m + (v - m) / k;
 			s = s + (v - m) * (v - oldm);
@@ -499,7 +499,7 @@ GridStats Grid::stats() {
 }
 
 void Grid::normalize(int band) {
-	GridStats st = stats();
+	GridStats st = stats(1);
 	const GridProps& gp = props();
 	double v, nodata = gp.nodata();
 	double mean = st.mean;
@@ -514,7 +514,7 @@ void Grid::normalize(int band) {
 }
 
 void Grid::logNormalize(int band) {
-	GridStats st = stats();
+	GridStats st = stats(1);
 	const GridProps& gp = props();
 	double n = st.min;
 	double x = st.max;
@@ -771,7 +771,7 @@ void MemRaster::fillFloat(double value, int band) {
 		Buffer buf(chunk);
 		for(size_t i = 0; i < chunk / sizeof(double); ++i)
 			*((double *) buf.buf + i) = value;
-		for(uint64_t i = 0; i < size; i += chunk)
+		for(uint64_t i = 0; i < size; i += chunk / sizeof(double))
 			std::memcpy((char *) m_grid + i, buf.buf, g_min(chunk, last));
 	}
 }
@@ -787,7 +787,7 @@ void MemRaster::fillInt(int value, int band) {
 		Buffer buf(chunk);
 		for(size_t i = 0; i < chunk / sizeof(int); ++i)
 			*((int *) buf.buf + i) = value;
-		for(uint64_t i = 0; i < size; i += chunk)
+		for(uint64_t i = 0; i < size; i += chunk / sizeof(int))
 			std::memcpy((char *) m_grid + i, buf.buf, g_min(chunk, last));
 	}
 }
