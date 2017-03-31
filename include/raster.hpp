@@ -367,7 +367,6 @@ namespace geo {
             // falls in the radius will be included.
             void voidFillIDW(double radius, int count = 4, double exp = 2.0, int band = 1);
 
-            /*
         	template <class V>
         	void writeAStarPath(uint64_t start, std::unordered_map<uint64_t, uint64_t>& parents, V inserter) {
         		*inserter = start;
@@ -395,7 +394,7 @@ namespace geo {
             // using the given heuristic. Returns the optimal path between the
             // start cell and the goal.
             template <class U, class V>
-            void searchAStar(int startCol, int startRow, int goalCol, int goalRow, U heuristic, V inserter) {
+            void searchAStar(int startCol, int startRow, int goalCol, int goalRow, U heuristic, V inserter, std::unordered_set<uint64_t>* blocks = nullptr) {
 
             	uint64_t goal = ((uint64_t) goalCol << 32) | goalRow;
 
@@ -439,6 +438,9 @@ namespace geo {
 
             			uint64_t n = ((uint64_t) (qcol + it.first) << 32) | (qrow + it.second);
 
+            			if(blocks && blocks->find(n) != blocks->end()) // This pixel not allowed.
+            				continue;
+
             			if(closedSet.find(n) != closedSet.end())
             				continue;
 
@@ -453,10 +455,11 @@ namespace geo {
             			parents[n] = top;
             			gscore[n] = tgscore;
             			fscore[n] = tgscore + heuristic(n, goal);
+                		fscore.erase(top);
+                		gscore.erase(top);
             		}
             	}
             }
-            */
 
         };
 
