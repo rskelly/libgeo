@@ -12,6 +12,8 @@
 #include <stdexcept>
 #include <map>
 #include <unordered_map>
+#include <unordered_set>
+#include <queue>
 #include <vector>
 #include <cstring>
 #include <string>
@@ -365,10 +367,9 @@ namespace geo {
             // falls in the radius will be included.
             void voidFillIDW(double radius, int count = 4, double exp = 2.0, int band = 1);
 
-        	typedef std::pair<int, int> element;
-
+            /*
         	template <class V>
-        	void writeAStarPath(element& start, std::unordered_map<element, element>& parents, V inserter) {
+        	void writeAStarPath(uint64_t start, std::unordered_map<uint64_t, uint64_t>& parents, V inserter) {
         		*inserter = start;
         		++inserter;
         		while(parents.find(start) != parents.end()) {
@@ -378,33 +379,84 @@ namespace geo {
         		}
             }
 
+        	uint64_t minValue(std::unordered_map<uint64_t, double>& m) {
+        		double min = G_DBL_MAX_POS;
+        		uint64_t key = 0;
+        		for(const auto& it : m) {
+        			if(it.second < min) {
+        				min = it.second;
+        				key = it.first;
+        			}
+        		}
+        		return key;
+        	}
+
             // Finds the least-cost path from the start cell to the goal cell,
             // using the given heuristic. Returns the optimal path between the
             // start cell and the goal.
             template <class U, class V>
             void searchAStar(int startCol, int startRow, int goalCol, int goalRow, U heuristic, V inserter) {
 
-            	std::priority_queue<element, std::vector<element>, heuristic> q;
-            	std::unordered_map<element, element> parents;
+            	uint64_t goal = ((uint64_t) goalCol << 32) | goalRow;
+
             	std::vector<std::pair<int, int> > offsets = Util::squareKernel(3, false);
 
-            	q.push(std::make_pair(startCol, startRow));
+            	std::unordered_map<uint64_t, uint64_t> parents;
+            	std::unordered_map<uint64_t, double> gscore;
+            	std::unordered_map<uint64_t, double> fscore;
 
-            	while(!q.empty()) {
+            	std::unordered_set<uint64_t> openSet;
+            	std::unordered_set<uint64_t> closedSet;
 
-            		const element& top = q.top();
-            		int qcol = top.first;
-            		int qrow = top.second;
+            	uint64_t start = ((uint64_t) startCol << 32) | startRow;
 
-            		if(qcol == goalCol && qrow == goalRow) {
-            			writeAStarPath(parents, inserter);
+            	openSet.insert(start);
+            	gscore[start] = 0; 						// Distance from start to neighbour
+            	fscore[start] = heuristic(start, goal); // Distance from neighbour to goal.
+
+        		int cols = props().cols();
+        		int rows = props().rows();
+
+            	while(!openSet.empty()) {
+
+            		uint64_t top = minValue(fscore);
+
+            		if(top == goal) {
+            			writeAStarPath(top, parents, inserter);
             			break;
             		}
 
+            		openSet.erase(top);
+            		closedSet.insert(top);
 
-            		q.pop();
+            		int qcol = (top >> 32) & 0xffffffff;
+            		int qrow = top & 0xffffffff;
+
+            		for(const auto& it : offsets) {
+
+            			if(qcol + it.first < 0 || qrow + it.second < 0 || qcol + it.first >= cols || qrow + it.second >= rows)
+            				continue;
+
+            			uint64_t n = ((uint64_t) (qcol + it.first) << 32) | (qrow + it.second);
+
+            			if(closedSet.find(n) != closedSet.end())
+            				continue;
+
+            			double tgscore = gscore[top] + heuristic(top, n);
+
+            			if(openSet.find(n) == openSet.end()) {
+            				openSet.insert(n);
+            			} else if(tgscore >= gscore[n]) {
+            				continue;
+            			}
+
+            			parents[n] = top;
+            			gscore[n] = tgscore;
+            			fscore[n] = tgscore + heuristic(n, goal);
+            		}
             	}
             }
+            */
 
         };
 

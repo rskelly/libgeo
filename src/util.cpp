@@ -403,7 +403,7 @@ std::vector<std::pair<int, int> > Util::squareKernel(int size, bool includeCente
 	std::vector<std::pair<int, int> > offsets;
 	for(int r = -size / 2; r < size / 2 + 1; ++r) {
 		for(int c = -size / 2; c < size / 2 + 1; ++c) {
-			if(includeCenter || (r != 0 && c != 0))
+			if(includeCenter || !(r == 0 && c == 0))
 				offsets.push_back(std::make_pair(c, r));
 		}
 	}
