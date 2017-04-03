@@ -12,6 +12,9 @@
 
 using namespace geo::util;
 
+namespace geo {
+namespace ds {
+
 template <class T>
 class QuadTree {
 private:
@@ -163,5 +166,7 @@ public:
 	}
 };
 
+}
+}
 
 #endif /* _QUADTREE_HPP_ */
