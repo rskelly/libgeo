@@ -394,7 +394,7 @@ namespace geo {
             // using the given heuristic. Returns the optimal path between the
             // start cell and the goal.
             template <class U, class V>
-            void searchAStar(int startCol, int startRow, int goalCol, int goalRow, U heuristic, V inserter, std::unordered_set<uint64_t>* blocks = nullptr) {
+            void searchAStar(int startCol, int startRow, int goalCol, int goalRow, U heuristic, V inserter) {
 
             	uint64_t goal = ((uint64_t) goalCol << 32) | goalRow;
 
@@ -425,6 +425,11 @@ namespace geo {
             			break;
             		}
 
+            		double gscore0 = gscore[top];
+
+            		fscore.erase(top);
+            		gscore.erase(top);
+
             		openSet.erase(top);
             		closedSet.insert(top);
 
@@ -438,13 +443,10 @@ namespace geo {
 
             			uint64_t n = ((uint64_t) (qcol + it.first) << 32) | (qrow + it.second);
 
-            			if(blocks && blocks->find(n) != blocks->end()) // This pixel not allowed.
-            				continue;
-
             			if(closedSet.find(n) != closedSet.end())
             				continue;
 
-            			double tgscore = gscore[top] + heuristic(top, n);
+            			double tgscore = gscore0 + heuristic(top, n);
 
             			if(openSet.find(n) == openSet.end()) {
             				openSet.insert(n);
@@ -454,9 +456,8 @@ namespace geo {
 
             			parents[n] = top;
             			gscore[n] = tgscore;
-            			fscore[n] = tgscore + heuristic(n, goal);
-                		fscore.erase(top);
-                		gscore.erase(top);
+            			double h = heuristic(n, goal);
+            			fscore[n] = tgscore + h;
             		}
             	}
             }
