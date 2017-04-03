@@ -164,7 +164,7 @@ DB::DB(const std::string &file, const std::string &layer) :
 }
 
 DB::~DB() {
-	GDALClose(m_ds);
+	//GDALClose(m_ds);
 }
 
 std::map<std::string, std::set<std::string> > DB::extensions() {
