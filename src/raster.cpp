@@ -83,10 +83,14 @@ namespace geo {
 				}
 
 				Geometry* polyAsMulti() {
+					if (!poly->isValid()) {
+						g_warn("Encountered an invalid polygon.");
+						return nullptr;
+					}
 					if(GEOS_MULTIPOLYGON != poly->getGeometryTypeId()) {
-						std::vector<geos::geom::Geometry*>* geoms = new std::vector<Geometry*>();
-						geoms->push_back(poly);
-						return fact->createMultiPolygon(geoms);
+						std::vector<geos::geom::Geometry*> geoms;
+						geoms.push_back(poly);
+						return fact->createMultiPolygon(&geoms);
 					} else {
 						return poly;
 					}
@@ -767,12 +771,14 @@ void MemRaster::fillFloat(double value, int band) {
 	} else {
 		size_t chunk = m_mmapped ? m_mappedFile->pageSize() * 1024 : 2048 * 1024;
 		size_t size = m_props.size() * sizeof(double);
-		size_t last = size % chunk;
 		Buffer buf(chunk);
-		for(size_t i = 0; i < chunk / sizeof(double); ++i)
-			*((double *) buf.buf + i) = value;
-		for(uint64_t i = 0; i < size; i += chunk / sizeof(double))
-			std::memcpy((char *) m_grid + i, buf.buf, g_min(chunk, last));
+		for (size_t i = 0; i < chunk / sizeof(double); ++i)
+			*((int *)buf.buf + i) = value;
+		char* grid = (char*)m_grid;
+		for (uint64_t i = 0; i < size; i += chunk) {
+			std::memcpy(grid, buf.buf, g_min(chunk, size - i));
+			grid += chunk;
+		}
 	}
 }
 
@@ -783,12 +789,14 @@ void MemRaster::fillInt(int value, int band) {
 	} else {
 		size_t chunk = m_mmapped ? m_mappedFile->pageSize() * 1024 : 2048 * 1024;
 		size_t size = m_props.size() * sizeof(int);
-		size_t last = size % chunk;
 		Buffer buf(chunk);
 		for(size_t i = 0; i < chunk / sizeof(int); ++i)
 			*((int *) buf.buf + i) = value;
-		for(uint64_t i = 0; i < size; i += chunk / sizeof(int))
-			std::memcpy((char *) m_grid + i, buf.buf, g_min(chunk, last));
+		char* grid = (char*) m_grid;
+		for (uint64_t i = 0; i < size; i += chunk) {
+			std::memcpy(grid, buf.buf, g_min(chunk, size - i));
+			grid += chunk;
+		}
 	}
 }
 
@@ -1577,7 +1585,10 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 						// Add to the removal list
 						remove.insert(it.first);
 						// Retrieve the unioned geometry.
-						OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx, (GEOSGeom) it.second->polyAsMulti());
+						GEOSGeom ggeom = (GEOSGeom)it.second->polyAsMulti();
+						if (!ggeom)
+							continue;
+						OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx, ggeom);
 						// Create and append the feature.
 						OGRFeature feat(layer->GetLayerDefn());
 						feat.SetGeometry(geom);

@@ -505,38 +505,45 @@ std::string Util::tmpFile(const std::string &root) {
 	return p.string(); // Windows can have wide string paths.
 }
 
-using namespace boost::interprocess;
-
 MappedFile::MappedFile(const std::string &filename, uint64_t size, bool remove) :
-		m_filename(filename),
-		m_size(size),
-		m_remove(remove),
-		m_mapping(nullptr),
-		m_region(nullptr) {
+	m_filename(filename),
+	m_size(size),
+	m_remove(remove),
+	m_mapping(nullptr),
+	m_region(nullptr) {
+
+	if (size > 0)
+		initMappedFile();
+}
+
+void MappedFile::initMappedFile() {
 
 	using namespace boost::interprocess;
 	using namespace boost::filesystem;
 
-	{
-		std::filebuf fbuf;
-		if (size > 0) {
-			std::string dirname = Util::parent(filename);
-			Util::mkdir(dirname);
-			if(Util::diskSpace(dirname) < size)
-				g_runerr("There is not enough free space for the requested memory-mapped file.");
-			if(!fbuf.open(filename,
-					std::ios_base::in | std::ios_base::out
-							| std::ios_base::trunc | std::ios_base::binary))
-				g_runerr("Failed to open file for memory-mapping.");
-			long res = fbuf.pubseekoff(size - 1, std::ios_base::beg);
-			if(res < 0 || (uint64_t) res < size - 1)
-				g_runerr("Failed to reserve space for memory-mapped file.");
-			if(EOF == fbuf.sputc(0))
-				g_runerr("Failed to reserve space for memory-mapped file.");
+	std::string dirname = Util::parent(m_filename);
+	Util::mkdir(dirname);
+	if(Util::diskSpace(dirname) < m_size)
+		g_runerr("There is not enough free space for the requested memory-mapped file.");
+
+	const size_t bufSize = 1024 * 1024;
+	Buffer buf(bufSize);
+	char* bufc = (char*)buf.buf;
+	for (size_t i = 0; i < bufSize; ++i)
+		bufc[i] = 0;
+
+	std::FILE* f;
+	if(!(f = std::fopen(m_filename.c_str(), "wb")))
+		g_runerr("Failed to open file for memory-mapping.");
+	for (size_t i = 0; i < m_size; i += bufSize) {
+		if (!std::fwrite(bufc, g_min(bufSize, i - m_size), 1, f)) {
+			std::fclose(f);
+			g_runerr("Failed to initialized file for memory-mapping.");
 		}
 	}
+	std::fclose(f);
 
-	m_mapping = new file_mapping(filename.c_str(), read_write);
+	m_mapping = new file_mapping(m_filename.c_str(), read_write);
 	m_region = new mapped_region(*m_mapping, read_write);
 }
 
@@ -562,7 +569,8 @@ MappedFile::~MappedFile() {
 
 std::unique_ptr<MappedFile> Util::mapFile(const std::string &filename,
 		uint64_t size, bool remove) {
-	std::unique_ptr<MappedFile> mf(new MappedFile(filename, size, remove));
+	MappedFile* f = new MappedFile(filename, size, remove);
+	std::unique_ptr<MappedFile> mf(f);
 	return std::move(mf);
 }
 
