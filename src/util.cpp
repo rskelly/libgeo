@@ -513,10 +513,10 @@ MappedFile::MappedFile(const std::string &filename, uint64_t size, bool remove) 
 	m_region(nullptr) {
 
 	if (size > 0)
-		initMappedFile();
+		init();
 }
 
-void MappedFile::initMappedFile() {
+void MappedFile::init() {
 
 	using namespace boost::interprocess;
 	using namespace boost::filesystem;
