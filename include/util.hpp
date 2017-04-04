@@ -59,7 +59,7 @@ namespace geo {
         // Provides methods for handling status callbacks.
         class Callbacks {
         public:
-            virtual ~Callbacks() {}
+            virtual ~Callbacks();
             virtual void stepCallback(float status) const;
             virtual void overallCallback(float status) const;
             virtual void statusCallback(const std::string& msg) const;
