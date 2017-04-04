@@ -25,6 +25,7 @@ private:
 	int m_depth;
 	QuadTree* m_parent;
 	uint8_t m_idx;
+	std::list<std::tuple<double, double, T> > m_allItems;
 
 	uint8_t idx(double x, double y) {
 		uint8_t i = 0;
@@ -39,16 +40,6 @@ private:
 		if(m_nodes.find(idx) == m_nodes.end())
 			return nullptr;
 		return m_nodes[idx];
-	}
-
-	QuadTree* getNode(uint8_t pidx, uint8_t idx) {
-		QuadTree* n = nullptr;
-		if(m_parent) {
-			n = m_parent->getNode(pidx);
-			if(n)
-				n = n->getNode(idx);
-		}
-		return n;
 	}
 
 	QuadTree* getNode(double x, double y) {
@@ -93,6 +84,8 @@ public:
 	}
 
 	void add(double x, double y, T data) {
+		if(m_depth == 0)
+			m_allItems.push_back(std::make_tuple(x, y, data));
 		if(m_depth == m_maxDepth) {
 			m_items.push_back(std::make_tuple(x, y, data));
 		} else {
@@ -164,6 +157,15 @@ public:
 		} while(rcount < count && !bounds.contains(m_bounds));
 		return rcount;
 	}
+
+	int size() const {
+		return m_allItems.size();
+	}
+
+	const std::list<std::tuple<double, double, T> >& items() const {
+		return m_allItems;
+	}
+
 };
 
 }
