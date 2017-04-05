@@ -39,8 +39,7 @@ std::string Stopwatch::time() {
 }
 
 uint64_t Stopwatch::millis() {
-	std::chrono::duration<std::chrono::milliseconds> dur(m_stop - m_start);
-	return dur.count();
+	return std::chrono::duration_cast<std::chrono::milliseconds>(m_stop - m_start).count();
 }
 
 void Callbacks::stepCallback(float status) const {
