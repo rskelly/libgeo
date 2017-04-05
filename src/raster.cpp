@@ -1578,10 +1578,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 						// Add to the removal list
 						remove.insert(it.first);
 						// Retrieve the unioned geometry.
-						GEOSGeom ggeom = (GEOSGeom)it.second->poly();
-						if (!ggeom)
-							continue;
-						OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx, ggeom);
+						OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx, (GEOSGeom)it.second->poly());
 						// Create and append the feature.
 						OGRFeature feat(layer->GetLayerDefn());
 						feat.SetGeometry(geom);
@@ -1620,6 +1617,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 				if(extraPolys.find(it.first) != extraPolys.end()) {
 					std::unique_ptr<Poly> &p = it.second;
 					extraPolys[it.first]->update(p->geoms, p->minRow, p->maxRow);
+					p->geoms.clear(); // Don't want the geoms deleted.
 				} else {
 					extraPolys[it.first] = std::move(it.second);
 				}
