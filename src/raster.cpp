@@ -48,18 +48,22 @@ namespace geo {
 			public:
 				int thread;
 				int minRow, maxRow;
-				Geometry* poly;
+				std::vector<Geometry*> geoms;
 				const GeometryFactory* fact;
+				bool dispose;
 
 				Poly(Geometry* poly, int thread, int row, const GeometryFactory* fact) :
-						thread(thread), minRow(row), maxRow(row), poly(nullptr), fact(fact) {
-					this->poly = poly;
+						thread(thread), minRow(row), maxRow(row), fact(fact), dispose(true) {
+					geoms.push_back(poly);
 				}
 
 				void update(Geometry* u, int minRow, int maxRow) {
-					Geometry* p = this->poly;
-					poly = p->Union(u);
-					delete p;
+					geoms.push_back(u);
+					update(minRow, maxRow);
+				}
+
+				void update(std::vector<Geometry*>& u, int minRow, int maxRow) {
+					geoms.assign(u.begin(), u.end());
 					update(minRow, maxRow);
 				}
 
@@ -82,23 +86,13 @@ namespace geo {
 					return true;
 				}
 
-				Geometry* polyAsMulti() {
-					if (!poly->isValid()) {
-						g_warn("Encountered an invalid polygon.");
-						return nullptr;
-					}
-					if(GEOS_MULTIPOLYGON != poly->getGeometryTypeId()) {
-						std::vector<geos::geom::Geometry*> geoms;
-						geoms.push_back(poly);
-						return fact->createMultiPolygon(&geoms);
-					} else {
-						return poly;
-					}
+				Geometry* poly() {
+					return fact->createMultiPolygon(geoms);
 				}
 
 				~Poly() {
-					if(poly)
-						delete poly;
+					for(Geometry* g : geoms)
+						delete g;
 				}
 
 			};
@@ -1561,7 +1555,6 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 							polys[id0] = std::move(p);
 						} else {
 							polys[id0]->update(geom, r, r);
-							delete geom;
 						}
 
 						--c; // Back up the counter by one, to start with the new ID.
@@ -1585,7 +1578,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 						// Add to the removal list
 						remove.insert(it.first);
 						// Retrieve the unioned geometry.
-						GEOSGeom ggeom = (GEOSGeom)it.second->polyAsMulti();
+						GEOSGeom ggeom = (GEOSGeom)it.second->poly();
 						if (!ggeom)
 							continue;
 						OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx, ggeom);
@@ -1626,7 +1619,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 			for(auto &it : polys) {
 				if(extraPolys.find(it.first) != extraPolys.end()) {
 					std::unique_ptr<Poly> &p = it.second;
-					extraPolys[it.first]->update(p->poly, p->minRow, p->maxRow);
+					extraPolys[it.first]->update(p->geoms, p->minRow, p->maxRow);
 				} else {
 					extraPolys[it.first] = std::move(it.second);
 				}
@@ -1639,7 +1632,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 		if(*cancel)
 			break;
 		// Retrieve the unioned geometry.
-		OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx, (GEOSGeom) it.second->polyAsMulti());
+		OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx, (GEOSGeom) it.second->poly());
 		// Create and append the feature.
 		OGRFeature feat(layer->GetLayerDefn());
 		feat.SetGeometry(geom);
