@@ -163,8 +163,14 @@ DB::DB(const std::string &file, const std::string &layer) :
 	}
 }
 
+void DB::flush() {
+	if(OGRERR_NONE != m_layer->SyncToDisk())
+		g_warn("Failed to sync to disk.");
+}
+
 DB::~DB() {
-	//GDALClose(m_ds);
+	flush();
+	GDALClose(m_ds);
 }
 
 std::map<std::string, std::set<std::string> > DB::extensions() {
@@ -267,7 +273,7 @@ void DB::rollback() {
 void DB::commit() {
     if(CPLE_None != m_layer->CommitTransaction())
         g_warn("Failed to commit transaction.");
-    m_layer->SyncToDisk();
+    flush();
 }
 
 int DB::srid() const {

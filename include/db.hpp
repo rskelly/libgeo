@@ -98,6 +98,8 @@ namespace geo {
 
             int srid() const;
 
+            void flush();
+
         };
 
     } // db
