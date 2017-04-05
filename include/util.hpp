@@ -36,10 +36,33 @@ namespace std {
 #include <string>
 #include <vector>
 #include <tuple>
+#include <chrono>
 
 namespace geo {
 
     namespace util {
+
+    	// Provides a simple way to get a formatted
+    	// time beginning at an arbitrary point.
+    	class Stopwatch {
+    	private:
+    		bool m_reset;
+    		std::chrono::time_point<std::chrono::system_clock> m_start;
+    		std::chrono::time_point<std::chrono::system_clock> m_stop;
+    	public:
+    		// Create a stopwatch with time formatted as hh:mm:ss
+    		Stopwatch();
+    		// Start the stopwatch at its current time.
+    		void start();
+    		// Stop the stopwatch. Does not reset.
+    		void stop();
+    		// Reset the stopwatch to zero.
+    		void reset();
+    		// Return the formatted time.
+    		std::string time();
+    		// Return the number of milliseconds elapsed.
+    		uint64_t millis();
+    	};
 
         // Provides access to an allocated buffer
         // which will be safely disposed of.

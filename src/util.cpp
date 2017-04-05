@@ -15,6 +15,34 @@
 
 using namespace geo::util;
 
+Stopwatch::Stopwatch() :
+		m_reset(true) {}
+
+void Stopwatch::start() {
+	if(m_reset)
+		m_start = std::chrono::system_clock::now();
+}
+
+void Stopwatch::stop() {
+	m_stop = std::chrono::system_clock::now();
+}
+
+void Stopwatch::reset() {
+	m_reset = true;
+}
+
+std::string Stopwatch::time() {
+	uint64_t sec = millis() / 1000;
+	std::stringstream ss;
+	ss << (sec / 3600) << ":" << ((sec / 60) % 60) << ":" << (sec % 60);
+	return ss.str();
+}
+
+uint64_t Stopwatch::millis() {
+	std::chrono::duration<std::chrono::milliseconds> dur(m_stop - m_start);
+	return dur.count();
+}
+
 void Callbacks::stepCallback(float status) const {
 	g_debug("Step: " << (int) (status * 100.0f) << "%");
 }
