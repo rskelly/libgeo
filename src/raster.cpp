@@ -23,6 +23,7 @@
 #include <geos/geom/Polygon.h>
 #include <geos/geom/LinearRing.h>
 #include <geos/geom/CoordinateSequence.h>
+#include <geos/operation/union/CascadedPolygonUnion.h>
 
 #include "omp.h"
 
@@ -34,7 +35,7 @@
 using namespace geo::util;
 using namespace geo::raster;
 using namespace geos::geom;
-
+using namespace geos::operation::geounion;
 
 bool _cancel = false;
 
@@ -48,22 +49,23 @@ namespace geo {
 			public:
 				int thread;
 				int minRow, maxRow;
-				std::vector<Geometry*> geoms;
+				std::vector<Polygon*> geoms;
 				const GeometryFactory* fact;
 				bool dispose;
 
-				Poly(Geometry* poly, int thread, int row, const GeometryFactory* fact) :
+				Poly(Polygon* poly, int thread, int row, const GeometryFactory* fact) :
 						thread(thread), minRow(row), maxRow(row), fact(fact), dispose(true) {
 					geoms.push_back(poly);
 				}
 
-				void update(Geometry* u, int minRow, int maxRow) {
+				void update(Polygon* u, int minRow, int maxRow) {
 					geoms.push_back(u);
 					update(minRow, maxRow);
 				}
 
-				void update(std::vector<Geometry*>& u, int minRow, int maxRow) {
-					geoms.assign(u.begin(), u.end());
+				void update(const std::vector<Polygon*>& u, int minRow, int maxRow) {
+					for(Polygon* p : u)
+						geoms.push_back(p);
 					update(minRow, maxRow);
 				}
 
@@ -76,7 +78,7 @@ namespace geo {
 				// within the given thread, or by a thread whose block is completed.
 				// The checked range includes one row above and one below,
 				// which is required to guarantee that a polygon is completed.
-				bool isRangeFinalized(const std::vector<int> &finalRows) const {
+				bool isRangeFinalized(const std::vector<short> &finalRows) const {
 					int start = g_max(minRow - 1, 0);
 					int end = g_min(maxRow + 2, (int) finalRows.size());
 					for (int i = start; i < end; ++i) {
@@ -87,7 +89,16 @@ namespace geo {
 				}
 
 				Geometry* poly() {
-					return fact->createMultiPolygon(geoms);
+					Geometry* geom = CascadedPolygonUnion::Union(&geoms);
+					geoms.clear();
+					if(geom->getGeometryTypeId() != GEOS_MULTIPOLYGON) {
+						std::vector<Geometry*> geoms0 = {geom};
+						Geometry* geom0 = fact->createMultiPolygon(geoms0);
+						delete geom;
+						return geom0;
+					} else {
+						return geom;
+					}
 				}
 
 				~Poly() {
@@ -1476,7 +1487,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 	// Keeps track of extra polys leftover after each thread completes.
 	std::unordered_map<uint64_t, std::unique_ptr<Poly> > extraPolys;
 	// Keeps track of which rows are completed.
-	std::vector<int> finalRows(rows);
+	std::vector<short> finalRows(rows);
 	std::fill(finalRows.begin(), finalRows.end(), -1);
 	// Status tracker.
 	std::atomic<int> stat(0);
@@ -1487,9 +1498,6 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 
 	if(OGRERR_NONE != layer->StartTransaction())
 		g_runerr("Failed to start transation.");
-
-	// TODO: Perturbation to allow polygon union without multis.
-	double yShift0 = props().resolutionY() > 0 ? -0.00000001 : 0.00000001;
 
 	#pragma omp parallel
 	{
@@ -1525,7 +1533,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 
 				// Get the coord of one corner of the polygon.
 				double x0 = gp.toX(c);
-				double y0 = gp.toY(r) + yShift0;
+				double y0 = gp.toY(r);
 
 				// Scan right...
 				while(++c <= cols) {
@@ -1547,7 +1555,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 						seq->add(Coordinate(x0, y1));
 						seq->add(Coordinate(x0, y0));
 						LinearRing* ring = gf->createLinearRing(seq);
-						Geometry* geom = gf->createPolygon(ring, nullptr);
+						Polygon* geom = gf->createPolygon(ring, nullptr);
 
 						// If it's already in the list, union it, otherwise add it.
 						if(polys.find(id0) == polys.end()) {
