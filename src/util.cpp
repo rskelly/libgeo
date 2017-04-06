@@ -543,35 +543,58 @@ MappedFile::MappedFile(const std::string &filename, uint64_t size, bool remove) 
 		init();
 }
 
+MappedFile::MappedFile(uint64_t size, bool remove) :
+	m_size(size),
+	m_remove(remove),
+	m_mapping(nullptr),
+	m_region(nullptr) {
+
+	m_filename = Util::tmpFile();
+
+	if (size > 0)
+		init();
+}
+
+MappedFile::MappedFile() :
+	m_size(0),
+	m_remove(false),
+	m_mapping(nullptr),
+	m_region(nullptr) {
+}
+
+void MappedFile::reset(const std::string& filename, uint64_t size, bool remove) {
+	m_filename = filename;
+	m_size = size;
+	m_remove = remove;
+	init();
+}
+
+void MappedFile::reset(uint64_t size, bool remove) {
+	m_size = size;
+	m_remove = remove;
+
+	m_filename = Util::tmpFile();
+
+	init();
+}
+
 void MappedFile::init() {
-
 	using namespace boost::interprocess;
-	using namespace boost::filesystem;
-
 	std::string dirname = Util::parent(m_filename);
 	Util::mkdir(dirname);
 	if(Util::diskSpace(dirname) < m_size)
 		g_runerr("There is not enough free space for the requested memory-mapped file.");
-
-	const size_t bufSize = 1024 * 1024;
-	Buffer buf(bufSize);
-	char* bufc = (char*)buf.buf;
-	for (size_t i = 0; i < bufSize; ++i)
-		bufc[i] = 0;
-
-	std::FILE* f;
-	if(!(f = std::fopen(m_filename.c_str(), "wb")))
-		g_runerr("Failed to open file for memory-mapping.");
-	for (size_t i = 0; i < m_size; i += bufSize) {
-		if (!std::fwrite(bufc, g_min(bufSize, i - m_size), 1, f)) {
-			std::fclose(f);
-			g_runerr("Failed to initialized file for memory-mapping.");
-		}
-	}
+	std::FILE* f = std::fopen(m_filename.c_str(), "wb");
+	if(!f)
+		g_runerr("Failed to create a file for mapping.");
+	if(std::fseek(f, m_size - 1, SEEK_SET))
+		g_runerr("Failed to initialize file for mapping.");
+	char b = '\1';
+	if(!std::fwrite(&b, 1, 1, f))
+		g_runerr("Failed to initialize file for mapping.");
 	std::fclose(f);
-
 	m_mapping = new file_mapping(m_filename.c_str(), read_write);
-	m_region = new mapped_region(*m_mapping, read_write);
+	m_region = new mapped_region(*m_mapping, read_write, 0, m_size);
 }
 
 void* MappedFile::data() {
