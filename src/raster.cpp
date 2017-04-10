@@ -755,10 +755,10 @@ void MemRaster::init(const GridProps &pr, bool mapped) {
 		m_mmapped = mapped;
 		m_grid = nullptr;
 		size_t typeSize = getTypeSize(m_props.dataType());
-		size_t size = typeSize * pr.cols() * pr.rows();
+		size_t size = typeSize * m_props.cols() * m_props.rows();
 		m_mappedFile.release();
 		if (mapped) {
-			const std::string filename = Util::tmpFile(pr.mappedPath());
+			const std::string filename = Util::tmpFile(m_props.mappedPath());
 			m_mappedFile = Util::mapFile(filename, size);
 			m_grid = m_mappedFile->data();
 		} else {
@@ -778,7 +778,7 @@ void MemRaster::fillFloat(double value, int band) {
 		size_t size = m_props.size() * sizeof(double);
 		Buffer buf(chunk);
 		for (size_t i = 0; i < chunk / sizeof(double); ++i)
-			*((int *)buf.buf + i) = value;
+			*((double *)buf.buf + i) = value;
 		char* grid = (char*)m_grid;
 		for (uint64_t i = 0; i < size; i += chunk) {
 			std::memcpy(grid, buf.buf, g_min(chunk, size - i));
