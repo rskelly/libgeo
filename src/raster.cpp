@@ -778,7 +778,7 @@ void MemRaster::fillFloat(double value, int band) {
 		size_t size = m_props.size() * sizeof(double);
 		Buffer buf(chunk);
 		for (size_t i = 0; i < chunk / sizeof(double); ++i)
-			*((int *)buf.buf + i) = value;
+			*((double *)buf.buf + i) = value;
 		char* grid = (char*)m_grid;
 		for (uint64_t i = 0; i < size; i += chunk) {
 			std::memcpy(grid, buf.buf, g_min(chunk, size - i));
