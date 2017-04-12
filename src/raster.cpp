@@ -107,6 +107,7 @@ namespace geo {
 				}
 
 			};
+
 			// Keeps track of polygonization progress and provides a cancellation mechanism.
 			class PolyProgressData {
 			public:
@@ -812,7 +813,8 @@ double MemRaster::getFloat(uint64_t idx, int band) {
 	if(m_props.isInt()) {
 		return (double) getInt(idx, band);
 	} else {
-		return *(((double *) m_grid) + idx);
+		double* grid = (double*) m_grid;
+		return *(grid + idx);
 	}
 }
 
@@ -826,7 +828,8 @@ int MemRaster::getInt(uint64_t idx, int band) {
 	if (idx < 0 || idx >= m_props.size())
 		g_argerr("Index out of bounds: " << idx << "; size: " << m_props.size());
 	if(m_props.isInt()) {
-		return *(((int *) m_grid) + idx);
+		int* grid = (int*) m_grid;
+		return *(grid + idx);
 	} else {
 		return (int) getFloat(idx, band);
 	}
@@ -1459,7 +1462,8 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 
 	// Create an output dataset for the polygons.
 	char **dopts = NULL;
-	dopts = CSLSetNameValue(dopts, "SPATIALITE", "YES");
+	if(Util::lower(driver) == "sqlite")
+		dopts = CSLSetNameValue(dopts, "SPATIALITE", "YES");
 	GDALDataset *ds = drv->Create(filename.c_str(), 0, 0, 0, GDT_Unknown, dopts);
 	CPLFree(dopts);
 	if(!ds)
@@ -1497,7 +1501,14 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 	const GeometryFactory* gf = GeometryFactory::getDefaultInstance();
 
 	if(OGRERR_NONE != layer->StartTransaction())
-		g_runerr("Failed to start transation.");
+		g_runerr("Failed to start transaction.");
+
+	// TODO: Perturbation to allow polygon union without multis.
+	double yShift0 = props().resolutionY() > 0 ? G_DBL_MIN_POS : -G_DBL_MIN_POS;
+
+	uint64_t nd = m_props.nodata();
+
+	//omp_set_num_threads(1);
 
 	#pragma omp parallel
 	{
@@ -1527,9 +1538,9 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 
 			for(int c = 0; c < cols; ++c) {
 
-				// Get the current ID, skip if zero.
+				// Get the current ID, skip if nodata.
 				uint64_t id0 = rowBuf.getInt(c, 0);
-				if(!id0) continue;
+				if(id0 == nd) continue;
 
 				// Get the coord of one corner of the polygon.
 				double x0 = gp.toX(c);
@@ -1545,7 +1556,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 
 						// Coord of the other corner.
 						double x1 = gp.toX(c);
-						double y1 = gp.toY(r) + gp.resolutionY();
+						double y1 = gp.toY(r) + gp.resolutionY() + yShift0;
 
 						// Build the geometry.
 						CoordinateSequence* seq = gf->getCoordinateSequenceFactory()->create((size_t) 0, 2);
@@ -1602,8 +1613,9 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 			for(const uint64_t &id : remove)
 				polys.erase(id);
 
-			if(status)
-				status->update((float) ++stat / rows);
+			g_debug(r << " of " << rows);
+			if(status && ++stat % 10 == 0)
+				status->update((float) stat / rows);
 		}
 
 		// When a block of rows is completed, set the finalization
@@ -1625,7 +1637,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 				if(extraPolys.find(it.first) != extraPolys.end()) {
 					std::unique_ptr<Poly> &p = it.second;
 					extraPolys[it.first]->update(p->geoms, p->minRow, p->maxRow);
-					p->geoms.clear(); // Don't want the geoms deleted.
+					p->geoms.clear();
 				} else {
 					extraPolys[it.first] = std::move(it.second);
 				}
@@ -1634,15 +1646,28 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 	}
 
 	// Write all the remaining polygons to the output.
-	for(const auto &it : extraPolys) {
+	auto it = extraPolys.begin();
+	#pragma omp parallel for
+	for(size_t i = 0; i < extraPolys.size(); ++i) {
+
 		if(*cancel)
-			break;
+			continue;
+
+		Poly* poly;
+		uint64_t id;
+		#pragma omp critical(__next_poly)
+		{
+			id = it->first;
+			poly = it->second.get();
+			++it;
+		}
+
 		// Retrieve the unioned geometry.
-		OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx, (GEOSGeom) it.second->poly());
+		OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx, (GEOSGeom) poly->poly());
 		// Create and append the feature.
 		OGRFeature feat(layer->GetLayerDefn());
 		feat.SetGeometry(geom);
-		feat.SetField("id", (GIntBig) it.first);
+		feat.SetField("id", (GIntBig) id);
 		feat.SetFID(++fid);
 		delete geom;
 		if(OGRERR_NONE != layer->CreateFeature(&feat))
