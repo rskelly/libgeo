@@ -233,14 +233,15 @@ namespace geo {
             void init();
 
         public:
-            MappedFile(const std::string& filename, uint64_t size, bool remove);
-            MappedFile(uint64_t size, bool remove);
+            MappedFile(const std::string& filename, uint64_t size, bool remove = true);
+            MappedFile(uint64_t size, bool remove = true);
             MappedFile();
-            void reset(const std::string& filename, uint64_t size, bool remove);
-            void reset(uint64_t size, bool remove);
-            size_t pageSize();
+            void reset(const std::string& filename, uint64_t size, bool remove = true);
+            void reset(uint64_t size, bool remove = true);
+            size_t pageSize() const;
+            std::string filename() const;
             void* data();
-            uint64_t size();
+            uint64_t size() const;
             ~MappedFile();
         };
 

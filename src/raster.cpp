@@ -755,10 +755,10 @@ void MemRaster::init(const GridProps &pr, bool mapped) {
 		m_mmapped = mapped;
 		m_grid = nullptr;
 		size_t typeSize = getTypeSize(m_props.dataType());
-		size_t size = typeSize * pr.cols() * pr.rows();
+		size_t size = typeSize * m_props.cols() * m_props.rows();
 		m_mappedFile.release();
 		if (mapped) {
-			const std::string filename = Util::tmpFile(pr.mappedPath());
+			const std::string filename = Util::tmpFile(m_props.mappedPath());
 			m_mappedFile = Util::mapFile(filename, size);
 			m_grid = m_mappedFile->data();
 		} else {

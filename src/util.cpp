@@ -538,7 +538,6 @@ MappedFile::MappedFile(const std::string &filename, uint64_t size, bool remove) 
 	m_remove(remove),
 	m_mapping(nullptr),
 	m_region(nullptr) {
-
 	if (size > 0)
 		init();
 }
@@ -548,9 +547,7 @@ MappedFile::MappedFile(uint64_t size, bool remove) :
 	m_remove(remove),
 	m_mapping(nullptr),
 	m_region(nullptr) {
-
 	m_filename = Util::tmpFile();
-
 	if (size > 0)
 		init();
 }
@@ -560,22 +557,31 @@ MappedFile::MappedFile() :
 	m_remove(false),
 	m_mapping(nullptr),
 	m_region(nullptr) {
+	m_filename = Util::tmpFile();
 }
 
 void MappedFile::reset(const std::string& filename, uint64_t size, bool remove) {
-	m_filename = filename;
-	m_size = size;
+	if(filename.empty())
+		g_argerr("Filename cannot be empty.");
 	m_remove = remove;
-	init();
+	if(filename != m_filename) {
+		m_filename = filename;
+		m_size = size;
+		init();
+	} else if(size > m_size) {
+		m_size = size;
+		init();
+	}
 }
 
 void MappedFile::reset(uint64_t size, bool remove) {
-	m_size = size;
 	m_remove = remove;
-
-	m_filename = Util::tmpFile();
-
-	init();
+	if(m_filename.empty())
+		m_filename = Util::tmpFile();
+	if(size > m_size) {
+		m_size = size;
+		init();
+	}
 }
 
 void MappedFile::init() {
@@ -584,16 +590,31 @@ void MappedFile::init() {
 	Util::mkdir(dirname);
 	if(Util::diskSpace(dirname) < m_size)
 		g_runerr("There is not enough free space for the requested memory-mapped file.");
-	std::FILE* f = std::fopen(m_filename.c_str(), "wb");
-	if(!f)
-		g_runerr("Failed to create a file for mapping.");
-	if(std::fseek(f, m_size - 1, SEEK_SET))
-		g_runerr("Failed to initialize file for mapping.");
-	char b = '\1';
-	if(!std::fwrite(&b, 1, 1, f))
-		g_runerr("Failed to initialize file for mapping.");
-	std::fclose(f);
-	m_mapping = new file_mapping(m_filename.c_str(), read_write);
+	if(Util::exists(m_filename)) {
+		std::FILE* f = std::fopen(m_filename.c_str(), "rb+");
+		if(!f)
+			g_runerr("Failed to create a file for mapping.");
+		if(std::fseek(f, m_size - 1, SEEK_SET))
+			g_runerr("Failed to initialize file for mapping.");
+		char b = '\0';
+		if(!std::fwrite(&b, 1, 1, f))
+			g_runerr("Failed to initialize file for mapping.");
+		std::fclose(f);
+	} else {
+		std::FILE* f = std::fopen(m_filename.c_str(), "wb");
+		if(!f)
+			g_runerr("Failed to create a file for mapping.");
+		if(std::fseek(f, m_size - 1, SEEK_SET))
+			g_runerr("Failed to initialize file for mapping.");
+		char b = '\0';
+		if(!std::fwrite(&b, 1, 1, f))
+			g_runerr("Failed to initialize file for mapping.");
+		std::fclose(f);
+	}
+	if(!m_mapping)
+		m_mapping = new file_mapping(m_filename.c_str(), read_write);
+	if(m_region)
+		delete m_region;
 	m_region = new mapped_region(*m_mapping, read_write, 0, m_size);
 }
 
@@ -601,11 +622,15 @@ void* MappedFile::data() {
 	return m_region->get_address();
 }
 
-uint64_t MappedFile::size() {
+std::string MappedFile::filename() const {
+	return m_filename;
+}
+
+uint64_t MappedFile::size() const {
 	return m_size;
 }
 
-size_t MappedFile::pageSize() {
+size_t MappedFile::pageSize() const {
 	return m_region->get_page_size();
 }
 
@@ -613,8 +638,6 @@ MappedFile::~MappedFile() {
 	m_mapping->remove(m_filename.c_str());
 	delete m_region;
 	delete m_mapping;
-	if (m_remove) // TODO: Check if shared? Also, remove_file_on_destroy
-		Util::rm(m_filename);
 }
 
 std::unique_ptr<MappedFile> Util::mapFile(const std::string &filename,

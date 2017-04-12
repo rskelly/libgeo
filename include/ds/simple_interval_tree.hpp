@@ -5,8 +5,8 @@
  *      Author: rob
  */
 
-#ifndef INCLUDE_DS_SIMPLE_INTERVAL_TREE_HPP_
-#define INCLUDE_DS_SIMPLE_INTERVAL_TREE_HPP_
+#ifndef _SIMPLE_INTERVAL_TREE_HPP_
+#define _SIMPLE_INTERVAL_TREE_HPP_
 
 #include <memory>
 #include <list>
@@ -105,4 +105,4 @@ namespace geo {
 
 } // geo
 
-#endif /* INCLUDE_DS_SIMPLE_INTERVAL_TREE_HPP_ */
+#endif /* _SIMPLE_INTERVAL_TREE_HPP_ */
