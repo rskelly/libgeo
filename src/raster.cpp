@@ -19,6 +19,7 @@
 
 #include <geos/geom/GeometryFactory.h>
 #include <geos/geom/CoordinateSequenceFactory.h>
+#include <geos/geom/CoordinateArraySequence.h>
 #include <geos/geom/Geometry.h>
 #include <geos/geom/Polygon.h>
 #include <geos/geom/LinearRing.h>
@@ -49,24 +50,30 @@ namespace geo {
 			public:
 				int thread;
 				int minRow, maxRow;
-				std::vector<Polygon*> geoms;
+				Geometry* geom;
 				const GeometryFactory* fact;
 				bool dispose;
 
-				Poly(Polygon* poly, int thread, int row, const GeometryFactory* fact) :
-						thread(thread), minRow(row), maxRow(row), fact(fact), dispose(true) {
-					geoms.push_back(poly);
+				Poly(Geometry* poly, int thread, int row, const GeometryFactory* fact) :
+						thread(thread), minRow(row), maxRow(row), geom(nullptr), fact(fact), dispose(true) {
+					update(poly, minRow, maxRow);
 				}
 
-				void update(Polygon* u, int minRow, int maxRow) {
-					geoms.push_back(u);
+				void update(Geometry* u, int minRow, int maxRow) {
+					if (geom) {
+						Geometry* u0 = geom->Union(u);
+						//delete geom;
+						geom = u0;
+					}
+					else {
+						geom = u;
+					}
 					update(minRow, maxRow);
 				}
 
-				void update(const std::vector<Polygon*>& u, int minRow, int maxRow) {
-					for(Polygon* p : u)
-						geoms.push_back(p);
-					update(minRow, maxRow);
+				void update(const std::vector<Geometry*>& u, int minRow, int maxRow) {
+					for (Geometry* p : u)
+						update(p, minRow, maxRow);
 				}
 
 				void update(int minRow, int maxRow) {
@@ -88,22 +95,32 @@ namespace geo {
 					return true;
 				}
 
+				bool m_done = false;
+
 				Geometry* poly() {
-					Geometry* geom = CascadedPolygonUnion::Union(&geoms);
-					geoms.clear();
-					if(geom->getGeometryTypeId() != GEOS_MULTIPOLYGON) {
-						std::vector<Geometry*> geoms0 = {geom};
-						Geometry* geom0 = fact->createMultiPolygon(geoms0);
-						delete geom;
-						return geom0;
-					} else {
-						return geom;
+					switch(geom->getGeometryTypeId()) {
+					case GEOS_POLYGON:
+						try {
+							std::vector<Geometry*> geoms(1);
+							geoms[0] = geom;
+							Geometry* geom0 = fact->createMultiPolygon(&geoms);
+							geom = geom0;
+						} catch (const std::exception& ex) {
+							const char* e = ex.what();
+							std::cerr << e << "\n";
+						}
+						break;
+					case GEOS_MULTIPOLYGON:
+						break;
+					default:
+						g_runerr("Invalid geometry.");
 					}
+					return geom;
 				}
 
 				~Poly() {
-					for(Geometry* g : geoms)
-						delete g;
+					if (geom)
+						delete geom;
 				}
 
 			};
@@ -1559,7 +1576,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 						double y1 = gp.toY(r) + gp.resolutionY() + yShift0;
 
 						// Build the geometry.
-						CoordinateSequence* seq = gf->getCoordinateSequenceFactory()->create((size_t) 0, 2);
+						CoordinateSequence* seq = new CoordinateArraySequence(); // gf->getCoordinateSequenceFactory()->create((size_t)0, 2);
 						seq->add(Coordinate(x0, y0));
 						seq->add(Coordinate(x1, y0));
 						seq->add(Coordinate(x1, y1));
@@ -1636,8 +1653,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 			for(auto &it : polys) {
 				if(extraPolys.find(it.first) != extraPolys.end()) {
 					std::unique_ptr<Poly> &p = it.second;
-					extraPolys[it.first]->update(p->geoms, p->minRow, p->maxRow);
-					p->geoms.clear();
+					extraPolys[it.first]->update(p->geom, p->minRow, p->maxRow);
 				} else {
 					extraPolys[it.first] = std::move(it.second);
 				}
@@ -1647,7 +1663,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 
 	// Write all the remaining polygons to the output.
 	auto it = extraPolys.begin();
-	#pragma omp parallel for
+	//#pragma omp parallel for
 	for(int i = 0; i < (int) extraPolys.size(); ++i) { // Win requires signed int for OMP
 
 		if(*cancel)
@@ -1655,7 +1671,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 
 		Poly* poly;
 		uint64_t id;
-		#pragma omp critical(__next_poly)
+		//#pragma omp critical(__next_poly)
 		{
 			id = it->first;
 			poly = it->second.get();
