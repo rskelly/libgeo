@@ -532,25 +532,12 @@ std::string Util::tmpFile(const std::string &root) {
 	return p.string(); // Windows can have wide string paths.
 }
 
-MappedFile::MappedFile(const std::string &filename, uint64_t size, bool remove) :
-	m_filename(filename),
-	m_size(size),
-	m_remove(remove),
-	m_mapping(nullptr),
-	m_region(nullptr) {
-
-	if (size > 0)
-		init();
-}
-
 MappedFile::MappedFile(uint64_t size, bool remove) :
 	m_size(size),
 	m_remove(remove),
 	m_mapping(nullptr),
-	m_region(nullptr) {
-
-	m_filename = Util::tmpFile();
-
+	m_region(nullptr),
+	m_shm(nullptr) {
 	if (size > 0)
 		init();
 }
@@ -559,69 +546,46 @@ MappedFile::MappedFile() :
 	m_size(0),
 	m_remove(false),
 	m_mapping(nullptr),
-	m_region(nullptr) {
-}
-
-void MappedFile::reset(const std::string& filename, uint64_t size, bool remove) {
-	m_filename = filename;
-	m_size = size;
-	m_remove = remove;
-	init();
+	m_region(nullptr),
+	m_shm(nullptr) {
 }
 
 void MappedFile::reset(uint64_t size, bool remove) {
-	m_size = size;
 	m_remove = remove;
-
-	m_filename = Util::tmpFile();
-
-	init();
+	if(size > m_size) {
+		m_size = size;
+		init();
+	}
 }
+
+static int xxx = 0;
 
 void MappedFile::init() {
 	using namespace boost::interprocess;
-	std::string dirname = Util::parent(m_filename);
-	Util::mkdir(dirname);
-	if(Util::diskSpace(dirname) < m_size)
-		g_runerr("There is not enough free space for the requested memory-mapped file.");
-	std::FILE* f = std::fopen(m_filename.c_str(), "wb");
-	if(!f)
-		g_runerr("Failed to create a file for mapping.");
-	if(std::fseek(f, m_size - 1, SEEK_SET))
-		g_runerr("Failed to initialize file for mapping.");
-	char b = '\1';
-	if(!std::fwrite(&b, 1, 1, f))
-		g_runerr("Failed to initialize file for mapping.");
-	std::fclose(f);
-	m_mapping = new file_mapping(m_filename.c_str(), read_write);
-	m_region = new mapped_region(*m_mapping, read_write, 0, m_size);
+	if (m_shm)
+		delete m_shm;
+	m_shm = new shared_memory_object(open_or_create, std::to_string(++xxx).c_str(), read_write);
+	m_shm->truncate(m_size);
+	if(m_region)
+		delete m_region;
+	m_region = new mapped_region(*m_shm, read_write, 0, m_size);
 }
 
 void* MappedFile::data() {
 	return m_region->get_address();
 }
 
-uint64_t MappedFile::size() {
+uint64_t MappedFile::size() const {
 	return m_size;
 }
 
-size_t MappedFile::pageSize() {
+size_t MappedFile::pageSize() const {
 	return m_region->get_page_size();
 }
 
 MappedFile::~MappedFile() {
-	m_mapping->remove(m_filename.c_str());
 	delete m_region;
 	delete m_mapping;
-	if (m_remove) // TODO: Check if shared? Also, remove_file_on_destroy
-		Util::rm(m_filename);
-}
-
-std::unique_ptr<MappedFile> Util::mapFile(const std::string &filename,
-		uint64_t size, bool remove) {
-	MappedFile* f = new MappedFile(filename, size, remove);
-	std::unique_ptr<MappedFile> mf(f);
-	return std::move(mf);
 }
 
 std::string CRS::epsg2Proj4(int crs) const {

@@ -9,8 +9,8 @@
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/algorithm/string/case_conv.hpp>
 #include <boost/algorithm/string/join.hpp>
+#include <boost/interprocess/shared_memory_object.hpp>
 #include <boost/iostreams/device/mapped_file.hpp>
-
 
 #ifdef _MSC_VER
 #include <float.h>
@@ -224,23 +224,21 @@ namespace geo {
         // Maintains a memory-mapped file, and gives access to the mapped data.
         class MappedFile {
         private:
-            std::string m_filename;
             uint64_t m_size;
             bool m_remove;
-            boost::interprocess::file_mapping *m_mapping;
-            boost::interprocess::mapped_region *m_region;
+            boost::interprocess::file_mapping* m_mapping;
+			boost::interprocess::shared_memory_object* m_shm;
+            boost::interprocess::mapped_region* m_region;
 
             void init();
 
         public:
-            MappedFile(const std::string& filename, uint64_t size, bool remove);
-            MappedFile(uint64_t size, bool remove);
+            MappedFile(uint64_t size, bool remove = true);
             MappedFile();
-            void reset(const std::string& filename, uint64_t size, bool remove);
-            void reset(uint64_t size, bool remove);
-            size_t pageSize();
+            void reset(uint64_t size, bool remove = true);
+            size_t pageSize() const;
             void* data();
-            uint64_t size();
+            uint64_t size() const;
             ~MappedFile();
         };
 
