@@ -27,6 +27,7 @@
 
 #define G_DBL_MAX_POS (std::numeric_limits<double>::max())
 #define G_DBL_MAX_NEG (std::numeric_limits<double>::lowest())
+#define G_DBL_MIN_POS (std::numeric_limits<double>::min())
 
 #define G_FLT_MAX_POS (std::numeric_limits<float>::max())
 #define G_FLT_MAX_NEG (std::numeric_limits<float>::lowest())

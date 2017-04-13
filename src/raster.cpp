@@ -760,7 +760,6 @@ void MemRaster::init(const GridProps &pr, bool mapped) {
 		if(m_mappedFile.get())
 			delete m_mappedFile.release();
 		if (mapped) {
-			const std::string filename = Util::tmpFile(m_props.mappedPath());
 			m_mappedFile.reset(new MappedFile(size));
 			m_grid = m_mappedFile->data();
 		} else {
