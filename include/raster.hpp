@@ -47,10 +47,10 @@ namespace geo {
             int m_bands;           		// The number of bands.
             bool m_writable;            // True if the raster is writable
             double m_nodata;			// The nodata value.
+            bool m_nodataSet;			// True if nodata is set.
     		DataType m_type;
     		std::string m_projection;	// The WKT representation of the projection
     		std::string m_driver;
-    		std::string m_mappedPath;   // A directory within the temp directory used for storing mapped files.
 
     	public:
 
@@ -65,12 +65,9 @@ namespace geo {
     		bool isFloat() const;
 
     		double nodata() const;
-
     		void setNoData(double nodata);
-
-    		void setMappedPath(const std::string& path);
-
-    		std::string mappedPath() const;
+    		bool nodataSet() const;
+    		void unsetNodata();
 
     		// Return the number of columns.
             int cols() const;

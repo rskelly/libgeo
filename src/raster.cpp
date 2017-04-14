@@ -48,21 +48,21 @@ namespace geo {
 
 			class Poly {
 			public:
+				const GeometryFactory* fact;
+				Geometry* geom;
 				int thread;
 				int minRow, maxRow;
-				Geometry* geom;
-				const GeometryFactory* fact;
 				bool dispose;
 
 				Poly(Geometry* poly, int thread, int row, const GeometryFactory* fact) :
-						thread(thread), minRow(row), maxRow(row), geom(nullptr), fact(fact), dispose(true) {
+					fact(fact), geom(nullptr), thread(thread), minRow(row), maxRow(row), dispose(true) {
 					update(poly, minRow, maxRow);
 				}
 
 				void update(Geometry* u, int minRow, int maxRow) {
 					if (geom) {
 						Geometry* u0 = geom->Union(u);
-						//delete geom;
+						delete geom;
 						geom = u0;
 					}
 					else {
@@ -95,24 +95,14 @@ namespace geo {
 					return true;
 				}
 
-				bool m_done = false;
-
 				Geometry* poly() {
-					switch(geom->getGeometryTypeId()) {
-					case GEOS_POLYGON:
-						try {
-							std::vector<Geometry*> geoms(1);
-							geoms[0] = geom;
-							Geometry* geom0 = fact->createMultiPolygon(&geoms);
-							geom = geom0;
-						} catch (const std::exception& ex) {
-							const char* e = ex.what();
-							std::cerr << e << "\n";
-						}
-						break;
-					case GEOS_MULTIPOLYGON:
-						break;
-					default:
+					int type = geom->getGeometryTypeId();
+					if(type == GEOS_POLYGON) {
+						std::vector<Geometry*> geoms = {geom};
+						Geometry* geom0 = fact->createMultiPolygon(geoms);
+						delete geom;
+						geom = geom0;
+					} else if(type != GEOS_MULTIPOLYGON) {
 						g_runerr("Invalid geometry.");
 					}
 					return geom;
@@ -271,17 +261,10 @@ GridProps::GridProps() :
 		m_bands(0),           		// The number of bands
 		m_writable(false),			// True if the grid is writable
 		m_nodata(0),
+		m_nodataSet(false),
 		m_type(DataType::None) {	// The data type.
 }
 
-
-void GridProps::setMappedPath(const std::string& path) {
-	m_mappedPath = path;
-}
-
-std::string GridProps::mappedPath() const {
-	return m_mappedPath;
-}
 
 std::string GridProps::driver() const {
 	return m_driver;
@@ -319,6 +302,10 @@ double GridProps::nodata() const {
 	return m_nodata;
 }
 
+void GridProps::unsetNodata() {
+	m_nodataSet = false;
+}
+
 Bounds GridProps::bounds() const {
 	double x0 = m_trans[0];
 	double y0 = m_trans[3];
@@ -329,6 +316,11 @@ Bounds GridProps::bounds() const {
 
 void GridProps::setNoData(double nodata) {
 	m_nodata = nodata;
+	m_nodataSet = true;
+}
+
+bool GridProps::nodataSet() const {
+	return m_nodataSet;
 }
 
 bool GridProps::hasCell(int col, int row) const {
@@ -1116,8 +1108,10 @@ Raster::Raster(const std::string &filename, const GridProps &props) :
 	std::string proj = m_props.projection();
 	if (!proj.empty())
 		m_ds->SetProjection(proj.c_str());
-	for(int i = 1; i <= m_props.bands(); ++i)
-		m_ds->GetRasterBand(i)->SetNoDataValue(m_props.nodata());
+	if(m_props.nodataSet()) {
+		for(int i = 1; i <= m_props.bands(); ++i)
+			m_ds->GetRasterBand(i)->SetNoDataValue(m_props.nodata());
+	}
 	m_ds->GetRasterBand(1)->GetBlockSize(&m_bcols, &m_brows);
  	m_block = malloc(m_bcols * m_brows * getTypeSize(m_props.dataType()));
 }
@@ -1160,7 +1154,7 @@ Raster::Raster(const std::string &filename, bool writable) :
 	m_props.setBands(m_ds->GetRasterCount());
 	m_props.setWritable(writable);
 	m_props.setProjection(std::string(m_ds->GetProjectionRef()));
-	m_props.setNoData(m_ds->GetRasterBand(1)->GetNoDataValue());
+	m_props.setNoData(m_ds->GetRasterBand(1)->GetNoDataValue()); // TODO: This might not be a real nodata value.
 	m_ds->GetRasterBand(1)->GetBlockSize(&m_bcols, &m_brows);
  	m_block = malloc(m_bcols * m_brows * getTypeSize(m_props.dataType()));
 }
@@ -1191,40 +1185,13 @@ void writeInt(char* buf, int size, int value) {
 }
 
 void Raster::fillInt(int value, int band) {
-	int size = getTypeSize(m_props.dataType());
-	Buffer buf(m_bcols * m_brows * size);
-	for(int i = 0; i < m_bcols * m_brows; ++i)
-		writeInt(((char*) buf.buf) + i, size, value);
 	GDALRasterBand *bnd = m_ds->GetRasterBand(band);
-	int cols = props().cols();
-	int rows = props().rows();
-	for (int r = 0; r < rows / m_brows; ++r) {
-		for (int c = 0; c < cols / m_bcols; ++c) {
-			if (bnd->WriteBlock(c, r, buf.buf) != CE_None)
-				g_runerr("Fill error.");
-		}
-	}
+	bnd->Fill((int) value);
 }
 
 void Raster::fillFloat(double value, int band) {
-	int size = getTypeSize(m_props.dataType());
-	Buffer buf(m_bcols * m_brows * size);
-	if(size == 4) {
-		for(int i = 0; i < m_bcols * m_brows; ++i)
-			*(((float*) buf.buf) + i) = (float) value;
-	} else {
-		for(int i = 0; i < m_bcols * m_brows; ++i)
-			*(((double*) buf.buf) + i) = value;
-	}
 	GDALRasterBand *bnd = m_ds->GetRasterBand(band);
-	int cols = props().cols();
-	int rows = props().rows();
-	for (int r = 0; r < rows / m_brows; ++r) {
-		for (int c = 0; c < cols / m_bcols; ++c) {
-			if (bnd->WriteBlock(c, r, buf.buf) != CE_None)
-				g_runerr("Fill error.");
-		}
-	}
+	bnd->Fill(value);
 }
 
 void Raster::writeToRaster(Raster &grd,
@@ -1464,6 +1431,9 @@ void Raster::setFloat(double x, double y, double v, int band) {
 void Raster::polygonize(const std::string &filename, const std::string &layerName,
 		const std::string &driver, uint16_t srid, uint16_t band, Status *status, bool *cancel) {
 
+	if(!m_props.isInt())
+		g_runerr("Only integer rasters can be polygonized.");
+
 	if(cancel == nullptr)
 		cancel = &_cancel;
 
@@ -1503,15 +1473,20 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 
 	int cols = m_props.cols();
 	int rows = m_props.rows();
+	uint64_t nd = m_props.nodata();
+	// TODO: Perturbation to allow polygon union without multis.
+	double yShift0 = m_props.resolutionY() > 0 ? G_DBL_MIN_POS : -G_DBL_MIN_POS;
+
 	// Generate a unique fID for each feature.
 	std::atomic<uint64_t> fid(0);
+	// Status tracker.
+	std::atomic<int> stat(0);
+
 	// Keeps track of extra polys leftover after each thread completes.
 	std::unordered_map<uint64_t, std::unique_ptr<Poly> > extraPolys;
 	// Keeps track of which rows are completed.
 	std::vector<short> finalRows(rows);
 	std::fill(finalRows.begin(), finalRows.end(), -1);
-	// Status tracker.
-	std::atomic<int> stat(0);
 
 	// For creating GEOS objects.
 	GEOSContextHandle_t gctx = OGRGeometry::createGEOSContext();
@@ -1520,27 +1495,24 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 	if(OGRERR_NONE != layer->StartTransaction())
 		g_runerr("Failed to start transaction.");
 
-	// TODO: Perturbation to allow polygon union without multis.
-	double yShift0 = props().resolutionY() > 0 ? G_DBL_MIN_POS : -G_DBL_MIN_POS;
-
-	uint64_t nd = m_props.nodata();
-
 	//omp_set_num_threads(1);
 
-	#pragma omp parallel
+	//#pragma omp parallel
 	{
 
 		// Buffer for reading/polygonizing.
 		GridProps gp(m_props);
 		gp.setSize(cols, 1);
 		MemRaster rowBuf(gp);
+
 		// Keeps polygons created in thread.
 		std::unordered_map<uint64_t, std::unique_ptr<Poly> > polys;
 		int thread = omp_get_thread_num();
+
 		// To track the first and last rows in this thread's block.
 		int first = -1, last = 0;
 
-		#pragma omp for
+		//#pragma omp for
 		for(int r = 0; r < rows; ++r) {
 
 			if(*cancel)
@@ -1550,7 +1522,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 			last = r;
 
 			// Write into the buffer.
-			#pragma omp critical(__read_raster)
+			//#pragma omp critical(__read_raster)
 			writeTo(rowBuf, cols, 1, 0, r, 0, 0, band);
 
 			for(int c = 0; c < cols; ++c) {
@@ -1576,7 +1548,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 						double y1 = gp.toY(r) + gp.resolutionY() + yShift0;
 
 						// Build the geometry.
-						CoordinateSequence* seq = new CoordinateArraySequence(); // gf->getCoordinateSequenceFactory()->create((size_t)0, 2);
+						CoordinateSequence* seq = gf->getCoordinateSequenceFactory()->create((size_t)0, 2);
 						seq->add(Coordinate(x0, y0));
 						seq->add(Coordinate(x1, y0));
 						seq->add(Coordinate(x1, y1));
@@ -1602,12 +1574,12 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 			}
 
 			// Finalize the row.
-			#pragma omp critical(__finalize_rows)
+			//#pragma omp critical(__finalize_rows)
 			finalRows[r] = thread;
 
 			// At the end of the row, write any finalizable polygons.
 			std::unordered_set<uint64_t> remove;
-			#pragma omp critical(__write_layer)
+			//#pragma omp critical(__write_layer)
 			{
 				for(const auto &it : polys) {
 					if(it.second->isRangeFinalized(finalRows)) {
@@ -1638,7 +1610,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 		// When a block of rows is completed, set the finalization
 		// thread ID to -2, so all threads know this block is
 		// finalized.
-		#pragma omp critical(__finalize_rows)
+		//#pragma omp critical(__finalize_rows)
 		{
 			for(int j = first; j < last; ++j) {
 				if(finalRows[j] == thread)
@@ -1648,7 +1620,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 
 		// If the thread completes and polygons are left over, merge into the
 		// extra dict.
-		#pragma omp critical(__merge_polys)
+		//#pragma omp critical(__merge_polys)
 		{
 			for(auto &it : polys) {
 				if(extraPolys.find(it.first) != extraPolys.end()) {
