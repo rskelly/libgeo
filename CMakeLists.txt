@@ -50,7 +50,7 @@ project (libgeo)
 
 link_directories(. ${Boost_LIBRARY_DIRS} ${LIB_PATH})
 
-# Build support libraries ############################################################################################
+# Build support libraries ################################################################################
 
 add_library (geo STATIC src/geo.cpp)
 target_include_directories(geo PUBLIC include)
@@ -58,14 +58,19 @@ target_include_directories(geo PUBLIC include)
 
 add_library (util STATIC src/util.cpp)
 target_include_directories(util PUBLIC include ${Boost_INCLUDE_DIRS} ${GDAL_INCLUDE_DIR})
-target_link_libraries (util ${Boost_LIBRARIES} ${GDAL_LIBRARY} geo)
-
+target_link_libraries (util ${Boost_LIBRARIES} ${GDAL_LIBRARY} geo rt)
 
 add_library (db STATIC src/db.cpp)
 target_include_directories(db PUBLIC include ${Boost_INCLUDE_DIRS} ${GDAL_INCLUDE_DIR})
 target_link_libraries (db ${GDAL_LIBRARY} util geo)
 
+# Build tests ############################################################################################
 
 add_library (raster STATIC src/raster.cpp)
 target_include_directories(raster PUBLIC include ${Boost_INCLUDE_DIRS} ${GDAL_INCLUDE_DIR})
 target_link_libraries (raster ${GDAL_LIBRARY} ${GEOS_LIBRARY} util geo db)
+
+add_executable (polygonize src/tests/polygonize.cpp)
+target_include_directories(polygonize PUBLIC include)
+target_link_libraries (polygonize PUBLIC raster)
+
