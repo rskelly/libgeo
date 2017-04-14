@@ -3,14 +3,12 @@
 
 #include "geo.hpp"
 
-#include <boost/interprocess/file_mapping.hpp>
 #include <boost/interprocess/mapped_region.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/algorithm/string/case_conv.hpp>
 #include <boost/algorithm/string/join.hpp>
 #include <boost/interprocess/shared_memory_object.hpp>
-#include <boost/iostreams/device/mapped_file.hpp>
 
 #ifdef _MSC_VER
 #include <float.h>
@@ -226,9 +224,8 @@ namespace geo {
         private:
             uint64_t m_size;
             bool m_remove;
-            boost::interprocess::file_mapping* m_mapping;
-			boost::interprocess::shared_memory_object* m_shm;
             boost::interprocess::mapped_region* m_region;
+			boost::interprocess::shared_memory_object* m_shm;
 
             void init();
 

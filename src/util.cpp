@@ -535,7 +535,6 @@ std::string Util::tmpFile(const std::string &root) {
 MappedFile::MappedFile(uint64_t size, bool remove) :
 	m_size(size),
 	m_remove(remove),
-	m_mapping(nullptr),
 	m_region(nullptr),
 	m_shm(nullptr) {
 	if (size > 0)
@@ -545,7 +544,6 @@ MappedFile::MappedFile(uint64_t size, bool remove) :
 MappedFile::MappedFile() :
 	m_size(0),
 	m_remove(false),
-	m_mapping(nullptr),
 	m_region(nullptr),
 	m_shm(nullptr) {
 }
@@ -585,7 +583,7 @@ size_t MappedFile::pageSize() const {
 
 MappedFile::~MappedFile() {
 	delete m_region;
-	delete m_mapping;
+	delete m_shm;
 }
 
 std::string CRS::epsg2Proj4(int crs) const {
