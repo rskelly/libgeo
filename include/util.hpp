@@ -37,6 +37,7 @@ namespace std {
 #include <vector>
 #include <tuple>
 #include <chrono>
+#include <random>
 
 namespace geo {
 
@@ -415,8 +416,18 @@ namespace geo {
             // Returns true if the parent folder exists.
             static bool pathExists(const std::string& name);
 
+            // Return the number of bytes available on the device containing
+            // the given path.
             static uint64_t diskSpace(const std::string& path);
             
+            // Generate a random number in the range.
+			static double random(double from, double to) {
+				std::random_device r;
+				std::uniform_real_distribution<double> unif(from, to);
+				std::default_random_engine re(r());
+				return unif(re);
+			}
+
             // Remove a file.
             static bool rm(const std::string& name);
 
