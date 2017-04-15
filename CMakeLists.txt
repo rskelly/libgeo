@@ -64,13 +64,17 @@ add_library (db STATIC src/db.cpp)
 target_include_directories(db PUBLIC include ${Boost_INCLUDE_DIRS} ${GDAL_INCLUDE_DIR})
 target_link_libraries (db ${GDAL_LIBRARY} util geo)
 
-# Build tests ############################################################################################
-
 add_library (raster STATIC src/raster.cpp)
 target_include_directories(raster PUBLIC include ${Boost_INCLUDE_DIRS} ${GDAL_INCLUDE_DIR})
 target_link_libraries (raster ${GDAL_LIBRARY} ${GEOS_LIBRARY} util geo db)
 
+# Build tests ############################################################################################
+
 add_executable (polygonize src/tests/polygonize.cpp)
 target_include_directories(polygonize PUBLIC include)
 target_link_libraries (polygonize PUBLIC raster)
+
+add_executable (quadtree src/tests/quadtree.cpp)
+target_include_directories(quadtree PUBLIC include)
+target_link_libraries (quadtree PUBLIC util rt)
 
