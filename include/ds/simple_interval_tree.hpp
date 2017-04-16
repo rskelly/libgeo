@@ -10,6 +10,7 @@
 
 #include <memory>
 #include <list>
+#include <cmath>
 
 namespace geo {
 
