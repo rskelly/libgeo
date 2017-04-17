@@ -173,23 +173,39 @@ public:
 
 };
 
-static uint64_t s_id = 0;
+class IDGenerator {
+private:
+	uint64_t m_id;
+public:
+	IDGenerator() : m_id(0) {
 
-static uint64_t s_nextId() {
-	uint64_t id = s_id;
-	++s_id;
-	return id;
-}
+	}
+	uint64_t nextId() {
+		uint64_t id = m_id;
+		++m_id;
+		return id;
+	}
+};
 
 template <class T>
 class FileQuadTree;
 
 template <class T>
+class FileQuadTreeItem {
+public:
+	uint64_t id;
+	double x, y;
+	T item;
+	FileQuadTreeItem() : id(0), x(0), y(0) {}
+	FileQuadTreeItem(uint64_t id, double x, double y, const T& item) :
+		id(id), x(x), y(y), item(item) {
+	}
+};
+
+template <class T>
 class FileQuadTreeNode {
 	friend class FileQuadTree<T>;
 protected:
-
-	typedef std::tuple<uint64_t, double, double, T> Item;
 
 	std::unordered_map<char, std::unique_ptr<FileQuadTreeNode<T> > > m_nodes;
 	std::vector<size_t> m_offsets;
@@ -199,6 +215,7 @@ protected:
 	int m_maxDepth;
 	size_t m_count;
 	size_t m_cacheSize;
+	IDGenerator& m_idgen;
 
 	uint8_t idx(double x, double y) {
 		uint8_t i = 0;
@@ -227,19 +244,20 @@ protected:
 				b.miny(m_bounds.miny());
 				b.maxy(m_bounds.midy());
 			}
-			std::unique_ptr<FileQuadTreeNode> t(new FileQuadTreeNode(m_data, b, m_depth + 1, m_maxDepth, m_cacheSize));
+			std::unique_ptr<FileQuadTreeNode> t(new FileQuadTreeNode(m_data, b, m_depth + 1, m_maxDepth, m_cacheSize, m_idgen));
 			m_nodes[i] = std::move(t);
 		}
 		return m_nodes[i].get();
 	}
 
 	FileQuadTreeNode(MappedFile& data, const geo::util::Bounds& bounds,
-			int depth, int maxDepth, int cacheSize) :
+			int depth, int maxDepth, int cacheSize, IDGenerator& idgen) :
 		m_bounds(bounds),
 		m_data(data),
 		m_depth(depth), m_maxDepth(maxDepth),
 		m_count(0),
-		m_cacheSize(cacheSize) {
+		m_cacheSize(cacheSize),
+		m_idgen(idgen) {
 	}
 
 public:
@@ -251,14 +269,14 @@ public:
 			return getNode(x, y)->addItem(x, y, item);
 		} else {
 			// The size of a "row" in mapped memory.
-			size_t size = m_cacheSize * sizeof(Item);
+			size_t size = m_cacheSize * sizeof(FileQuadTreeItem<T>);
 			// The offset into the mapped memory for the start of the current cache.
 			size_t offset;
 
 			// If the count has surpassed the size of the current block,
 			// get a new offset and start a new block.
 			if(m_count % m_cacheSize == 0) {
-				offset = s_nextId();
+				offset = m_idgen.nextId();
 				m_offsets.push_back(offset);
 				// Resize the memory if necessary.
 				m_data.reset(offset * size + size);
@@ -267,12 +285,12 @@ public:
 			}
 
 			// The position of the new item.
-			size_t position = offset * size + (m_count % m_cacheSize) * sizeof(Item);
+			size_t position = offset * size + (m_count % m_cacheSize) * sizeof(FileQuadTreeItem<T>);
 
 			// Write the item.
-			Item i = std::make_tuple(position, x, y, item);
+			FileQuadTreeItem<T> i(position, x, y, item);
 			char* fdata = (char*) m_data.data() + position;
-			std::memcpy(fdata, &i, sizeof(Item));
+			std::memcpy(fdata , &i, sizeof(FileQuadTreeItem<T>));
 
 			++m_count;
 
@@ -281,20 +299,20 @@ public:
 	}
 
 	// Get an item from the tree.
-	bool getItem(Item& item, uint64_t id) {
-		if(id + sizeof(Item) > m_data.size())
+	bool getItem(FileQuadTreeItem<T>& item, uint64_t id) {
+		if(id + sizeof(FileQuadTreeItem<T>) > m_data.size())
 			return false;
 		char* data = (char*) m_data.data() + id;
-		std::memcpy(&item, data, sizeof(Item));
+		std::memcpy(&item, data, sizeof(FileQuadTreeItem<T>));
 		return true;
 	}
 
 	// Update the item in the tree.
-	bool updateItem(const Item& item, uint64_t id) {
-		if(id + sizeof(Item) > m_data.size())
+	bool updateItem(const FileQuadTreeItem<T>& item, uint64_t id) {
+		if(id + sizeof(FileQuadTreeItem<T>) > m_data.size())
 			return false;
 		char* data = (char*) m_data.data() + id;
-		std::memcpy(data, &item, sizeof(Item));
+		std::memcpy(data, &item, sizeof(FileQuadTreeItem<T>));
 		return true;
 	}
 
@@ -315,18 +333,16 @@ public:
 		if(m_bounds.intersects(bounds)) {
 			if(m_depth == m_maxDepth) {
 				// Move on to check items in mapped memory.
-				std::vector<Item> items(m_cacheSize);
-				size_t size = m_cacheSize * sizeof(Item);
+				std::vector<FileQuadTreeItem<T>> items(m_cacheSize);
+				size_t size = m_cacheSize * sizeof(FileQuadTreeItem<T>);
 				for(size_t i = 0; i < m_offsets.size(); ++i) {
 					size_t offset = m_offsets[i] * size;
 					char* fdata = (char*) m_data.data() + offset;
 					char* vdata = (char*) items.data();
 					std::memcpy(vdata, fdata, size);
 					for(size_t j = 0; j < g_min(m_cacheSize, m_count - i * m_cacheSize); ++j) {
-						const Item& it = items[j];
-						double x = std::get<1>(it);
-						double y = std::get<2>(it);
-						if(bounds.contains(x, y)) {
+						FileQuadTreeItem<T>& it = items[j];
+						if(bounds.contains(it.x, it.y)) {
 							*inserter = it;
 							++inserter;
 							++count;
@@ -345,9 +361,9 @@ public:
 	public:
 		double x, y;
 		Sorter(double x, double y) : x(x), y(y) {}
-		bool operator()(std::tuple<uint64_t, double, double, T>& a, std::tuple<uint64_t, double, double, T>& b) {
-			double da = g_sq(x - std::get<1>(a)) + g_sq(y - std::get<2>(a));
-			double db = g_sq(x - std::get<1>(b)) + g_sq(y - std::get<2>(a));
+		bool operator()(FileQuadTreeItem<T>& a, FileQuadTreeItem<T>& b) {
+			double da = g_sq(x - a.x) + g_sq(y - a.y);
+			double db = g_sq(x - b.x) + g_sq(y - b.y);
 			return da < db;
 		}
 	};
@@ -384,6 +400,10 @@ public:
 		return rcount;
 	}
 
+	const Bounds& bounds() const {
+		return m_bounds;
+	}
+
 };
 
 template <class T>
@@ -394,11 +414,13 @@ private:
 	size_t m_idx;
 	size_t m_nidx;
 	FileQuadTreeNode<T>* m_iqt;
+	size_t m_cacheSize;
+	IDGenerator m_idGenerator;
 
 public:
 	FileQuadTree(const geo::util::Bounds& bounds, int maxDepth, int cacheSize = 4096) :
-		FileQuadTreeNode<T>(m_data, bounds, 0, maxDepth, cacheSize),
-		m_idx(0), m_nidx(0), m_iqt(nullptr) {
+		FileQuadTreeNode<T>(m_data, bounds, 0, maxDepth, cacheSize, m_idGenerator),
+		m_idx(0), m_nidx(0), m_iqt(nullptr), m_cacheSize(cacheSize) {
 	}
 
 
@@ -421,14 +443,16 @@ public:
 		}
 	}
 
-	bool next(std::tuple<uint64_t, double, double, T>& item) {
+	bool next(FileQuadTreeItem<T>& item) {
 		while(m_nidx < m_inodes.size()) {
-			if(m_idx < m_inodes[m_nidx]->m_items.size()) {
-				std::memcpy(&item, &(m_inodes[m_nidx]->m_items[m_idx]), sizeof(std::tuple<uint64_t, double, double, T>));
+			if(m_idx < m_inodes[m_nidx]->m_count) {
+				char* data = (char*) m_data.data() + m_idx * m_cacheSize * sizeof(FileQuadTreeItem<T>);
+				std::memcpy(&item, data, sizeof(FileQuadTreeItem<T>));
 				++m_idx;
 				return true;
 			} else {
 				++m_nidx;
+				m_idx = 0;
 			}
 		}
 		return false;
