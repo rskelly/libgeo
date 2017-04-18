@@ -29,6 +29,14 @@ else()
 	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-pragmas")
 endif()
 
+# disallow in-source builds
+#if("${PROJECT_SOURCE_DIR}" STREQUAL "${PROJECT_BINARY_DIR}")
+#  message(SEND_ERROR "In-source builds are not allowed.")
+#endif("${PROJECT_SOURCE_DIR}" STREQUAL "${PROJECT_BINARY_DIR}")
+
+add_subdirectory(stxxl)
+set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${STXXL_CXX_FLAGS}")
+
 set (Boost_DEBUG OFF)
 set (Boost_USE_STATIC_LIBS OFF)
 set (Boost_USE_STATIC_RUNTIME OFF)
@@ -45,6 +53,7 @@ endif()
 
 
 project (libgeo)
+
 
 # Configure directories
 
@@ -77,4 +86,8 @@ target_link_libraries (polygonize PUBLIC raster)
 add_executable (quadtree src/tests/quadtree.cpp)
 target_include_directories(quadtree PUBLIC include)
 target_link_libraries (quadtree PUBLIC util rt)
+
+add_executable (qtree src/tests/qtree.cpp)
+target_include_directories(qtree PUBLIC include)# ${STXXL_INCLUDE_DIRS})
+target_link_libraries (qtree PUBLIC util)# ${STXXL_LIBRARIES})
 
