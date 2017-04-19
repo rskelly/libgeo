@@ -537,9 +537,8 @@ std::string Util::tmpFile(const std::string &root) {
 	return p.string(); // Windows can have wide string paths.
 }
 
-MappedFile::MappedFile(uint64_t size, bool remove) :
+MappedFile::MappedFile(uint64_t size) :
 	m_size(0),
-	m_remove(remove),
 	m_region(nullptr),
 	m_shm(nullptr) {
 	if (size > 0)
@@ -548,7 +547,6 @@ MappedFile::MappedFile(uint64_t size, bool remove) :
 
 MappedFile::MappedFile() :
 	m_size(0),
-	m_remove(true),
 	m_region(nullptr),
 	m_shm(nullptr) {
 }
@@ -564,26 +562,43 @@ uint64_t fixSize(uint64_t size) {
 	}
 }
 
+bool MappedFile::write(void* input, uint64_t position, uint64_t length) {
+    if(size() < position + length)
+        reset(position + length);
+    std::memcpy((char*) data() + position, input, length);
+    return true;
+}
+
+bool MappedFile::read(void* output, uint64_t position, uint64_t length) {
+    if(position + length > size())
+        return false;
+    std::memcpy(output, (char*) data() + position, length);
+    return true;
+}
+
 void MappedFile::reset(uint64_t size) {
 	using namespace boost::interprocess;
-	size = fixSize(size);
-	if(size == 0)
-		return;
-	if(size > Util::diskSpace("/"))
-		g_runerr("Not enough disk space to grow memory.");
-	if(!m_shm)
-		m_shm = new shared_memory_object(open_or_create, ("geo::util::MappedFile_" + std::to_string(++s_MappedFile_idx)).c_str(), read_write);
-	if(size != m_size) {
-		m_size = size;
-		m_shm->truncate(m_size);
-		if(m_region)
-			delete m_region;
-		m_region = new mapped_region(*m_shm, read_write, 0, m_size);
+	#pragma omp critical(__mapped_file_reset__)
+	{
+		size = fixSize(size);
+		if(size > 0) {
+			if(size > Util::diskSpace("/"))
+				g_runerr("Not enough disk space to grow memory.");
+			if(!m_shm)
+				m_shm = new shared_memory_object(open_or_create, ("geo::util::MappedFile_" + std::to_string(++s_MappedFile_idx)).c_str(), read_write);
+			if(size != m_size) {
+				m_size = size;
+				m_shm->truncate(m_size);
+				if(m_region)
+					delete m_region;
+				m_region = new mapped_region(*m_shm, read_write, 0, m_size);
+			}
+		}
 	}
 }
 
 void* MappedFile::data() {
-	return m_region->get_address();
+	return m_region ? m_region->get_address() : nullptr;
 }
 
 uint64_t MappedFile::size() const {
@@ -591,7 +606,7 @@ uint64_t MappedFile::size() const {
 }
 
 size_t MappedFile::pageSize() const {
-	return m_region->get_page_size();
+	return boost::interprocess::mapped_region::get_page_size();
 }
 
 MappedFile::~MappedFile() {

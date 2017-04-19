@@ -8,8 +8,8 @@
 
 using namespace geo::util;
 
-static size_t s_idx = 0;
-static size_t s_bufSize = 64;
+static size_t s_position = 0;
+static size_t s_bufSize = 1024;
 
 template <class T>
 class CatItem {
@@ -19,18 +19,14 @@ private:
 	size_t m_iiidx;
 
 public:
-	size_t count;
 	std::vector<std::pair<size_t, size_t> > items;
 
-	CatItem() : count(0) {}
+	CatItem() {}
 
-	size_t newPosition() {
-		if(items.empty() || (count % s_bufSize) == 0)
-			items.push_back(std::make_pair(0, s_idx++));
-		std::pair<size_t, size_t>& item = items[items.size() - 1];
-		size_t pos = item.second * s_bufSize * sizeof(T) + item.first * sizeof(T);
-		item.first++;
-		++count;
+	size_t update(size_t count) {
+		size_t pos = s_position;
+		s_position += count * sizeof(T);
+		items.push_back(std::make_pair(count, pos));
 		return pos;
 	}
 
@@ -40,10 +36,10 @@ public:
 		m_iiidx = 0;
 	}
 
-	bool nextPosition(size_t* idx) {
+	bool next(size_t* idx) {
 		while(m_idx < items.size()) {
 			if(m_iidx < items[m_idx].first) {
-				*idx = items[m_idx].second * s_bufSize * sizeof(T) + m_iidx * sizeof(T);
+				*idx = items[m_idx].second;
 				++m_iidx;
 				return true;
 			} else {
@@ -67,6 +63,8 @@ private:
 	double m_size; 
 	// A catalog to keep pointers into the mapped memory.
 	std::unordered_map<size_t, CatItem<T> > m_catalog;
+	// Cache points for writing.
+	std::unordered_map<size_t, std::vector<T> > m_cache;
 	// The mapped memory.
 	MappedFile m_mapped;	
 
@@ -84,57 +82,76 @@ public:
 		return m_bounds;
 	}
 
-	size_t toBinX(double x) {
-		return (size_t) (x - m_bounds.minx()) / m_size * m_bins;
+	int toBinX(double x) {
+		return (int) (x - m_bounds.minx()) / m_size * m_bins;
 	}
 
-	size_t toBinY(double y) {
-		return (size_t) (y - m_bounds.miny()) / m_size * m_bins;
+	int toBinY(double y) {
+		return (int) (y - m_bounds.miny()) / m_size * m_bins;
 	}
 
 	size_t index(double x, double y) {
-		return toBinY(y) * m_bins + toBinX(x);
+		return (size_t) toBinY(y) * m_bins + toBinX(x);
 	}
 
 	std::list<size_t> indices(double x, double y, double radius, bool outer = false) {
-		size_t b0 = g_max(0, toBinX(x - radius));
-		size_t b2 = g_min(m_bins, toBinX(x + radius));
-		size_t b1 = g_max(0, toBinY(y - radius));
-		size_t b3 = g_min(m_bins, toBinY(y + radius));
+		int b0 = g_max(0, toBinX(x - radius));
+		int b2 = g_max(1, g_min((int) m_bins, toBinX(x + radius)));
+		int b1 = g_max(0, toBinY(y - radius));
+		int b3 = g_max(1, g_min((int) m_bins, toBinY(y + radius)));
 		std::list<size_t> lst;
 		if(outer) {
-			for(size_t a = b0; a <= b2; ++a)
+			for(int a = b0; a <= b2; ++a)
 				lst.push_back(b1 * m_bins + a);
-			for(size_t b = b1 + 1; b <= b3 - 1; ++b) {
+			for(int b = b1 + 1; b <= b3 - 1; ++b) {
 				lst.push_back(b * m_bins + b0);
 				lst.push_back(b * m_bins + b2);
 			}
-			for(size_t a = b0; a <= b2; ++a)
+			for(int a = b0; a <= b2; ++a)
 				lst.push_back(b3 * m_bins + a);
 		} else {
-			for(size_t b = b1; b <= b3; ++b)
-				for(size_t a = b0; a <= b2; ++a) {
+			for(int b = b1; b <= b3; ++b)
+				for(int a = b0; a <= b2; ++a) {
 					lst.push_back(b * m_bins + a);
 			}
 		}
 		return lst;
 	}
 
+	void flushAll() {
+		for(const auto& it : m_cache) {
+			size_t idx = it.first;
+			const std::vector<T>& items = it.second;
+			if(!items.empty()) {
+				size_t pos = m_catalog[idx].update(items.size());
+				m_mapped.write((void*) items.data(), pos, items.size() * sizeof(T));
+			}
+		}
+		m_cache.clear();
+	}
+
+	void flush(size_t idx) {
+		std::vector<T>& items = m_cache[idx];
+		if(!items.empty()) {
+			size_t pos = m_catalog[idx].update(items.size());
+			m_mapped.write((void*) items.data(), pos, items.size() * sizeof(T));
+		}
+		m_cache.erase(idx);
+	}
+
 	void addItem(double x, double y, const T& item) {
 		size_t idx = index(x, y);
-		size_t pos = m_catalog[idx].newPosition();
-		if(m_mapped.size() < pos + sizeof(T))
-			m_mapped.reset(pos + sizeof(T));
-		char* data = (char*) m_mapped.data() + pos;
-		std::memcpy(data, &item, sizeof(T));
+		m_cache[idx].push_back(std::move(item));
+		if(m_cache[idx].size() == s_bufSize)
+			flush(idx);
 	}
 
 	template <class U>
 	void search(double x, double y, double radius, U output) {
 		if(!m_bounds.contains(x, y))
 			return;
+		flushAll();
 		std::list<size_t> idx = indices(x, y, radius);
-		char* data = (char*) m_mapped.data();
 		radius = g_sq(radius);
 		for(const size_t& i : idx) {
 			if(m_catalog.find(i) != m_catalog.end()) {
@@ -142,10 +159,9 @@ public:
 				ci.reset();
 				size_t pos = 0;
 				T item;
-				while(ci.nextPosition(&pos)) {
-					if(pos + sizeof(T) > m_mapped.size())
-						g_runerr("Requested position is out of bounds: " << pos);
-					std::memcpy(&item, data + pos, sizeof(T));
+				while(ci.next(&pos)) {
+					if(!m_mapped.read(item, pos))
+						g_runerr("Failed to read item.");
 					if(g_sq(item.x - x) + g_sq(item.y - y) <= radius) {
 						*output = item;
 						++output;
@@ -159,18 +175,17 @@ public:
 	void search(const Bounds& bounds, U output) {
 		if(!m_bounds.intersects(bounds))
 			return;
+		flushAll();
 		std::list<size_t> idx = indices(bounds.midx(), bounds.midy(), g_max(bounds.width(), bounds.height()));
-		char* data = (char*) m_mapped.data();
 		for(const size_t& i : idx) {
 			if(m_catalog.find(i) != m_catalog.end()) {
 				CatItem<T>& ci = m_catalog[i];
 				ci.reset();
 				size_t pos = 0;
 				T item;
-				while(ci.nextPosition(&pos)) {
-					if(pos + sizeof(T) > m_mapped.size())
-						g_runerr("Requested position is out of bounds: " << pos);
-					std::memcpy(&item, data + pos, sizeof(T));
+				while(ci.next(&pos)) {
+					if(!m_mapped.read(item, pos))
+						g_runerr("Failed to read item.");
 					if(bounds.contains(item.x, item.y)) {
 						*output = item;
 						++output;
@@ -190,7 +205,9 @@ public:
 
 	template <class U>
 	void nearest(double x, double y, size_t n, U output) {
-		char* data = (char*) m_mapped.data();
+		if(!m_bounds.contains(x, y))
+			return;
+		flushAll();
 		std::vector<T> tmp;
 		size_t radius = 1;
 		while(radius <= m_bins) {
@@ -204,10 +221,9 @@ public:
 					ci.reset();
 					size_t pos = 0;
 					T item;
-					while(ci.nextPosition(&pos)) {
-						if(pos + sizeof(T) > m_mapped.size())
-							g_runerr("Requested position is out of bounds: " << pos);
-						std::memcpy(&item, data + pos, sizeof(T));
+					while(ci.next(&pos)) {
+						if(!m_mapped.read(item, pos))
+							g_runerr("Failed to read item.");
 						tmp.push_back(std::move(item));
 					}
 				}

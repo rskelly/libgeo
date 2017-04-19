@@ -13,6 +13,11 @@ public:
 };
 
 int main(int argc, char** argv) {
+
+	int count = 100;
+	if(argc == 2)
+		count = atoi(argv[1]);
+
 	Bounds b(0, 0, 100, 100);
 
 	double sx = Util::random(0, 100);
@@ -20,10 +25,10 @@ int main(int argc, char** argv) {
 	double sr = 10.0;
 	int sc = 0;
 
-	QTree<PPoint> t(b, 1000);
+	QTree<PPoint> t(b, 10);
 	Stopwatch sw;
 	sw.start();
-	for(int i = 0; i < 1000000; ++i) {
+	for(int i = 0; i < count; ++i) {
 		double x = Util::random(0, 100);
 		double y = Util::random(0, 100);
 		t.addItem(x, y,  PPoint(x, y));
@@ -35,7 +40,7 @@ int main(int argc, char** argv) {
 	}
 
 	sw.stop();
-	std::cerr << "added 1000000 in " << sw.millis() << "\n";
+	std::cerr << "added " << count << " in " << sw.millis() << "\n";
 
 	std::list<PPoint> res;
 	t.search(sx, sy, sr, std::back_inserter(res));

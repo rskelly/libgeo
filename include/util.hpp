@@ -224,18 +224,51 @@ namespace geo {
         class MappedFile {
         private:
             uint64_t m_size;
-            bool m_remove;
             boost::interprocess::mapped_region* m_region;
 			boost::interprocess::shared_memory_object* m_shm;
 
-        public:
-            MappedFile(uint64_t size, bool remove = true);
-            MappedFile();
-            void reset(uint64_t size);
-            size_t pageSize() const;
             void* data();
+
+        public:
+
+            // Create a mapped file with the given size.
+            MappedFile(uint64_t size);
+            MappedFile();
+
+            // Resize the memory up or down.
+            void reset(uint64_t size);
+
+            // Return the page size.
+            size_t pageSize() const;
+
+            // Return the size of mapped memory.
             uint64_t size() const;
+
             ~MappedFile();
+
+            // Write the object to memory, resize if necessary.
+            template <class T>
+            bool write(const T& item, uint64_t position) {
+                if(size() < position + sizeof(T))
+                    reset(position + sizeof(T));
+                std::memcpy((char*) data() + position, &item, sizeof(T));
+                return true;
+            }
+
+
+            bool write(void* input, uint64_t position, uint64_t size);
+
+            // Read the object from memory, return false if fails.
+            template <class T>
+            bool read(T& item, uint64_t position) {
+                if(position + sizeof(T) > size())
+                    return false;
+                std::memcpy(&item, (char*) data() + position, sizeof(T));
+                return true;
+            }
+
+            bool read(void* output, uint64_t position, uint64_t size);
+
         };
 
         // Provides utility methods for working with LiDAR data.
