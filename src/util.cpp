@@ -538,40 +538,48 @@ std::string Util::tmpFile(const std::string &root) {
 }
 
 MappedFile::MappedFile(uint64_t size, bool remove) :
-	m_size(size),
+	m_size(0),
 	m_remove(remove),
 	m_region(nullptr),
 	m_shm(nullptr) {
 	if (size > 0)
-		init();
+		reset(size);
 }
 
 MappedFile::MappedFile() :
 	m_size(0),
-	m_remove(false),
+	m_remove(true),
 	m_region(nullptr),
 	m_shm(nullptr) {
 }
 
-void MappedFile::reset(uint64_t size, bool remove) {
-	m_remove = remove;
-	if(size > m_size) {
-		m_size = size;
-		init();
+static size_t s_MappedFile_idx = 0;
+
+uint64_t fixSize(uint64_t size) {
+	uint64_t page = boost::interprocess::mapped_region::get_page_size();
+	if(size % page == 0) {
+		return size;
+	} else {
+		return (size / page + 1) * page;
 	}
 }
 
-static int xxx = 0;
-
-void MappedFile::init() {
+void MappedFile::reset(uint64_t size) {
 	using namespace boost::interprocess;
-	if (m_shm)
-		delete m_shm;
-	m_shm = new shared_memory_object(open_or_create, std::to_string(++xxx).c_str(), read_write);
-	m_shm->truncate(m_size);
-	if(m_region)
-		delete m_region;
-	m_region = new mapped_region(*m_shm, read_write, 0, m_size);
+	size = fixSize(size);
+	if(size == 0)
+		return;
+	if(size > Util::diskSpace("/"))
+		g_runerr("Not enough disk space to grow memory.");
+	if(!m_shm)
+		m_shm = new shared_memory_object(open_or_create, ("geo::util::MappedFile_" + std::to_string(++s_MappedFile_idx)).c_str(), read_write);
+	if(size != m_size) {
+		m_size = size;
+		m_shm->truncate(m_size);
+		if(m_region)
+			delete m_region;
+		m_region = new mapped_region(*m_shm, read_write, 0, m_size);
+	}
 }
 
 void* MappedFile::data() {

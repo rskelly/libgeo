@@ -228,12 +228,10 @@ namespace geo {
             boost::interprocess::mapped_region* m_region;
 			boost::interprocess::shared_memory_object* m_shm;
 
-            void init();
-
         public:
             MappedFile(uint64_t size, bool remove = true);
             MappedFile();
-            void reset(uint64_t size, bool remove = true);
+            void reset(uint64_t size);
             size_t pageSize() const;
             void* data();
             uint64_t size() const;
