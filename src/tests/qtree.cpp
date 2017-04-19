@@ -1,5 +1,8 @@
 #include "ds/qtree.hpp"
+#include "util.hpp"
 #include <list>
+
+using namespace geo::util;
 
 class PPoint {
 public:
@@ -12,12 +15,15 @@ public:
 int main(int argc, char** argv) {
 	Bounds b(0, 0, 100, 100);
 	QTree<PPoint> t(b, 10);
-	t.addItem(1, 1, PPoint(1, 1));
-	t.addItem(2, 2, PPoint(2, 2));
-	t.addItem(3, 3, PPoint(3, 3));
-	t.addItem(99, 99, PPoint(99, 99));
+	for(int i = 0; i < 1000000; ++i) {
+		double x = Util::random(0, 100);
+		double y = Util::random(0, 100);
+		t.addItem(x, y,  PPoint(x, y));
+		//std::cerr << "added: " << x << ", " << y << "\n";
+	}
+
 	std::list<PPoint> res;
-	t.search(99, 99, 1, std::back_inserter(res));
+	t.search(50, 50, 50, std::back_inserter(res));
 	for(const PPoint& tt : res)
-		std::cerr << tt.x << ", " << tt.y << "\n";
+		std::cerr << "found: " << tt.x << ", " << tt.y << "\n";
 }
