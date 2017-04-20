@@ -227,13 +227,13 @@ namespace geo {
             boost::interprocess::mapped_region* m_region;
 			boost::interprocess::shared_memory_object* m_shm;
 
-            void* data();
-
         public:
 
             // Create a mapped file with the given size.
             MappedFile(uint64_t size);
             MappedFile();
+
+            void* data();
 
             // Resize the memory up or down.
             void reset(uint64_t size);

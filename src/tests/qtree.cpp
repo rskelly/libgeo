@@ -31,7 +31,7 @@ int main(int argc, char** argv) {
 	for(int i = 0; i < count; ++i) {
 		double x = Util::random(0, 100);
 		double y = Util::random(0, 100);
-		t.addItem(x, y,  PPoint(x, y));
+		t.addItem(PPoint(x, y));
 		//std::cerr << "added: " << x << ", " << y << "\n";
 		if(g_sq(x - sx) + g_sq(y - sy) <= g_sq(sr)) {
 			//std::cerr << "1," << x << ", " << y << "\n";

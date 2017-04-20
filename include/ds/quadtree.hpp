@@ -289,9 +289,7 @@ public:
 
 			// Write the item.
 			FileQuadTreeItem<T> i(position, x, y, item);
-			char* fdata = (char*) m_data.data() + position;
-			std::memcpy(fdata , &i, sizeof(FileQuadTreeItem<T>));
-
+			m_data.write(i, position);
 			++m_count;
 
 			return position;
@@ -302,8 +300,7 @@ public:
 	bool getItem(FileQuadTreeItem<T>& item, uint64_t id) {
 		if(id + sizeof(FileQuadTreeItem<T>) > m_data.size())
 			return false;
-		char* data = (char*) m_data.data() + id;
-		std::memcpy(&item, data, sizeof(FileQuadTreeItem<T>));
+		m_data.read(item, id);
 		return true;
 	}
 
@@ -311,8 +308,7 @@ public:
 	bool updateItem(const FileQuadTreeItem<T>& item, uint64_t id) {
 		if(id + sizeof(FileQuadTreeItem<T>) > m_data.size())
 			return false;
-		char* data = (char*) m_data.data() + id;
-		std::memcpy(data, &item, sizeof(FileQuadTreeItem<T>));
+		m_data.write(item, id);
 		return true;
 	}
 
@@ -337,9 +333,8 @@ public:
 				size_t size = m_cacheSize * sizeof(FileQuadTreeItem<T>);
 				for(size_t i = 0; i < m_offsets.size(); ++i) {
 					size_t offset = m_offsets[i] * size;
-					char* fdata = (char*) m_data.data() + offset;
 					char* vdata = (char*) items.data();
-					std::memcpy(vdata, fdata, size);
+					m_data.read(vdata, offset, size);
 					for(size_t j = 0; j < g_min(m_cacheSize, m_count - i * m_cacheSize); ++j) {
 						FileQuadTreeItem<T>& it = items[j];
 						if(bounds.contains(it.x, it.y)) {

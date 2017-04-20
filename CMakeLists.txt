@@ -30,12 +30,12 @@ else()
 endif()
 
 # disallow in-source builds
-#if("${PROJECT_SOURCE_DIR}" STREQUAL "${PROJECT_BINARY_DIR}")
+# if("${PROJECT_SOURCE_DIR}" STREQUAL "${PROJECT_BINARY_DIR}")
 #  message(SEND_ERROR "In-source builds are not allowed.")
-#endif("${PROJECT_SOURCE_DIR}" STREQUAL "${PROJECT_BINARY_DIR}")
+# endif("${PROJECT_SOURCE_DIR}" STREQUAL "${PROJECT_BINARY_DIR}")
 
-add_subdirectory(stxxl)
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${STXXL_CXX_FLAGS}")
+# add_subdirectory(stxxl)
+# set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${STXXL_CXX_FLAGS}")
 
 set (Boost_DEBUG OFF)
 set (Boost_USE_STATIC_LIBS OFF)

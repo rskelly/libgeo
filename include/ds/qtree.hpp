@@ -5,23 +5,35 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <queue>
+#include <thread>
+#include <condition_variable>
 
 using namespace geo::util;
 
 static size_t s_position = 0;
 static size_t s_bufSize = 1024;
 
+class Writer {
+public:
+	virtual void doWrite() = 0;
+	virtual ~Writer() {}
+};
+
+void writer(Writer* qt) {
+	qt->doWrite();
+}
+
 template <class T>
 class CatItem {
 private:
 	size_t m_idx;
 	size_t m_iidx;
-	size_t m_iiidx;
 
 public:
 	std::vector<std::pair<size_t, size_t> > items;
 
-	CatItem() {}
+	CatItem() : m_idx(0), m_iidx(0) {}
 
 	size_t update(size_t count) {
 		size_t pos = s_position;
@@ -33,7 +45,6 @@ public:
 	void reset() {
 		m_idx = 0;
 		m_iidx = 0;
-		m_iiidx = 0;
 	}
 
 	bool next(size_t* idx) {
@@ -52,7 +63,7 @@ public:
 };
 
 template <class T>
-class QTree {
+class QTree : public Writer {
 private:
 	// The geographic boundary corresponding to this tree. Will be reshaped to a square 
 	// using the longer side.
@@ -67,15 +78,55 @@ private:
 	std::unordered_map<size_t, std::vector<T> > m_cache;
 	// The mapped memory.
 	MappedFile m_mapped;	
+	std::queue<T> m_wq;
+	std::thread m_writer;
+	bool m_running;
+	std::mutex m_mtx;
+	std::condition_variable m_cdn;
 
 public:
 	QTree(const Bounds& bounds, size_t bins) :
 		m_bounds(bounds), 
-		m_bins(bins) {
+		m_bins(bins),
+		m_running(false) {
 
 		m_size = g_max(m_bounds.width(), m_bounds.height());
 		m_bounds.set(m_bounds.midx() - m_size / 2, m_bounds.midy() - m_size / 2, 
 			m_bounds.midx() + m_size / 2, m_bounds.midy() + m_size / 2);
+
+	}
+
+	void startWrite() {
+		if(!m_running) {
+			m_running = true;
+			m_writer = std::thread(writer, this);
+		}
+	}
+
+	void finishWrite() {
+		if(m_running) {
+			m_cdn.notify_one();
+			m_running = false;
+			m_writer.join();
+		}
+	}
+
+	void doWrite() {
+		while(m_running) {
+			std::cerr << m_wq.size() << "\n";
+			std::unique_lock<std::mutex> lock(m_mtx);
+		    while(m_wq.empty()) {
+			    m_cdn.wait(lock);
+		    }
+			T item = m_wq.front();
+			m_wq.pop();
+			m_cdn.notify_one();
+			size_t idx = index(item.x, item.y);
+			m_cache[idx].push_back(std::move(item));
+			if(m_cache[idx].size() == s_bufSize)
+				flush(idx);
+		}
+		flushAll();
 	}
 
 	const Bounds& bounds() const {
@@ -139,18 +190,20 @@ public:
 		m_cache.erase(idx);
 	}
 
-	void addItem(double x, double y, const T& item) {
-		size_t idx = index(x, y);
-		m_cache[idx].push_back(std::move(item));
-		if(m_cache[idx].size() == s_bufSize)
-			flush(idx);
+	void addItem(const T& item) {
+		startWrite();
+		{
+			std::lock_guard<std::mutex> lock(m_mtx);
+			m_wq.push(item);
+		    m_cdn.notify_one();
+		}
 	}
 
 	template <class U>
 	void search(double x, double y, double radius, U output) {
 		if(!m_bounds.contains(x, y))
 			return;
-		flushAll();
+		finishWrite();
 		std::list<size_t> idx = indices(x, y, radius);
 		radius = g_sq(radius);
 		for(const size_t& i : idx) {
@@ -175,7 +228,7 @@ public:
 	void search(const Bounds& bounds, U output) {
 		if(!m_bounds.intersects(bounds))
 			return;
-		flushAll();
+		finishWrite();
 		std::list<size_t> idx = indices(bounds.midx(), bounds.midy(), g_max(bounds.width(), bounds.height()));
 		for(const size_t& i : idx) {
 			if(m_catalog.find(i) != m_catalog.end()) {
@@ -207,7 +260,7 @@ public:
 	void nearest(double x, double y, size_t n, U output) {
 		if(!m_bounds.contains(x, y))
 			return;
-		flushAll();
+		finishWrite();
 		std::vector<T> tmp;
 		size_t radius = 1;
 		while(radius <= m_bins) {
