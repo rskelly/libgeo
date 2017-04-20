@@ -537,10 +537,24 @@ std::string Util::tmpFile(const std::string &root) {
 	return p.string(); // Windows can have wide string paths.
 }
 
+MappedFile::MappedFile(const std::string& root, uint64_t size) :
+	m_size(0),
+	m_region(nullptr),
+	m_mapping(nullptr) {
+
+	if(!Util::mkdir(root))
+		g_runerr("Failed to make temporary directory: " << root);
+	m_filename = Util::tmpFile(root);
+	if (size > 0)
+		reset(size);
+}
+
 MappedFile::MappedFile(uint64_t size) :
 	m_size(0),
 	m_region(nullptr),
-	m_shm(nullptr) {
+	m_mapping(nullptr) {
+
+	m_filename = Util::tmpFile();
 	if (size > 0)
 		reset(size);
 }
@@ -548,10 +562,10 @@ MappedFile::MappedFile(uint64_t size) :
 MappedFile::MappedFile() :
 	m_size(0),
 	m_region(nullptr),
-	m_shm(nullptr) {
-}
+	m_mapping(nullptr) {
 
-static size_t s_MappedFile_idx = 0;
+	m_filename = Util::tmpFile();
+}
 
 uint64_t fixSize(uint64_t size) {
 	uint64_t page = boost::interprocess::mapped_region::get_page_size();
@@ -581,19 +595,32 @@ void MappedFile::reset(uint64_t size) {
 	#pragma omp critical(__mapped_file_reset__)
 	{
 		size = fixSize(size);
-		if(size > 0) {
-			if(size > Util::diskSpace("/"))
+		if(size > m_size) {
+			if(size > Util::diskSpace(Util::parent(m_filename)))
 				g_runerr("Not enough disk space to grow memory.");
-			if(!m_shm)
-				m_shm = new shared_memory_object(open_or_create, ("geo::util::MappedFile_" + std::to_string(++s_MappedFile_idx)).c_str(), read_write);
-			if(size != m_size) {
-				m_size = size;
-				m_shm->truncate(m_size);
-				if(m_region)
-					delete m_region;
-				m_region = new mapped_region(*m_shm, read_write, 0, m_size);
+			m_size = size;
+			if(m_region) {
+				m_region->flush();
+				delete m_region;
+				m_region = nullptr;
 			}
+			std::FILE* f = std::fopen(m_filename.c_str(), "wb+");
+			if(!f)
+				g_runerr("Failed to open mapped file: " << m_filename);
+			if(std::fseek(f, m_size - 1, SEEK_SET)) {
+				std::fclose(f);
+				g_runerr("Failed to resize mapped file.");
+			}
+			if(EOF == std::fputc(0, f)) {
+				std::fclose(f);
+				g_runerr("Failed to resize mapped file.");
+			}
+			std::fclose(f);
 		}
+		if(!m_mapping)
+			m_mapping = new file_mapping(m_filename.c_str(), read_write);
+		if(!m_region)
+			m_region = new mapped_region(*m_mapping, read_write, 0, m_size);
 	}
 }
 
@@ -610,8 +637,9 @@ size_t MappedFile::pageSize() const {
 }
 
 MappedFile::~MappedFile() {
+	m_mapping->remove(m_filename.c_str());
 	delete m_region;
-	delete m_shm;
+	delete m_mapping;
 }
 
 std::string CRS::epsg2Proj4(int crs) const {
