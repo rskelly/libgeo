@@ -11,9 +11,6 @@
 
 using namespace geo::util;
 
-static size_t s_position = 0;
-static size_t s_bufSize = 1024;
-
 class Writer {
 public:
 	virtual void doWrite() = 0;
@@ -35,22 +32,26 @@ public:
 
 	CatItem() : m_idx(0), m_iidx(0) {}
 
-	size_t update(size_t count) {
-		size_t pos = s_position;
-		s_position += count * sizeof(T);
+	size_t update(size_t count, size_t& position) {
+		size_t pos = position;
+		position += count * sizeof(T);
 		items.push_back(std::make_pair(count, pos));
 		return pos;
 	}
 
+	// Reset the position iterator.
 	void reset() {
 		m_idx = 0;
 		m_iidx = 0;
 	}
 
-	bool next(size_t* idx) {
+	// Get the position in memory of the next item in the catalog.
+	bool next(size_t* pos) {
 		while(m_idx < items.size()) {
 			if(m_iidx < items[m_idx].first) {
-				*idx = items[m_idx].second;
+				// The start position is stored; add to it the position
+				// of the item at the given index.
+				*pos = items[m_idx].second + m_iidx * sizeof(T);
 				++m_iidx;
 				return true;
 			} else {
@@ -70,6 +71,10 @@ private:
 	Bounds m_bounds;
 	// The number of bins along each side.
 	size_t m_bins;
+	// The numer of cached points before writing.
+	size_t m_bufSize;
+	// The current write position in the memory.
+	size_t m_position;
 	// The length of one side in map units.
 	double m_size; 
 	// A catalog to keep pointers into the mapped memory.
@@ -85,15 +90,18 @@ private:
 	std::condition_variable m_cdn;
 
 public:
-	QTree(const Bounds& bounds, size_t bins) :
+	QTree(const Bounds& bounds, size_t bins, size_t bufSize) :
 		m_bounds(bounds), 
 		m_bins(bins),
+		m_bufSize(bufSize),
+		m_position(0),
 		m_running(false) {
 
 		m_size = g_max(m_bounds.width(), m_bounds.height());
 		m_bounds.set(m_bounds.midx() - m_size / 2, m_bounds.midy() - m_size / 2, 
 			m_bounds.midx() + m_size / 2, m_bounds.midy() + m_size / 2);
 
+		startWrite();
 	}
 
 	void startWrite() {
@@ -105,26 +113,32 @@ public:
 
 	void finishWrite() {
 		if(m_running) {
-			m_cdn.notify_one();
 			m_running = false;
+			m_cdn.notify_one();
 			m_writer.join();
 		}
 	}
 
 	void doWrite() {
+		std::unique_lock<std::mutex> lock(m_mtx);
+		lock.unlock();
 		while(m_running) {
-			std::cerr << m_wq.size() << "\n";
-			std::unique_lock<std::mutex> lock(m_mtx);
-		    while(m_wq.empty()) {
+			//std::cerr << m_wq.size() << "\n";
+			lock.lock();
+		    while(m_running && m_wq.empty()) 
 			    m_cdn.wait(lock);
-		    }
-			T item = m_wq.front();
-			m_wq.pop();
-			m_cdn.notify_one();
-			size_t idx = index(item.x, item.y);
-			m_cache[idx].push_back(std::move(item));
-			if(m_cache[idx].size() == s_bufSize)
-				flush(idx);
+		    while(!m_wq.empty()) {
+				T item = m_wq.front();
+				m_wq.pop();
+				m_cdn.notify_one();
+				int idx = index(item.x, item.y);
+				if(idx < 0 || idx >= (int) g_sq(m_bins))
+					g_runerr("Illegal index in doWrite: " << idx << " max: " << g_sq(m_bins));
+				m_cache[idx].push_back(std::move(item));
+				if(m_cache[idx].size() == m_bufSize)
+					flush(idx);
+			}
+			lock.unlock();
 		}
 		flushAll();
 	}
@@ -141,16 +155,16 @@ public:
 		return (int) (y - m_bounds.miny()) / m_size * m_bins;
 	}
 
-	size_t index(double x, double y) {
-		return (size_t) toBinY(y) * m_bins + toBinX(x);
+	int index(double x, double y) {
+		return toBinY(y) * m_bins + toBinX(x);
 	}
 
-	std::list<size_t> indices(double x, double y, double radius, bool outer = false) {
+	std::list<int> indices(double x, double y, double radius, bool outer = false) {
 		int b0 = g_max(0, toBinX(x - radius));
-		int b2 = g_max(1, g_min((int) m_bins, toBinX(x + radius)));
+		int b2 = g_max(1, g_min((int) m_bins - 1, toBinX(x + radius)));
 		int b1 = g_max(0, toBinY(y - radius));
-		int b3 = g_max(1, g_min((int) m_bins, toBinY(y + radius)));
-		std::list<size_t> lst;
+		int b3 = g_max(1, g_min((int) m_bins - 1, toBinY(y + radius)));
+		std::list<int> lst;
 		if(outer) {
 			for(int a = b0; a <= b2; ++a)
 				lst.push_back(b1 * m_bins + a);
@@ -161,8 +175,8 @@ public:
 			for(int a = b0; a <= b2; ++a)
 				lst.push_back(b3 * m_bins + a);
 		} else {
-			for(int b = b1; b <= b3; ++b)
-				for(int a = b0; a <= b2; ++a) {
+			for(int b = b1; b <= b3; ++b) {
+				for(int a = b0; a <= b2; ++a)
 					lst.push_back(b * m_bins + a);
 			}
 		}
@@ -170,11 +184,12 @@ public:
 	}
 
 	void flushAll() {
+		//std::cerr << "flush all" << "\n";
 		for(const auto& it : m_cache) {
 			size_t idx = it.first;
 			const std::vector<T>& items = it.second;
 			if(!items.empty()) {
-				size_t pos = m_catalog[idx].update(items.size());
+				size_t pos = m_catalog[idx].update(items.size(), m_position);
 				m_mapped.write((void*) items.data(), pos, items.size() * sizeof(T));
 			}
 		}
@@ -182,16 +197,16 @@ public:
 	}
 
 	void flush(size_t idx) {
+		//std::cerr << "flush " << idx << "\n";
 		std::vector<T>& items = m_cache[idx];
 		if(!items.empty()) {
-			size_t pos = m_catalog[idx].update(items.size());
+			size_t pos = m_catalog[idx].update(items.size(), m_position);
 			m_mapped.write((void*) items.data(), pos, items.size() * sizeof(T));
 		}
 		m_cache.erase(idx);
 	}
 
 	void addItem(const T& item) {
-		startWrite();
 		{
 			std::lock_guard<std::mutex> lock(m_mtx);
 			m_wq.push(item);
@@ -204,9 +219,11 @@ public:
 		if(!m_bounds.contains(x, y))
 			return;
 		finishWrite();
-		std::list<size_t> idx = indices(x, y, radius);
+		std::list<int> idx = indices(x, y, radius);
 		radius = g_sq(radius);
-		for(const size_t& i : idx) {
+		for(const int& i : idx) {
+			if(i < 0 || i >= (int) g_sq(m_bins))
+				g_runerr("Illegal index in search (1): " << i << " max: " << g_sq(m_bins));
 			if(m_catalog.find(i) != m_catalog.end()) {
 				CatItem<T>& ci = m_catalog[i];
 				ci.reset();
@@ -229,8 +246,10 @@ public:
 		if(!m_bounds.intersects(bounds))
 			return;
 		finishWrite();
-		std::list<size_t> idx = indices(bounds.midx(), bounds.midy(), g_max(bounds.width(), bounds.height()));
-		for(const size_t& i : idx) {
+		std::list<int> idx = indices(bounds.midx(), bounds.midy(), g_max(bounds.width(), bounds.height()));
+		for(const int& i : idx) {
+			if(i < 0 || i >= g_sq(m_bins))
+				g_runerr("Illegal index in search (2): " << i << " max: " << g_sq(m_bins));
 			if(m_catalog.find(i) != m_catalog.end()) {
 				CatItem<T>& ci = m_catalog[i];
 				ci.reset();
@@ -264,11 +283,10 @@ public:
 		std::vector<T> tmp;
 		size_t radius = 1;
 		while(radius <= m_bins) {
-			
-			std::list<size_t> idx = indices(x, y, radius, true); // Only the outer ring; inner ring already searched.
-
-			for(const size_t& i : idx) {
-				
+			std::list<int> idx = indices(x, y, radius, true); // Only the outer ring; inner ring already searched.
+			for(const int& i : idx) {
+				if(i < 0 || i >=(int)  g_sq(m_bins))
+					g_runerr("Illegal index in nearest: " << i << " max: " << g_sq(m_bins));
 				if(m_catalog.find(i) != m_catalog.end()) {
 					CatItem<T>& ci = m_catalog[i];
 					ci.reset();
