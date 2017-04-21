@@ -2,6 +2,12 @@
 #define __QTREE_HPP__
 
 #include "util.hpp"
+
+#include "geos/geom/Geometry.h"
+#include "geos/geom/Envelope.h"
+#include "geos/geom/Point.h"
+#include "geos/geom/GeometryFactory.h"
+
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -10,6 +16,7 @@
 #include <condition_variable>
 
 using namespace geo::util;
+using namespace geos::geom;
 
 class Writer {
 public:
@@ -89,64 +96,6 @@ private:
 	std::mutex m_mtx;
 	std::condition_variable m_cdn;
 
-public:
-	QTree(const Bounds& bounds, size_t bins, size_t bufSize) :
-		m_bounds(bounds), 
-		m_bins(bins),
-		m_bufSize(bufSize),
-		m_position(0),
-		m_running(false) {
-
-		m_size = g_max(m_bounds.width(), m_bounds.height());
-		m_bounds.set(m_bounds.midx() - m_size / 2, m_bounds.midy() - m_size / 2, 
-			m_bounds.midx() + m_size / 2, m_bounds.midy() + m_size / 2);
-
-		startWrite();
-	}
-
-	void startWrite() {
-		if(!m_running) {
-			m_running = true;
-			m_writer = std::thread(writer, this);
-		}
-	}
-
-	void finishWrite() {
-		if(m_running) {
-			m_running = false;
-			m_cdn.notify_one();
-			m_writer.join();
-		}
-	}
-
-	void doWrite() {
-		std::unique_lock<std::mutex> lock(m_mtx);
-		lock.unlock();
-		while(m_running) {
-			//std::cerr << m_wq.size() << "\n";
-			lock.lock();
-		    while(m_running && m_wq.empty()) 
-			    m_cdn.wait(lock);
-		    while(!m_wq.empty()) {
-				T item = m_wq.front();
-				m_wq.pop();
-				m_cdn.notify_one();
-				int idx = index(item.x, item.y);
-				if(idx < 0 || idx >= (int) g_sq(m_bins))
-					g_runerr("Illegal index in doWrite: " << idx << " max: " << g_sq(m_bins));
-				m_cache[idx].push_back(std::move(item));
-				if(m_cache[idx].size() == m_bufSize)
-					flush(idx);
-			}
-			lock.unlock();
-		}
-		flushAll();
-	}
-
-	const Bounds& bounds() const {
-		return m_bounds;
-	}
-
 	int toBinX(double x) {
 		return (int) (x - m_bounds.minx()) / m_size * m_bins;
 	}
@@ -206,6 +155,75 @@ public:
 		m_cache.erase(idx);
 	}
 
+	void startWrite() {
+		if(!m_running) {
+			m_running = true;
+			m_writer = std::thread(writer, this);
+		}
+	}
+
+	void finishWrite() {
+		if(m_running) {
+			m_running = false;
+			m_cdn.notify_one();
+			m_writer.join();
+		}
+	}
+
+	void doWrite() {
+		std::unique_lock<std::mutex> lock(m_mtx);
+		lock.unlock();
+		while(m_running) {
+			//std::cerr << m_wq.size() << "\n";
+			lock.lock();
+		    while(m_running && m_wq.empty())
+			    m_cdn.wait(lock);
+		    while(!m_wq.empty()) {
+				T item = m_wq.front();
+				m_wq.pop();
+				m_cdn.notify_one();
+				int idx = index(item.x, item.y);
+				if(idx < 0 || idx >= (int) g_sq(m_bins))
+					g_runerr("Illegal index in doWrite: " << idx << " max: " << g_sq(m_bins));
+				m_cache[idx].push_back(std::move(item));
+				if(m_cache[idx].size() == m_bufSize)
+					flush(idx);
+			}
+			lock.unlock();
+		}
+		flushAll();
+	}
+
+	struct _sorter {
+		double x, y;
+		_sorter(double x, double y) : x(x), y(y) {}
+		bool operator()(const T& a, const T& b) {
+			return  (g_sq(x - a.x) + g_sq(y - a.y)) < (g_sq(x - b.x) + g_sq(y - b.y));
+		}
+	};
+
+
+public:
+
+	QTree(const Bounds& bounds, size_t bins, size_t bufSize) :
+		m_bounds(bounds),
+		m_bins(bins),
+		m_bufSize(bufSize),
+		m_position(0),
+		m_running(false) {
+
+		m_size = g_max(m_bounds.width(), m_bounds.height());
+		m_bounds.set(m_bounds.midx() - m_size / 2, m_bounds.midy() - m_size / 2,
+			m_bounds.midx() + m_size / 2, m_bounds.midy() + m_size / 2);
+
+		startWrite();
+	}
+
+	const Bounds& bounds() const {
+		return m_bounds;
+	}
+
+	// Add an item to the store.
 	void addItem(const T& item) {
 		{
 			std::lock_guard<std::mutex> lock(m_mtx);
@@ -214,6 +232,7 @@ public:
 		}
 	}
 
+	// Search for points within [radius] of the coordinate.
 	template <class U>
 	void search(double x, double y, double radius, U output) {
 		if(!m_bounds.contains(x, y))
@@ -241,6 +260,7 @@ public:
 		}
 	}
 
+	// Search for points inside the bounding box.
 	template <class U>
 	void search(const Bounds& bounds, U output) {
 		if(!m_bounds.intersects(bounds))
@@ -267,13 +287,37 @@ public:
 		}
 	}
 
-	struct _sorter {
-		double x, y;
-		_sorter(double x, double y) : x(x), y(y) {}
-		bool operator()(const T& a, const T& b) {
-			return  (g_sq(x - a.x) + g_sq(y - a.y)) < (g_sq(x - b.x) + g_sq(y - b.y));
+	// Search for points inside the GEOS geometry.
+	template <class U>
+	void search(const Geometry& geom, U output) {
+		Envelope* env = (Envelope*) geom.getEnvelope();
+		Bounds bounds(env->getMinX(), env->getMinY(), env->getMaxX(), env->getMaxY());
+		if(!m_bounds.intersects(bounds))
+			return;
+		finishWrite();
+		GeometryFactory gf;
+		std::list<int> idx = indices(bounds.midx(), bounds.midy(), g_max(bounds.width(), bounds.height()));
+		for(const int& i : idx) {
+			if(i < 0 || i >= g_sq(m_bins))
+				g_runerr("Illegal index in search (2): " << i << " max: " << g_sq(m_bins));
+			if(m_catalog.find(i) != m_catalog.end()) {
+				CatItem<T>& ci = m_catalog[i];
+				ci.reset();
+				size_t pos = 0;
+				T item;
+				while(ci.next(&pos)) {
+					if(!m_mapped.read(item, pos))
+						g_runerr("Failed to read item.");
+					geos::geom::Point* pt = gf.createPoint(Coordinate(item.x, item.y));
+					if(geom.contains(pt)) {
+						*output = item;
+						++output;
+					}
+					delete pt;
+				}
+			}
 		}
-	};
+	}
 
 	template <class U>
 	void nearest(double x, double y, size_t n, U output) {
