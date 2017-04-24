@@ -604,7 +604,12 @@ void MappedFile::reset(uint64_t size) {
 				delete m_region;
 				m_region = nullptr;
 			}
-			std::FILE* f = std::fopen(m_filename.c_str(), "wb+");
+			std::FILE* f;
+			if(Util::exists(m_filename)) {
+				f = std::fopen(m_filename.c_str(), "rb+");
+			} else {
+				f = std::fopen(m_filename.c_str(), "wb+");
+			}
 			if(!f)
 				g_runerr("Failed to open mapped file: " << m_filename);
 			if(std::fseek(f, m_size - 1, SEEK_SET)) {
