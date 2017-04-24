@@ -3,13 +3,15 @@
 #include <list>
 
 using namespace geo::util;
+using namespace geo::ds;
 
 class PPoint {
 public:
 	double x;
 	double y;
-	PPoint(double x, double y) : x(x), y(y) {}
-	PPoint() : x(0), y(0) {}
+	size_t pos;
+	PPoint(double x, double y) : x(x), y(y), pos(0) {}
+	PPoint() : x(0), y(0), pos(0) {}
 };
 
 int main(int argc, char** argv) {
