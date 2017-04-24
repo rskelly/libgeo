@@ -183,7 +183,6 @@ namespace geo {
 				std::unique_lock<std::mutex> lock(m_mtx);
 				lock.unlock();
 				while(m_running) {
-					//std::cerr << m_wq.size() << "\n";
 					lock.lock();
 					while(m_running && m_wq.empty())
 						m_cdn.wait(lock);
@@ -246,9 +245,9 @@ namespace geo {
 				{
 					std::lock_guard<std::mutex> lock(m_mtx);
 					m_wq.push(item);
-					++m_count;
-					m_cdn.notify_one();
 				}
+				++m_count;
+				m_cdn.notify_one();
 			}
 
 			// Search for points within [radius] of the coordinate.
