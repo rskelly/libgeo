@@ -673,6 +673,7 @@ namespace geo {
             // Vectorize the raster.
             void polygonize(const std::string &filename, const std::string &layerName, 
                 const std::string &driver, uint16_t srid = 0, uint16_t band = 1,
+				bool removeHoles = false, bool removeDangles = false,
 				geo::util::Status *status = nullptr, bool *cancel = nullptr);
 
             ~Raster();

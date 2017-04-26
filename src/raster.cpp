@@ -95,7 +95,7 @@ namespace geo {
 					return true;
 				}
 
-				Geometry* poly() {
+				Geometry* poly(bool removeHoles, bool removeDangles) {
 					int type = geom->getGeometryTypeId();
 					if(type == GEOS_POLYGON) {
 						std::vector<Geometry*> geoms = {geom};
@@ -104,6 +104,33 @@ namespace geo {
 						geom = geom0;
 					} else if(type != GEOS_MULTIPOLYGON) {
 						g_runerr("Invalid geometry.");
+					}
+					if(removeHoles || removeDangles) {
+						std::vector<Geometry*> geoms;
+						double area = 0;
+						for(size_t i = 0; i < geom->getNumGeometries(); ++i) {
+							Polygon* p = dynamic_cast<Polygon*>(geom->getGeometryN(i)->clone());
+							if(removeDangles) {
+								double a = p->getArea();
+								if(a < area)
+									continue;
+								area = a;
+							}
+							if(removeHoles) {
+								CoordinateSequence* c = p->getExteriorRing()->getCoordinates();
+								LinearRing* r = fact->createLinearRing(c);
+								Polygon* p0 = fact->createPolygon(r, nullptr);
+								geoms.push_back(p0);
+							} else {
+								geoms.push_back(p);
+							}
+						}
+						MultiPolygon* m = fact->createMultiPolygon(geoms);
+						delete geom;
+						geom = m;
+					}
+					if(removeDangles) {
+
 					}
 					return geom;
 				}
@@ -1431,7 +1458,8 @@ void Raster::setFloat(double x, double y, double v, int band) {
 }
 
 void Raster::polygonize(const std::string &filename, const std::string &layerName,
-		const std::string &driver, uint16_t srid, uint16_t band, Status *status, bool *cancel) {
+		const std::string &driver, uint16_t srid, uint16_t band,
+		bool removeHoles, bool removeDangles, Status *status, bool *cancel) {
 
 	if(!m_props.isInt())
 		g_runerr("Only integer rasters can be polygonized.");
@@ -1588,7 +1616,8 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 						// Add to the removal list
 						remove.insert(it.first);
 						// Retrieve the unioned geometry.
-						OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx, (GEOSGeom)it.second->poly());
+						OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx,
+								(GEOSGeom)it.second->poly(removeHoles, removeDangles));
 						// Create and append the feature.
 						OGRFeature feat(layer->GetLayerDefn());
 						feat.SetGeometry(geom);
@@ -1653,7 +1682,8 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 		}
 
 		// Retrieve the unioned geometry.
-		OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx, (GEOSGeom) poly->poly());
+		OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx,
+				(GEOSGeom) poly->poly(removeHoles, removeDangles));
 		// Create and append the feature.
 		OGRFeature feat(layer->GetLayerDefn());
 		feat.SetGeometry(geom);
