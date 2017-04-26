@@ -386,8 +386,10 @@ namespace geo {
 			size_t m_iterIdx;
 
 			void reset() {
-				for(const auto& it : m_catalog)
+				for(const auto& it : m_catalog) {
+					m_catalog[it.first].reset();
 					m_iter.push_back(it.first);
+				}
 				m_iterIdx = 0;
 			}
 
