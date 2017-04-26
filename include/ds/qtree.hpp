@@ -242,6 +242,8 @@ namespace geo {
 
 			// Add an item to the store.
 			void addItem(const T& item) {
+				if(!m_bounds.contains(item.x, item.y))
+					g_runerr("Item is out of bounds for QTree.");
 				{
 					std::lock_guard<std::mutex> lock(m_mtx);
 					m_wq.push(item);
