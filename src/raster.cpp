@@ -786,12 +786,13 @@ void MemRaster::fillFloat(double value, int band) {
 	} else {
 		size_t chunk = m_mmapped ? m_mappedFile->pageSize() * 1024 : 2048 * 1024;
 		size_t size = m_props.size() * sizeof(double);
-		Buffer buf(chunk);
+		Buffer buffer(chunk);
+		double* buf = (double*) buffer.buf;
 		for (size_t i = 0; i < chunk / sizeof(double); ++i)
-			*((double *)buf.buf + i) = value;
+			*(buf + i) = value;
 		char* grid = (char*)m_grid;
 		for (uint64_t i = 0; i < size; i += chunk) {
-			std::memcpy(grid, buf.buf, g_min(chunk, size - i));
+			std::memcpy(grid, buffer.buf, g_min(chunk, size - i));
 			grid += chunk;
 		}
 	}
@@ -804,12 +805,13 @@ void MemRaster::fillInt(int value, int band) {
 	} else {
 		size_t chunk = m_mmapped ? m_mappedFile->pageSize() * 1024 : 2048 * 1024;
 		size_t size = m_props.size() * sizeof(int);
-		Buffer buf(chunk);
+		Buffer buffer(chunk);
+		int* buf = (int*) buffer.buf;
 		for(size_t i = 0; i < chunk / sizeof(int); ++i)
-			*((int *) buf.buf + i) = value;
+			*(buf + i) = value;
 		char* grid = (char*) m_grid;
 		for (uint64_t i = 0; i < size; i += chunk) {
-			std::memcpy(grid, buf.buf, g_min(chunk, size - i));
+			std::memcpy(grid, buffer.buf, g_min(chunk, size - i));
 			grid += chunk;
 		}
 	}
