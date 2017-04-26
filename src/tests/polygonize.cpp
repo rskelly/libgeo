@@ -12,7 +12,7 @@ int main(int argc, char** argv) {
 	using namespace geo::raster;
 
 	Raster test("/home/rob/Documents/git/libgeo/data/tests/polygons.tif");
-	test.polygonize("/home/rob/Documents/git/libgeo/data/tests/output/polygons.sqlite", "polygons", "sqlite", 26910, 1, nullptr, nullptr);
+	test.polygonize("/home/rob/Documents/git/libgeo/data/tests/output/polygons.sqlite", "polygons", "sqlite", 26910, 1);
 
 	return 0;
 }
