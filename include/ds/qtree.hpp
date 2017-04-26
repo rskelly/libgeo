@@ -28,7 +28,7 @@ namespace geo {
 				virtual ~Writer() {}
 			};
 
-			void writer(Writer* qt) {
+			static void writer(Writer* qt) {
 				qt->doWrite();
 			}
 
