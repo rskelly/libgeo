@@ -93,6 +93,8 @@ namespace geo {
 			double m_size;
 			// The number of elements contained in the tree.
 			size_t m_count;
+			// The number of writer threads to start.
+			size_t m_cores;
 			// A catalog to keep pointers into the mapped memory.
 			std::unordered_map<size_t, CatItem<T> > m_catalog;
 			// Cache points for writing.
@@ -100,7 +102,7 @@ namespace geo {
 			// The mapped memory.
 			MappedFile m_mapped;
 			std::queue<T> m_wq;
-			std::thread m_writer;
+			std::vector<std::thread> m_writers;
 			bool m_running;
 			std::mutex m_mtx;
 			std::condition_variable m_cdn;
@@ -167,29 +169,29 @@ namespace geo {
 			void startWrite() {
 				if(!m_running) {
 					m_running = true;
-					m_writer = std::thread(writer, this);
+					for(int i = 0; i < m_cores; ++i)
+						m_writers.push_back(std::thread(writer, this));
 				}
 			}
 
 			void finishWrite() {
 				if(m_running) {
 					m_running = false;
-					m_cdn.notify_one();
-					m_writer.join();
+					m_cdn.notify_all();
+					for(auto& writer : m_writers)
+						writer.join();
 				}
 			}
 
 			void doWrite() {
-				std::unique_lock<std::mutex> lock(m_mtx);
-				lock.unlock();
+				T item;
 				while(m_running) {
-					lock.lock();
-					while(m_running && m_wq.empty())
-						m_cdn.wait(lock);
-					while(!m_wq.empty()) {
-						T item = m_wq.front();
+					{
+						std::unique_lock<std::mutex> lock(m_mtx);
+						while(m_running && m_wq.empty())
+							m_cdn.wait(lock);
+						item = std::move(m_wq.front());
 						m_wq.pop();
-						m_cdn.notify_one();
 						int idx = index(item.x, item.y);
 						if(idx < 0 || idx >= (int) g_sq(m_bins))
 							g_runerr("Illegal index in doWrite: " << idx << " max: " << g_sq(m_bins));
@@ -197,7 +199,7 @@ namespace geo {
 						if(m_cache[idx].size() == m_bufSize)
 							flush(idx);
 					}
-					lock.unlock();
+					m_cdn.notify_one();
 				}
 				flushAll();
 			}
@@ -219,7 +221,8 @@ namespace geo {
 				m_bufSize(bufSize),
 				m_position(0),
 				m_count(0),
-				m_running(false) {
+				m_running(false),
+				m_cores(4) {
 
 				m_size = g_max(m_bounds.width(), m_bounds.height());
 				m_bounds.set(m_bounds.midx() - m_size / 2, m_bounds.midy() - m_size / 2,
