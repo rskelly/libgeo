@@ -35,16 +35,16 @@ namespace geo {
 			template <class T>
 			class CatItem {
 			private:
-				size_t m_idx;
-				size_t m_iidx;
+				uint64_t m_idx;
+				uint64_t m_iidx;
 
 			public:
-				std::vector<std::pair<size_t, size_t> > items;
+				std::vector<std::pair<uint64_t, uint64_t> > items;
 
 				CatItem() : m_idx(0), m_iidx(0) {}
 
-				size_t update(size_t count, size_t& position) {
-					size_t pos = position;
+				uint64_t update(uint64_t count, uint64_t& position) {
+					uint64_t pos = position;
 					position += count * sizeof(T);
 					items.push_back(std::make_pair(count, pos));
 					return pos;
@@ -57,12 +57,12 @@ namespace geo {
 				}
 
 				// Get the position in memory of the next item in the catalog.
-				bool next(size_t* pos) {
+				bool next(uint64_t* pos) {
 					while(m_idx < items.size()) {
 						if(m_iidx < items[m_idx].first) {
 							// The start position is stored; add to it the position
 							// of the item at the given index.
-							*pos = items[m_idx].second + m_iidx * sizeof(T);
+							*pos = items[m_idx].second + m_iidx * (uint64_t) sizeof(T);
 							++m_iidx;
 							return true;
 						} else {
@@ -84,19 +84,19 @@ namespace geo {
 			// using the longer side.
 			Bounds m_bounds;
 			// The number of bins along each side.
-			size_t m_bins;
+			uint64_t m_bins;
 			// The numer of cached points before writing.
-			size_t m_bufSize;
+			uint64_t m_bufSize;
 			// The current write position in the memory.
-			size_t m_position;
+			uint64_t m_position;
 			// The length of one side in map units.
 			double m_size;
 			// The number of elements contained in the tree.
-			size_t m_count;
+			uint64_t m_count;
 			// A catalog to keep pointers into the mapped memory.
-			std::unordered_map<size_t, CatItem<T> > m_catalog;
+			std::unordered_map<uint64_t, CatItem<T> > m_catalog;
 			// Cache points for writing.
-			std::unordered_map<size_t, std::vector<T> > m_cache;
+			std::unordered_map<uint64_t, std::vector<T> > m_cache;
 			// The mapped memory.
 			MappedFile m_mapped;
 			std::queue<T> m_wq;
@@ -144,21 +144,21 @@ namespace geo {
 			void flushAll() {
 				//std::cerr << "flush all" << "\n";
 				for(const auto& it : m_cache) {
-					size_t idx = it.first;
+					uint64_t idx = it.first;
 					const std::vector<T>& items = it.second;
 					if(!items.empty()) {
-						size_t pos = m_catalog[idx].update(items.size(), m_position);
+						uint64_t pos = m_catalog[idx].update(items.size(), m_position);
 						m_mapped.write((void*) items.data(), pos, items.size() * sizeof(T));
 					}
 				}
 				m_cache.clear();
 			}
 
-			void flush(size_t idx) {
+			void flush(uint64_t idx) {
 				//std::cerr << "flush " << idx << "\n";
 				std::vector<T>& items = m_cache[idx];
 				if(!items.empty()) {
-					size_t pos = m_catalog[idx].update(items.size(), m_position);
+					uint64_t pos = m_catalog[idx].update(items.size(), m_position);
 					m_mapped.write((void*) items.data(), pos, items.size() * sizeof(T));
 				}
 				m_cache.erase(idx);
@@ -186,6 +186,8 @@ namespace geo {
 						std::unique_lock<std::mutex> lock(m_mtx);
 						while(m_running && m_wq.empty())
 							m_cdn.wait(lock);
+						if(m_wq.empty())
+							continue;
 						item = m_wq.front();
 						m_wq.pop();
 					}
@@ -211,7 +213,7 @@ namespace geo {
 
 		public:
 
-			QTree(const Bounds& bounds, size_t bins = 512, size_t bufSize = 64) :
+			QTree(const Bounds& bounds, uint64_t bins = 512, uint64_t bufSize = 64) :
 				m_bounds(bounds),
 				m_bins(bins),
 				m_bufSize(bufSize),
@@ -230,7 +232,7 @@ namespace geo {
 				finishWrite();
 			}
 
-			size_t count() const {
+			uint64_t count() const {
 				return m_count;
 			}
 
@@ -264,7 +266,7 @@ namespace geo {
 					if(m_catalog.find(i) != m_catalog.end()) {
 						CatItem<T>& ci = m_catalog[i];
 						ci.reset();
-						size_t pos = 0;
+						uint64_t pos = 0;
 						T item;
 						while(ci.next(&pos)) {
 							if(!m_mapped.read(item, pos))
@@ -287,12 +289,12 @@ namespace geo {
 				finishWrite();
 				std::list<int> idx = indices(bounds.midx(), bounds.midy(), g_max(bounds.width(), bounds.height()));
 				for(const int& i : idx) {
-					if(i < 0 || (size_t) i >= g_sq(m_bins))
+					if(i < 0 || (uint64_t) i >= g_sq(m_bins))
 						g_runerr("Illegal index in search (2): " << i << " max: " << g_sq(m_bins));
 					if(m_catalog.find(i) != m_catalog.end()) {
 						CatItem<T>& ci = m_catalog[i];
 						ci.reset();
-						size_t pos = 0;
+						uint64_t pos = 0;
 						T item;
 						while(ci.next(&pos)) {
 							if(!m_mapped.read(item, pos))
@@ -323,7 +325,7 @@ namespace geo {
 					if(m_catalog.find(i) != m_catalog.end()) {
 						CatItem<T>& ci = m_catalog[i];
 						ci.reset();
-						size_t pos = 0;
+						uint64_t pos = 0;
 						T item;
 						while(ci.next(&pos)) {
 							if(!m_mapped.read(item, pos))
@@ -341,12 +343,12 @@ namespace geo {
 			}
 
 			template <class U>
-			void nearest(double x, double y, size_t n, U output) {
+			void nearest(double x, double y, uint64_t n, U output) {
 				if(!m_bounds.contains(x, y))
 					return;
 				finishWrite();
 				std::vector<T> tmp;
-				size_t radius = 1;
+				uint64_t radius = 1;
 				while(radius <= m_bins) {
 					std::list<int> idx = indices(x, y, radius, true); // Only the outer ring; inner ring already searched.
 					for(const int& i : idx) {
@@ -355,7 +357,7 @@ namespace geo {
 						if(m_catalog.find(i) != m_catalog.end()) {
 							CatItem<T>& ci = m_catalog[i];
 							ci.reset();
-							size_t pos = 0;
+							uint64_t pos = 0;
 							T item;
 							while(ci.next(&pos)) {
 								if(!m_mapped.read(item, pos))
@@ -371,7 +373,7 @@ namespace geo {
 							struct _sorter sorter(x, y);
 							std::sort(tmp.begin(), tmp.end(), sorter);
 						}
-						for(size_t i = 0; i < n; ++i) {
+						for(uint64_t i = 0; i < n; ++i) {
 							*output = std::move(tmp[0]);
 							++output;
 						}
@@ -382,8 +384,8 @@ namespace geo {
 				}
 			}
 
-			std::vector<size_t> m_iter;
-			size_t m_iterIdx;
+			std::vector<uint64_t> m_iter;
+			uint64_t m_iterIdx;
 
 			void reset() {
 				for(const auto& it : m_catalog) {
@@ -395,7 +397,7 @@ namespace geo {
 
 			bool next(T& item) {
 				while(m_iterIdx < m_iter.size()) {
-					size_t pos = 0;
+					uint64_t pos = 0;
 					if(!m_catalog[m_iter[m_iterIdx]].next(&pos)) {
 						++m_iterIdx;
 						continue;
