@@ -1293,8 +1293,8 @@ void Raster::writeToMemRaster(MemRaster &grd,
 
 	const GridProps& gp = grd.props();
 	GDALDataType gtype = dataType2GDT(gp.dataType());
-	int typeSize = getTypeSize(gp.dataType());
-	int gcols = gp.cols();
+	uint64_t typeSize = getTypeSize(gp.dataType());
+	uint64_t gcols = gp.cols();
 
 	Buffer buf(cols * rows * typeSize);
 	GDALRasterBand *band = m_ds->GetRasterBand(srcBand);
@@ -1305,8 +1305,12 @@ void Raster::writeToMemRaster(MemRaster &grd,
 
 	char* output = (char*) grd.grid();
 	char* input  = (char*) buf.buf;
-	for(int r = 0; r < rows; ++r)
-		std::memcpy(output + ((dstRow + r) * gcols + dstCol) * typeSize , input + r * cols * typeSize, cols * typeSize);
+	uint64_t len = cols * typeSize;
+	for(int r = 0; r < rows; ++r) {
+		uint64_t doff = ((dstRow + r) * gcols + dstCol) * typeSize;
+		uint64_t soff = (uint64_t) r * cols * typeSize;
+		std::memcpy(output + doff , input + soff, len);
+	}
 
 }
 
@@ -1463,24 +1467,26 @@ void Raster::setFloat(double x, double y, double v, int band) {
 static void processGeomQueue(std::queue<std::unique_ptr<Poly> > &q, std::atomic<uint64_t> &fid,
 		GEOSContextHandle_t gctx, OGRLayer* layer, bool removeHoles, bool removeDangles,
 		bool& running) {
-	while(running || !q.empty()) {
+	while(running) {
 		if(q.empty()) {
 			std::this_thread::sleep_for(std::chrono::milliseconds(1)); // TODO: Use a lock.
 			continue;
 		}
-		std::unique_ptr<Poly> p = std::move(q.front());
-		q.pop();
-		// Retrieve the unioned geometry.
-		OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx,
-				(GEOSGeom) p->poly(removeHoles, removeDangles));
-		// Create and append the feature.
-		OGRFeature feat(layer->GetLayerDefn());
-		feat.SetGeometry(geom);
-		feat.SetField("id", (GIntBig) p->id);
-		feat.SetFID(++fid);
-		delete geom;
-		if(OGRERR_NONE != layer->CreateFeature(&feat))
-			g_runerr("Failed to add geometry.");
+		while(!q.empty()) {
+			std::unique_ptr<Poly> p = std::move(q.front());
+			q.pop();
+			// Retrieve the unioned geometry.
+			OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx,
+					(GEOSGeom) p->poly(removeHoles, removeDangles));
+			// Create and append the feature.
+			OGRFeature feat(layer->GetLayerDefn());
+			feat.SetGeometry(geom);
+			feat.SetField("id", (GIntBig) p->id);
+			feat.SetFID(++fid);
+			delete geom;
+			if(OGRERR_NONE != layer->CreateFeature(&feat))
+				g_runerr("Failed to add geometry.");
+		}
 	}
 }
 
@@ -1567,6 +1573,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 
 		// Keeps polygons created in thread.
 		std::unordered_map<uint64_t, std::unique_ptr<Poly> > polys;
+		omp_set_num_threads(2); // TODO: Thread count.
 		int thread = omp_get_thread_num();
 
 		// To track the first and last rows in this thread's block.
