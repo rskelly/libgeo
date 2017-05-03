@@ -109,11 +109,11 @@ void Bounds::set(double _minx, double _miny, double _maxx, double _maxy, double 
 }
 
 bool Bounds::contains(double x, double y) const {
-	return x > m_minx && x < m_maxx && y > m_miny && y < m_maxy;
+	return x >= m_minx && x < m_maxx && y >= m_miny && y < m_maxy;
 }
 
 bool Bounds::contains(double x, double y, double z) const {
-	return contains(x, y) && z > m_minz && z < m_maxz;
+	return contains(x, y) && z >= m_minz && z < m_maxz;
 }
 
 bool Bounds::contains(const Bounds &b, int dims) const {
