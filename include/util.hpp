@@ -227,13 +227,15 @@ namespace geo {
             boost::interprocess::mapped_region* m_region;
 			boost::interprocess::file_mapping* m_mapping;
 			std::string m_filename;
+			bool m_mapped;
+			std::unique_ptr<Buffer> m_data;
 
         public:
 
             // Create a mapped file with the given size.
-			MappedFile(const std::string& root, uint64_t size);
-            MappedFile(uint64_t size);
-            MappedFile();
+			MappedFile(const std::string& root, uint64_t size, bool mapped = true);
+            MappedFile(uint64_t size, bool mapped = true);
+            MappedFile(bool mapped = true);
 
             const std::string& filename() const;
 

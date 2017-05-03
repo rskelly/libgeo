@@ -537,10 +537,11 @@ std::string Util::tmpFile(const std::string &root) {
 	return p.string(); // Windows can have wide string paths.
 }
 
-MappedFile::MappedFile(const std::string& root, uint64_t size) :
+MappedFile::MappedFile(const std::string& root, uint64_t size, bool mapped) :
 	m_size(0),
 	m_region(nullptr),
-	m_mapping(nullptr) {
+	m_mapping(nullptr),
+	m_mapped(mapped) {
 
 	if(!Util::mkdir(root))
 		g_runerr("Failed to make temporary directory: " << root);
@@ -549,20 +550,22 @@ MappedFile::MappedFile(const std::string& root, uint64_t size) :
 		reset(size);
 }
 
-MappedFile::MappedFile(uint64_t size) :
+MappedFile::MappedFile(uint64_t size, bool mapped) :
 	m_size(0),
 	m_region(nullptr),
-	m_mapping(nullptr) {
+	m_mapping(nullptr),
+	m_mapped(mapped) {
 
 	m_filename = Util::tmpFile();
 	if (size > 0)
 		reset(size);
 }
 
-MappedFile::MappedFile() :
+MappedFile::MappedFile(bool mapped) :
 	m_size(0),
 	m_region(nullptr),
-	m_mapping(nullptr) {
+	m_mapping(nullptr),
+	m_mapped(mapped) {
 
 	m_filename = Util::tmpFile();
 }
@@ -596,41 +599,53 @@ void MappedFile::reset(uint64_t size) {
 	{
 		size = fixSize(size);
 		if(size > m_size) {
-			if(size > Util::diskSpace(Util::parent(m_filename)))
+			if(m_mapped && size > Util::diskSpace(Util::parent(m_filename)))
 				g_runerr("Not enough disk space to grow memory.");
+			uint64_t oldSize = m_size;
 			m_size = size;
 			if(m_region) {
 				m_region->flush();
 				delete m_region;
 				m_region = nullptr;
 			}
-			std::FILE* f;
-			if(Util::exists(m_filename)) {
-				f = std::fopen(m_filename.c_str(), "rb+");
+			if(m_mapped) {
+				std::FILE* f;
+				if(Util::exists(m_filename)) {
+					f = std::fopen(m_filename.c_str(), "rb+");
+				} else {
+					f = std::fopen(m_filename.c_str(), "wb+");
+				}
+				if(!f)
+					g_runerr("Failed to open mapped file: " << m_filename);
+				if(std::fseek(f, m_size - 1, SEEK_SET)) {
+					std::fclose(f);
+					g_runerr("Failed to resize mapped file.");
+				}
+				if(EOF == std::fputc(0, f)) {
+					std::fclose(f);
+					g_runerr("Failed to resize mapped file.");
+				}
+				std::fclose(f);
 			} else {
-				f = std::fopen(m_filename.c_str(), "wb+");
+				std::unique_ptr<Buffer> buf(new Buffer(m_size));
+				if(m_data.get()) {
+					std::memcpy(buf->buf, m_data->buf, oldSize);
+					delete m_data.release();
+				}
+				m_data.reset(buf.release());
 			}
-			if(!f)
-				g_runerr("Failed to open mapped file: " << m_filename);
-			if(std::fseek(f, m_size - 1, SEEK_SET)) {
-				std::fclose(f);
-				g_runerr("Failed to resize mapped file.");
-			}
-			if(EOF == std::fputc(0, f)) {
-				std::fclose(f);
-				g_runerr("Failed to resize mapped file.");
-			}
-			std::fclose(f);
 		}
-		if(!m_mapping)
-			m_mapping = new file_mapping(m_filename.c_str(), read_write);
-		if(!m_region)
-			m_region = new mapped_region(*m_mapping, read_write, 0, m_size);
+		if(m_mapped) {
+			if(!m_mapping)
+				m_mapping = new file_mapping(m_filename.c_str(), read_write);
+			if(!m_region)
+				m_region = new mapped_region(*m_mapping, read_write, 0, m_size);
+		}
 	}
 }
 
 void* MappedFile::data() {
-	return m_region ? m_region->get_address() : nullptr;
+	return m_mapped ? (m_region ? m_region->get_address() : nullptr) : m_data->buf;
 }
 
 uint64_t MappedFile::size() const {
@@ -642,9 +657,11 @@ size_t MappedFile::pageSize() const {
 }
 
 MappedFile::~MappedFile() {
-	m_mapping->remove(m_filename.c_str());
-	delete m_region;
-	delete m_mapping;
+	if(m_mapped) {
+		m_mapping->remove(m_filename.c_str());
+		delete m_region;
+		delete m_mapping;
+	}
 }
 
 std::string CRS::epsg2Proj4(int crs) const {
