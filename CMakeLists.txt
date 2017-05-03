@@ -83,6 +83,10 @@ add_executable (polygonize src/tests/polygonize.cpp)
 target_include_directories(polygonize PUBLIC include)
 target_link_libraries (polygonize PUBLIC raster)
 
+add_executable (smooth src/tests/smooth.cpp)
+target_include_directories(smooth PUBLIC include)
+target_link_libraries (smooth PUBLIC raster)
+
 add_executable (quadtree src/tests/quadtree.cpp)
 target_include_directories(quadtree PUBLIC include)
 target_link_libraries (quadtree PUBLIC util rt)

@@ -154,6 +154,8 @@ namespace geo {
 
     		// Get the writable state of the raster.
     		bool writable() const;
+
+
     	};
 
     	class G_DLL_EXPORT GridStats {
@@ -187,6 +189,94 @@ namespace geo {
             virtual ~FillOperator() {};
         };
 
+        class Grid;
+        class TileIterator;
+
+        class G_DLL_EXPORT Tile {
+        	friend class TileIterator;
+        private:
+        	Grid* m_tile;
+        	Grid* m_source;
+        	int m_cols;
+        	int m_rows;
+        	int m_col; 		// The position of the ROI in the source.
+        	int m_row;
+        	int m_buffer;
+        	int m_srcCol;	// The buffered position in the source.
+        	int m_srcRow;
+        	int m_dstCol;	// The position written to in the tile.
+        	int m_dstRow;
+        	int m_band;
+        	bool m_writeOnFlush;
+
+        protected:
+
+        	// Create the tile.
+        	Tile(Grid* tile, Grid* source, int cols, int rows,
+        			int col, int row, int buffer,
+        			int srcCol, int srcRow,
+					int dstCol, int dstRow, int band, bool writeOnFlush);
+
+        public:
+
+        	int srcCol() const;
+        	int dstCol() const;
+        	int srcRow() const;
+        	int dstRow() const;
+        	int cols() const;
+        	int rows() const;
+
+        	// Return the grid containing tile data.
+        	Grid& grid();
+
+        	// Write the tile's data to the destination grid.
+        	void writeTo(Grid& dest);
+
+        	// Flush tile contents to the source. Called implicitly
+        	// on destruction.
+        	void flush();
+
+        	// Destroy the Tile. Implicitly flushes any changes.
+        	~Tile();
+        };
+
+        class G_DLL_EXPORT TileIterator {
+        	friend class Grid;
+        private:
+        	Grid& m_source;
+        	int m_cols;
+        	int m_rows;
+        	int m_buffer;
+        	int m_curCol;
+        	int m_curRow;
+        	int m_band;
+        	mutable std::mutex m_mtx;
+
+        protected:
+
+        	// Create a TileIterator of the given size. If a buffer is given,
+        	// The tile size in increased, and pixels are read from the source
+        	// to fill the buffer, however only pixels within the unbuffered
+        	// window are written back.
+        	TileIterator(Grid& source, int cols, int rows, int buffer = 0, int band = 1);
+
+        public:
+
+        	// Returns true if there's another tile to be
+        	// retrieved
+        	bool hasNext();
+
+        	// Returns the number of tiles.
+        	int count() const;
+
+        	// Returns the next tile. Writes the previous tile to
+        	// source (if there is one) and reads the next one.
+        	Tile next();
+
+        	// Destroy the TileIterator.
+        	~TileIterator();
+        };
+
         // Abstract class for grids (rasters).
         class G_DLL_EXPORT Grid {
         public:
@@ -194,6 +284,9 @@ namespace geo {
 
             virtual ~Grid() = 0;
             
+            // Return a tile iterator;
+            std::unique_ptr<TileIterator> iterator(int cols, int rows, int buffer = 0, int band = 0);
+
             // Compute the table of Gaussian weights given the size of the table
             // and the std. deviation.
             static void gaussianWeights(double *weights, int size, double sigma);
@@ -518,6 +611,7 @@ namespace geo {
             std::unique_ptr<geo::util::MappedFile> m_mappedFile;
             std::unique_ptr<boost::interprocess::mapped_region> m_region;
             std::unique_ptr<boost::interprocess::file_mapping> m_mapping;
+            std::mutex m_mtx;
 
             // Checks if the grid has been initialized. Throws exception otherwise.
             void checkInit() const;
@@ -593,6 +687,7 @@ namespace geo {
             std::string m_filename;     // Raster filename
             GridProps m_props;
             GDALDataType m_type;        // GDALDataType -- limits the possible template types.
+            std::mutex m_mtx;
 
             GDALDataType getGDType() const;
 
