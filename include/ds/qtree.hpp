@@ -85,21 +85,16 @@ namespace geo {
 			Bounds m_bounds;
 			std::unique_ptr<QTree> m_nodes[4];
 			std::list<T> m_items;
-			int m_maxDepth;
-			int m_maxCount;
-			int m_depth;
-			int m_count;
+			uint32_t m_maxDepth;
+			uint32_t m_maxCount;
+			uint32_t m_depth;
+			bool m_split;
 
 			typename std::list<T>::iterator m_iter;
 			uint64_t m_iterIdx;
 
 			int index(double x, double y) {
-				uint8_t idx = 0;
-				if(x >= m_bounds.midx())
-					idx |= 1;
-				if(y >= m_bounds.midy())
-					idx |= 2;
-				return idx;
+				return ((y >= m_bounds.midy()) << 1) | (x >= m_bounds.midx());
 			}
 
 			QTree* node(uint8_t idx) {
@@ -140,7 +135,7 @@ namespace geo {
 				for(T& item : m_items)
 					node(item.x, item.y)->addItem(std::move(item));
 				m_items.clear();
-				m_count = 0;
+				m_split = true;
 			}
 
 			QTree(const Bounds& bounds, int maxDepth, int maxCount, int depth) :
@@ -148,7 +143,7 @@ namespace geo {
 				m_maxDepth(maxDepth),
 				m_maxCount(maxCount),
 				m_depth(depth),
-				m_count(0),
+				m_split(false),
 				m_iterIdx(0) {
 
 			}
@@ -160,19 +155,21 @@ namespace geo {
 				m_maxDepth(maxDepth),
 				m_maxCount(maxCount),
 				m_depth(0),
-				m_count(0),
+				m_split(false),
 				m_iterIdx(0) {
 			}
 
 			uint64_t count() const {
-				uint64_t c = m_count;
-				if(!c) {
+				if(m_split) {
+					return m_items.size();
+				} else {
+					uint64_t c = 0;
 					for(int i = 0; i < 4; ++i) {
 						if(m_nodes[i].get())
 							c += m_nodes[i]->count();
 					}
+					return c;
 				}
-				return c;
 			}
 
 			const Bounds& bounds() const {
@@ -183,14 +180,13 @@ namespace geo {
 			void addItem(const T& item) {
 				if(!m_bounds.contains(item.x, item.y))
 					g_runerr("Item is out of bounds for QTree.");
-				if(m_count == m_maxCount && m_depth < m_maxDepth)
+				if(m_depth < m_maxDepth && m_items.size() == m_maxCount)
 					split();
-				if(m_depth < m_maxDepth) {
+				if(m_split) {
 					node(item.x, item.y)->addItem(item);
 				} else {
 					m_items.push_back(item);
 				}
-
 			}
 
 			// Search for points within [radius] of the coordinate.
@@ -198,16 +194,19 @@ namespace geo {
 			void search(double x, double y, double radius, U output) {
 				if(!m_bounds.contains(x, y))
 					return;
-				radius = g_sq(radius);
-				for(T& item : m_items) {
-					if(g_sq(item.x - x) + g_sq(item.y - y) <= radius) {
-						*output = item;
-						++output;
+				if(!m_split) {
+					radius = g_sq(radius);
+					for(T& item : m_items) {
+						if(g_sq(item.x - x) + g_sq(item.y - y) <= radius) {
+							*output = item;
+							++output;
+						}
 					}
-				}
-				for(int i = 0; i < 4; ++i) {
-					if(m_nodes[i].get())
-						m_nodes[i]->search(x, y, radius, output);
+				} else {
+					for(int i = 0; i < 4; ++i) {
+						if(m_nodes[i].get())
+							m_nodes[i]->search(x, y, radius, output);
+					}
 				}
 			}
 
@@ -216,15 +215,18 @@ namespace geo {
 			void search(const Bounds& bounds, U output) {
 				if(!m_bounds.intersects(bounds))
 					return;
-				for(T& item : m_items) {
-					if(bounds.contains(item.x, item.y)) {
-						*output = item;
-						++output;
+				if(!m_split) {
+					for(T& item : m_items) {
+						if(bounds.contains(item.x, item.y)) {
+							*output = item;
+							++output;
+						}
 					}
-				}
-				for(int i = 0; i < 4; ++i) {
-					if(m_nodes[i].get())
-						m_nodes[i]->search(bounds, output);
+				} else {
+					for(int i = 0; i < 4; ++i) {
+						if(m_nodes[i].get())
+							m_nodes[i]->search(bounds, output);
+					}
 				}
 			}
 
@@ -235,18 +237,21 @@ namespace geo {
 				Bounds bounds(env->getMinX(), env->getMinY(), env->getMaxX(), env->getMaxY());
 				if(!m_bounds.intersects(bounds))
 					return;
-				GeometryFactory gf;
-				for(T& item : m_items) {
-					geos::geom::Point* pt = gf.createPoint(Coordinate(item.x, item.y));
-					if(geom.contains(pt)) {
-						*output = item;
-						++output;
+				if(!m_split) {
+					GeometryFactory gf;
+					for(T& item : m_items) {
+						geos::geom::Point* pt = gf.createPoint(Coordinate(item.x, item.y));
+						if(geom.contains(pt)) {
+							*output = item;
+							++output;
+						}
+						delete pt;
 					}
-					delete pt;
-				}
-				for(int i = 0; i < 4; ++i) {
-					if(m_nodes[i].get())
-						m_nodes[i]->search(geom, output);
+				} else {
+					for(int i = 0; i < 4; ++i) {
+						if(m_nodes[i].get())
+							m_nodes[i]->search(geom, output);
+					}
 				}
 			}
 
@@ -276,26 +281,27 @@ namespace geo {
 			}
 
 			void reset() {
-				if(m_count) {
+				if(!m_split) {
 					m_iter = m_items.begin();
 				} else {
-					for(int i = 0; i < 4; ++i) {
-						if(m_nodes[i].get())
+					for(int i = 3; i >= 0; --i) {
+						if(m_nodes[i].get()) {
 							m_nodes[i]->reset();
+							m_iterIdx = i;
+						}
 					}
 				}
 			}
 
 			bool next(T& item) {
-				if(m_count) {
-					while(m_iterIdx < 4 && !m_nodes[m_iterIdx].get()) {
-						if(!m_nodes[m_iterIdx]->next(item)) {
-							++m_iterIdx;
-						} else {
-							return true;
+				if(m_split) {
+					while(m_iterIdx < 4) {
+						if(m_nodes[m_iterIdx].get()) {
+							if(m_nodes[m_iterIdx]->next(item))
+								return true;
 						}
+						++m_iterIdx;
 					}
-
 				} else if(m_iter != m_items.end()) {
 					item = *m_iter;
 					++m_iter;
@@ -304,9 +310,21 @@ namespace geo {
 				return false;
 			}
 
-			void finalize() {}
-
-			void updateItem(const T& item) {}
+			void updateItem(const T& uitem) {
+				if(!m_bounds.contains(uitem.x, uitem.y))
+					return;
+				if(!m_split) {
+					for(T& item : m_items) {
+						if(item.x == uitem.x && item.y == uitem.y)
+							item = uitem;
+					}
+				} else {
+					for(int i = 0; i < 4; ++i) {
+						if(m_nodes[i].get())
+							m_nodes[i]->updateItem(uitem);
+					}
+				}
+			}
 
 			~QTree() {
 			}
