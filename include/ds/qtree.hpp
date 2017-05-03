@@ -78,7 +78,243 @@ namespace geo {
 		using namespace geo::ds::util;
 
 		template <class T>
-		class QTree : public Writer {
+		class QTree {
+		protected:
+			// The geographic boundary corresponding to this tree. Will be reshaped to a square
+			// using the longer side.
+			Bounds m_bounds;
+			std::unique_ptr<QTree> m_nodes[4];
+			std::list<T> m_items;
+			int m_maxDepth;
+			int m_maxCount;
+			int m_depth;
+			int m_count;
+
+			typename std::list<T>::iterator m_iter;
+			uint64_t m_iterIdx;
+
+			int index(double x, double y) {
+				uint8_t idx = 0;
+				if(x >= m_bounds.midx())
+					idx |= 1;
+				if(y >= m_bounds.midy())
+					idx |= 2;
+				return idx;
+			}
+
+			QTree* node(uint8_t idx) {
+				if(!m_nodes[idx].get()) {
+					Bounds bounds;
+					if(idx & 1) {
+						bounds.minx(m_bounds.midx());
+						bounds.maxx(m_bounds.maxx());
+					} else {
+						bounds.minx(m_bounds.minx());
+						bounds.maxx(m_bounds.midx());
+					}
+					if(idx & 2) {
+						bounds.miny(m_bounds.midy());
+						bounds.maxy(m_bounds.maxy());
+					} else {
+						bounds.miny(m_bounds.miny());
+						bounds.maxy(m_bounds.midy());
+					}
+					m_nodes[idx].reset(new QTree(bounds, m_maxDepth, m_maxCount, m_depth + 1));
+				}
+				return m_nodes[idx].get();
+			}
+
+			QTree* node(double x, double y) {
+				return node(index(x, y));
+			}
+
+			struct _sorter {
+				double x, y;
+				_sorter(double x, double y) : x(x), y(y) {}
+				bool operator()(const T& a, const T& b) {
+					return  (g_sq(x - a.x) + g_sq(y - a.y)) < (g_sq(x - b.x) + g_sq(y - b.y));
+				}
+			};
+
+			void split() {
+				for(T& item : m_items)
+					node(item.x, item.y)->addItem(std::move(item));
+				m_items.clear();
+				m_count = 0;
+			}
+
+			QTree(const Bounds& bounds, int maxDepth, int maxCount, int depth) :
+				m_bounds(bounds),
+				m_maxDepth(maxDepth),
+				m_maxCount(maxCount),
+				m_depth(depth),
+				m_count(0),
+				m_iterIdx(0) {
+
+			}
+
+		public:
+
+			QTree(const Bounds& bounds, int maxDepth, int maxCount) :
+				m_bounds(bounds),
+				m_maxDepth(maxDepth),
+				m_maxCount(maxCount),
+				m_depth(0),
+				m_count(0),
+				m_iterIdx(0) {
+			}
+
+			uint64_t count() const {
+				uint64_t c = m_count;
+				if(!c) {
+					for(int i = 0; i < 4; ++i) {
+						if(m_nodes[i].get())
+							c += m_nodes[i]->count();
+					}
+				}
+				return c;
+			}
+
+			const Bounds& bounds() const {
+				return m_bounds;
+			}
+
+			// Add an item to the store.
+			void addItem(const T& item) {
+				if(!m_bounds.contains(item.x, item.y))
+					g_runerr("Item is out of bounds for QTree.");
+				if(m_count == m_maxCount && m_depth < m_maxDepth)
+					split();
+				if(m_depth < m_maxDepth) {
+					node(item.x, item.y)->addItem(item);
+				} else {
+					m_items.push_back(item);
+				}
+
+			}
+
+			// Search for points within [radius] of the coordinate.
+			template <class U>
+			void search(double x, double y, double radius, U output) {
+				if(!m_bounds.contains(x, y))
+					return;
+				radius = g_sq(radius);
+				for(T& item : m_items) {
+					if(g_sq(item.x - x) + g_sq(item.y - y) <= radius) {
+						*output = item;
+						++output;
+					}
+				}
+				for(int i = 0; i < 4; ++i) {
+					if(m_nodes[i].get())
+						m_nodes[i]->search(x, y, radius, output);
+				}
+			}
+
+			// Search for points inside the bounding box.
+			template <class U>
+			void search(const Bounds& bounds, U output) {
+				if(!m_bounds.intersects(bounds))
+					return;
+				for(T& item : m_items) {
+					if(bounds.contains(item.x, item.y)) {
+						*output = item;
+						++output;
+					}
+				}
+				for(int i = 0; i < 4; ++i) {
+					if(m_nodes[i].get())
+						m_nodes[i]->search(bounds, output);
+				}
+			}
+
+			// Search for points inside the GEOS geometry.
+			template <class U>
+			void search(const Geometry& geom, U output) {
+				Envelope* env = (Envelope*) geom.getEnvelope();
+				Bounds bounds(env->getMinX(), env->getMinY(), env->getMaxX(), env->getMaxY());
+				if(!m_bounds.intersects(bounds))
+					return;
+				GeometryFactory gf;
+				for(T& item : m_items) {
+					geos::geom::Point* pt = gf.createPoint(Coordinate(item.x, item.y));
+					if(geom.contains(pt)) {
+						*output = item;
+						++output;
+					}
+					delete pt;
+				}
+				for(int i = 0; i < 4; ++i) {
+					if(m_nodes[i].get())
+						m_nodes[i]->search(geom, output);
+				}
+			}
+
+			template <class U>
+			void nearest(double x, double y, uint64_t n, U output) {
+				if(!m_bounds.contains(x, y))
+					return;
+				std::vector<T> tmp;
+				double radius = 1;
+				while(radius <= g_max(m_bounds.width(), m_bounds.height())) {
+					search(x, y, radius, std::back_inserter(tmp));
+
+					if(tmp.size() >= n) {
+						if(tmp.size() > n) {
+							struct _sorter sorter(x, y);
+							std::sort(tmp.begin(), tmp.end(), sorter);
+						}
+						for(uint64_t i = 0; i < n; ++i) {
+							*output = std::move(tmp[0]);
+							++output;
+						}
+						break;
+					}
+
+					radius *= 2;
+				}
+			}
+
+			void reset() {
+				if(m_count) {
+					m_iter = m_items.begin();
+				} else {
+					for(int i = 0; i < 4; ++i) {
+						if(m_nodes[i].get())
+							m_nodes[i]->reset();
+					}
+				}
+			}
+
+			bool next(T& item) {
+				if(m_count) {
+					while(m_iterIdx < 4 && !m_nodes[m_iterIdx].get()) {
+						if(!m_nodes[m_iterIdx]->next(item)) {
+							++m_iterIdx;
+						} else {
+							return true;
+						}
+					}
+
+				} else if(m_iter != m_items.end()) {
+					item = *m_iter;
+					++m_iter;
+					return true;
+				}
+				return false;
+			}
+
+			void finalize() {}
+
+			void updateItem(const T& item) {}
+
+			~QTree() {
+			}
+
+		};
+
+		template <class T>
+		class MQTree : public Writer {
 		private:
 			// The geographic boundary corresponding to this tree. Will be reshaped to a square
 			// using the longer side.
@@ -98,7 +334,7 @@ namespace geo {
 			// Cache points for writing.
 			std::unordered_map<uint64_t, std::vector<T> > m_cache;
 			// The mapped memory.
-			MappedFile m_mapped;
+			std::unique_ptr<MappedFile> m_mapped;
 			std::queue<T> m_wq;
 			std::thread m_writer;
 			bool m_running;
@@ -148,7 +384,7 @@ namespace geo {
 					const std::vector<T>& items = it.second;
 					if(!items.empty()) {
 						uint64_t pos = m_catalog[idx].update(items.size(), m_position);
-						m_mapped.write((void*) items.data(), pos, items.size() * sizeof(T));
+						m_mapped->write((void*) items.data(), pos, items.size() * sizeof(T));
 					}
 				}
 				m_cache.clear();
@@ -159,7 +395,7 @@ namespace geo {
 				std::vector<T>& items = m_cache[idx];
 				if(!items.empty()) {
 					uint64_t pos = m_catalog[idx].update(items.size(), m_position);
-					m_mapped.write((void*) items.data(), pos, items.size() * sizeof(T));
+					m_mapped->write((void*) items.data(), pos, items.size() * sizeof(T));
 				}
 				m_cache.erase(idx);
 			}
@@ -213,7 +449,7 @@ namespace geo {
 
 		public:
 
-			QTree(const Bounds& bounds, uint64_t bins = 512, uint64_t bufSize = 64) :
+			MQTree(const Bounds& bounds, uint64_t bins = 512, uint64_t bufSize = 64, bool mapped = false) :
 				m_bounds(bounds),
 				m_bins(bins),
 				m_bufSize(bufSize),
@@ -224,6 +460,8 @@ namespace geo {
 				m_size = g_max(m_bounds.width(), m_bounds.height());
 				m_bounds.set(m_bounds.midx() - m_size / 2, m_bounds.midy() - m_size / 2,
 					m_bounds.midx() + m_size / 2, m_bounds.midy() + m_size / 2);
+
+				m_mapped.reset(new MappedFile(false));
 
 				startWrite();
 			}
@@ -243,7 +481,7 @@ namespace geo {
 			// Add an item to the store.
 			void addItem(const T& item) {
 				if(!m_bounds.contains(item.x, item.y))
-					g_runerr("Item is out of bounds for QTree.");
+					g_runerr("Item is out of bounds for MQTree.");
 				{
 					std::lock_guard<std::mutex> lock(m_mtx);
 					m_wq.push(item);
@@ -269,7 +507,7 @@ namespace geo {
 						uint64_t pos = 0;
 						T item;
 						while(ci.next(&pos)) {
-							if(!m_mapped.read(item, pos))
+							if(!m_mapped->read(item, pos))
 								g_runerr("Failed to read item.");
 							if(g_sq(item.x - x) + g_sq(item.y - y) <= radius) {
 								item.pos = pos;
@@ -297,7 +535,7 @@ namespace geo {
 						uint64_t pos = 0;
 						T item;
 						while(ci.next(&pos)) {
-							if(!m_mapped.read(item, pos))
+							if(!m_mapped->read(item, pos))
 								g_runerr("Failed to read item.");
 							if(bounds.contains(item.x, item.y)) {
 								item.pos = pos;
@@ -328,7 +566,7 @@ namespace geo {
 						uint64_t pos = 0;
 						T item;
 						while(ci.next(&pos)) {
-							if(!m_mapped.read(item, pos))
+							if(!m_mapped->read(item, pos))
 								g_runerr("Failed to read item.");
 							geos::geom::Point* pt = gf.createPoint(Coordinate(item.x, item.y));
 							if(geom.contains(pt)) {
@@ -360,7 +598,7 @@ namespace geo {
 							uint64_t pos = 0;
 							T item;
 							while(ci.next(&pos)) {
-								if(!m_mapped.read(item, pos))
+								if(!m_mapped->read(item, pos))
 									g_runerr("Failed to read item.");
 								item.pos = pos;
 								tmp.push_back(std::move(item));
@@ -402,7 +640,7 @@ namespace geo {
 						++m_iterIdx;
 						continue;
 					}
-					m_mapped.read(item, pos);
+					m_mapped->read(item, pos);
 					item.pos = pos;
 					return true;
 				}
@@ -410,14 +648,13 @@ namespace geo {
 			}
 
 			void updateItem(const T& item) {
-				m_mapped.write(item, item.pos);
+				m_mapped->write(item, item.pos);
 			}
 
-			~QTree() {
+			~MQTree() {
 			}
 
 		};
-
 	}
 }
 
