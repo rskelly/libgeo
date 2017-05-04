@@ -521,13 +521,21 @@ int Tile::rows() const {
 	return m_rows;
 }
 
+int Tile::col() const {
+	return m_col;
+}
+
+int Tile::row() const {
+	return m_row;
+}
+
 Grid& Tile::grid() {
 	return *m_tile;
 }
 
 void Tile::flush() {
 	if(m_writeOnFlush && m_tile)
-		m_tile->writeTo(*m_source, m_cols, m_rows, m_srcCol, m_srcRow, m_dstCol, m_dstRow, 1, m_band);
+		writeTo(*m_source);
 }
 
 void Tile::writeTo(Grid& dest) {
@@ -796,7 +804,6 @@ void Grid::smooth(Grid &smoothed, double sigma, int size, int band,
 		const GridProps& props = grid.props();
 		MemRaster buf(props);
 		grid.writeTo(buf);
-		grid.fillFloat(i);
 
 		// Process the entire block, even the buffer parts.
 		for (int r = 0; r < props.rows() - size; ++r) {

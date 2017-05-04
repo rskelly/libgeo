@@ -225,6 +225,8 @@ namespace geo {
         	int dstRow() const;
         	int cols() const;
         	int rows() const;
+        	int col() const;
+        	int row() const;
 
         	// Return the grid containing tile data.
         	Grid& grid();
@@ -285,7 +287,7 @@ namespace geo {
             virtual ~Grid() = 0;
             
             // Return a tile iterator;
-            std::unique_ptr<TileIterator> iterator(int cols, int rows, int buffer = 0, int band = 0);
+            std::unique_ptr<TileIterator> iterator(int cols, int rows, int buffer = 0, int band = 1);
 
             // Compute the table of Gaussian weights given the size of the table
             // and the std. deviation.
