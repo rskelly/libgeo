@@ -1812,28 +1812,32 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 
 		}
 
-		for(auto it = polys.begin(); it != polys.end();) {
-			if(current.find(it->first) == current.end()) {
-				std::unique_lock<std::mutex> lck(m_pqmtx);
-				while(polyQ.size() > 100)
-					m_cond2.wait(lck);
-				polyQ.push(std::move(it->second));
-				it = polys.erase(it);
-			} else {
-				++it;
+		{
+			std::unique_lock<std::mutex> lck(m_pqmtx);
+			while(polyQ.size() > 1)
+				m_cond2.wait(lck);
+			for(auto it = polys.begin(); it != polys.end();) {
+				if(current.find(it->first) == current.end()) {
+					polyQ.push(std::move(it->second));
+					it = polys.erase(it);
+				} else {
+					++it;
+				}
 			}
 		}
 		m_cond1.notify_one();
 	}
 
 	while(!polys.empty()) {
-		int i = 0;
-		for(auto it = polys.begin(); i < 100 && it != polys.end(); ++i) {
+		{
 			std::unique_lock<std::mutex> lck(m_pqmtx);
-			while(polyQ.size() > 100)
+			while(polyQ.size() > 1)
 				m_cond2.wait(lck);
-			polyQ.push(std::move(it->second));
-			it = polys.erase(it);
+			int i = 0;
+			for(auto it = polys.begin(); i < 1000 && it != polys.end(); ++i) {
+				polyQ.push(std::move(it->second));
+				it = polys.erase(it);
+			}
 		}
 		m_cond1.notify_one();
 	}
