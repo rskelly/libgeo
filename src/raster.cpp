@@ -1791,7 +1791,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 					seq->add(Coordinate(x0, y1));
 					seq->add(Coordinate(x0, y0));
 					LinearRing* ring = gf->createLinearRing(seq);
-					Polygon* geom = gf->createPolygon(ring, nullptr);
+					Polygon* geom = gf->createPolygon(ring, NULL);
 
 					// If it's already in the list, merge it, otherwise add it.
 					if(polys.find(id0) == polys.end()) {
