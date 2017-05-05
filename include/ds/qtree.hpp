@@ -22,6 +22,8 @@ namespace geo {
 	namespace ds {
 		namespace util {
 
+			// Iterface for MQTree that allows writing
+			// to disk.
 			class Writer {
 			public:
 				virtual void doWrite() = 0;
@@ -32,6 +34,9 @@ namespace geo {
 				qt->doWrite();
 			}
 
+			// A catalog item for MQTRee. Stores the number of
+			// items in a disk location, and its offset from the
+			// beginning of the file.
 			template <class T>
 			class CatItem {
 			private:
@@ -77,26 +82,46 @@ namespace geo {
 
 		using namespace geo::ds::util;
 
+		// An in-memory quadtree.
 		template <class T>
 		class QTree {
 		protected:
 			// The geographic boundary corresponding to this tree. Will be reshaped to a square
 			// using the longer side.
 			Bounds m_bounds;
+			// The four sub-quads
 			std::unique_ptr<QTree> m_nodes[4];
+			// The list of items stored in the current node if not split.
 			std::list<T> m_items;
+			// The max tree depth. TODO: Should be small enough to prevent degenerate nodes.
 			uint32_t m_maxDepth;
+			// Max number of items before splitting a node.
 			uint32_t m_maxCount;
+			// The depth of the current node.
 			uint32_t m_depth;
+			// True if the current node has been split.
 			bool m_split;
 
+			// An iterator for traversing the current node's items.
 			typename std::list<T>::iterator m_iter;
-			uint64_t m_iterIdx;
+			// An index for traversing the current node's sub-nodes.
+			uint8_t m_iterIdx;
 
+			// Sorts the items.
+			struct qtree_sorter {
+				double x, y;
+				qtree_sorter(double x, double y) : x(x), y(y) {}
+				bool operator()(const T& a, const T& b) {
+					return  (g_sq(x - a.x) + g_sq(y - a.y)) < (g_sq(x - b.x) + g_sq(y - b.y));
+				}
+			};
+
+			// Returns the index of a sub-node given a point.
 			int index(double x, double y) {
 				return ((y >= m_bounds.midy()) << 1) | (x >= m_bounds.midx());
 			}
 
+			// Returns the node for the given index; creates it if necessary.
 			QTree* node(uint8_t idx) {
 				if(!m_nodes[idx].get()) {
 					Bounds bounds;
@@ -119,18 +144,12 @@ namespace geo {
 				return m_nodes[idx].get();
 			}
 
+			// Returns the node for the given point; creates it if necessary.
 			QTree* node(double x, double y) {
 				return node(index(x, y));
 			}
 
-			struct _sorter {
-				double x, y;
-				_sorter(double x, double y) : x(x), y(y) {}
-				bool operator()(const T& a, const T& b) {
-					return  (g_sq(x - a.x) + g_sq(y - a.y)) < (g_sq(x - b.x) + g_sq(y - b.y));
-				}
-			};
-
+			// Split the node; distribute items to subnodes.
 			void split() {
 				for(T& item : m_items)
 					node(item.x, item.y)->addItem(std::move(item));
@@ -138,6 +157,21 @@ namespace geo {
 				m_split = true;
 			}
 
+			// Search for all points inside nodes intersecting the bounding box.
+			void findIntersecting(const Bounds& bounds, std::list<T>& output) {
+				if(m_bounds.intersects(bounds)) {
+					if(!m_split) {
+						output.insert(output.end(), m_items.begin(), m_items.end());
+					} else {
+						for(int i = 0; i < 4; ++i) {
+							if(m_nodes[i].get())
+								m_nodes[i]->findIntersecting(bounds, output);
+						}
+					}
+				}
+			}
+
+			// Construct a sub-node.
 			QTree(const Bounds& bounds, int maxDepth, int maxCount, int depth) :
 				m_bounds(bounds),
 				m_maxDepth(maxDepth),
@@ -150,6 +184,7 @@ namespace geo {
 
 		public:
 
+			// Construct a QTree with the given bounds, depth and count.
 			QTree(const Bounds& bounds, int maxDepth, int maxCount) :
 				m_bounds(bounds),
 				m_maxDepth(maxDepth),
@@ -157,8 +192,11 @@ namespace geo {
 				m_depth(0),
 				m_split(false),
 				m_iterIdx(0) {
+
+				m_bounds.cube();
 			}
 
+			// The total number of items in the node.
 			uint64_t count() const {
 				if(m_split) {
 					return m_items.size();
@@ -172,11 +210,12 @@ namespace geo {
 				}
 			}
 
+			// The bounds of the node.
 			const Bounds& bounds() const {
 				return m_bounds;
 			}
 
-			// Add an item to the store.
+			// Add an item to the node.
 			void addItem(const T& item) {
 				if(!m_bounds.contains(item.x, item.y))
 					g_runerr("Item is out of bounds for QTree.");
@@ -189,23 +228,62 @@ namespace geo {
 				}
 			}
 
+			void removeItem(const T& uitem) {
+				if(m_bounds.contains(uitem.x, uitem.y)) {
+					if(!m_split) {
+						for(auto it = m_items.begin(); it != m_items.end(); ) {
+							if(it->x == uitem.x && it->y == uitem.y) {
+								it = m_items.erase(it);
+							} else {
+								++it;
+							}
+						}
+					} else {
+						node(uitem.x, uitem.y)->removeItem(uitem);
+					}
+				}
+			}
+
+			// Update the item in the tree. Updating the position is not allowed.
+			// For that, remove the item and re-insert it.
+			void updateItem(const T& uitem) {
+				if(m_bounds.contains(uitem.x, uitem.y)) {
+					if(!m_split) {
+						for(T& item : m_items) {
+							if(item.x == uitem.x && item.y == uitem.y)
+								item = uitem;
+						}
+					} else {
+						node(uitem.x, uitem.y)->updateItem(uitem);
+					}
+				}
+			}
+
 			// Search for points within [radius] of the coordinate.
 			template <class U>
 			void search(double x, double y, double radius, U output) {
-				if(!m_bounds.contains(x, y))
-					return;
-				if(!m_split) {
-					radius = g_sq(radius);
-					for(T& item : m_items) {
-						if(g_sq(item.x - x) + g_sq(item.y - y) <= radius) {
+				// Search with an inside radius of zero.
+				search(x, y, radius, 0, output);
+			}
+
+			// Search for points within [outside] of the coordinate, but not within [inside].
+			template <class U>
+			void search(double x, double y, double outside, double inside, U output) {
+				// Search within the bounding box first.
+				Bounds bounds(x - outside, y - outside, x + outside, y + outside);
+				if(m_bounds.intersects(bounds)) {
+					std::list<T> result;
+					// Find all nodes that intersect the bounds and return their contents.
+					findIntersecting(bounds, result);
+					// Find all items inside the outside radius, and outside the inside radius.
+					outside = g_sq(outside);
+					inside = g_sq(inside);
+					for(T& item : result) {
+						double dist = g_sq(item.x - x) + g_sq(item.y - y);
+						if(dist <= outside && dist > inside) {
 							*output = item;
 							++output;
 						}
-					}
-				} else {
-					for(int i = 0; i < 4; ++i) {
-						if(m_nodes[i].get())
-							m_nodes[i]->search(x, y, radius, output);
 					}
 				}
 			}
@@ -213,73 +291,76 @@ namespace geo {
 			// Search for points inside the bounding box.
 			template <class U>
 			void search(const Bounds& bounds, U output) {
-				if(!m_bounds.intersects(bounds))
-					return;
-				if(!m_split) {
-					for(T& item : m_items) {
+				if(m_bounds.intersects(bounds)) {
+					std::list<T> result;
+					// Find all nodes that intersect the bounds and return their contents.
+					findIntersecting(bounds, result);
+					// Find all items contained in the bounds.
+					for(T& item : result) {
 						if(bounds.contains(item.x, item.y)) {
 							*output = item;
 							++output;
 						}
 					}
-				} else {
-					for(int i = 0; i < 4; ++i) {
-						if(m_nodes[i].get())
-							m_nodes[i]->search(bounds, output);
-					}
 				}
+
 			}
 
 			// Search for points inside the GEOS geometry.
 			template <class U>
 			void search(const Geometry& geom, U output) {
+				// Create an envelope from the geometry.
 				Envelope* env = (Envelope*) geom.getEnvelope();
+				// Make sure the geom intersects with the tree.
 				Bounds bounds(env->getMinX(), env->getMinY(), env->getMaxX(), env->getMaxY());
-				if(!m_bounds.intersects(bounds))
-					return;
-				if(!m_split) {
+				if(m_bounds.intersects(bounds)) {
+					std::list<T> result;
+					// Find all nodes with relevant items.
+					findIntersecting(bounds, result);
 					GeometryFactory gf;
-					for(T& item : m_items) {
+					// Find all items that are inside the geometry.
+					for(T& item : result) {
 						geos::geom::Point* pt = gf.createPoint(Coordinate(item.x, item.y));
 						if(geom.contains(pt)) {
 							*output = item;
 							++output;
 						}
-						delete pt;
-					}
-				} else {
-					for(int i = 0; i < 4; ++i) {
-						if(m_nodes[i].get())
-							m_nodes[i]->search(geom, output);
 					}
 				}
 			}
 
+			// Find the [n] nearest items to the coordinate.
+			// If [outside] and [inside] are given, they're the outer and inner radii to search within.
+			// and will be doubled on each iteration.
 			template <class U>
-			void nearest(double x, double y, uint64_t n, U output) {
-				if(!m_bounds.contains(x, y))
-					return;
-				std::vector<T> tmp;
-				double radius = 1;
-				while(radius <= g_max(m_bounds.width(), m_bounds.height())) {
-					search(x, y, radius, std::back_inserter(tmp));
+			void nearest(double x, double y, uint64_t n, U output, double outside = 1, double inside = 0) {
 
-					if(tmp.size() >= n) {
-						if(tmp.size() > n) {
-							struct _sorter sorter(x, y);
-							std::sort(tmp.begin(), tmp.end(), sorter);
+				std::list<T> result;
+				// Search while the outside radius is smaller than the bounds.
+				while(outside <= m_bounds.width()) {
+					search(x, y, outside, inside, std::back_inserter(result));
+					if(result.size() >= n) {
+						if(result.size() > n) {
+							struct qtree_sorter sorter(x, y);
+							result.sort(sorter);
+							//std::sort(result.begin(), result.end(), sorter);
 						}
-						for(uint64_t i = 0; i < n; ++i) {
-							*output = std::move(tmp[0]);
+						uint64_t i = 0;
+						for(T& item : result) {
+							*output = item;
 							++output;
+							if(++i == n)
+								break;
 						}
 						break;
 					}
-
-					radius *= 2;
+					inside = outside;
+					outside *= 2; // If we don't find enough, try again with a larger radius.
 				}
+
 			}
 
+			// Reset the iterator on this node and children.
 			void reset() {
 				if(!m_split) {
 					m_iter = m_items.begin();
@@ -293,6 +374,7 @@ namespace geo {
 				}
 			}
 
+			// Get the next item in this subtree.
 			bool next(T& item) {
 				if(m_split) {
 					while(m_iterIdx < 4) {
@@ -308,22 +390,6 @@ namespace geo {
 					return true;
 				}
 				return false;
-			}
-
-			void updateItem(const T& uitem) {
-				if(!m_bounds.contains(uitem.x, uitem.y))
-					return;
-				if(!m_split) {
-					for(T& item : m_items) {
-						if(item.x == uitem.x && item.y == uitem.y)
-							item = uitem;
-					}
-				} else {
-					for(int i = 0; i < 4; ++i) {
-						if(m_nodes[i].get())
-							m_nodes[i]->updateItem(uitem);
-					}
-				}
 			}
 
 			~QTree() {
