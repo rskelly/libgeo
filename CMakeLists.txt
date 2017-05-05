@@ -67,7 +67,11 @@ target_include_directories(geo PUBLIC include)
 
 add_library (util STATIC src/util.cpp)
 target_include_directories(util PUBLIC include ${Boost_INCLUDE_DIRS} ${GDAL_INCLUDE_DIR})
-target_link_libraries (util ${Boost_LIBRARIES} ${GDAL_LIBRARY} geo rt)
+if (UNIX AND NOT APPLE)
+	target_link_libraries (util ${Boost_LIBRARIES} ${GDAL_LIBRARY} geo rt)
+else ()
+	target_link_libraries (util ${Boost_LIBRARIES} ${GDAL_LIBRARY} geo)
+endif ()
 
 add_library (db STATIC src/db.cpp)
 target_include_directories(db PUBLIC include ${Boost_INCLUDE_DIRS} ${GDAL_INCLUDE_DIR})
