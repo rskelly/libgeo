@@ -91,7 +91,11 @@ add_executable (smooth src/tests/smooth.cpp)
 target_include_directories(smooth PUBLIC include)
 target_link_libraries (smooth PUBLIC raster)
 
-add_executable (qtree src/tests/qtree.cpp)
-target_include_directories(qtree PUBLIC include)# ${STXXL_INCLUDE_DIRS})
-target_link_libraries (qtree PUBLIC util)# ${STXXL_LIBRARIES})
+add_executable (fqtree src/tests/fqtree.cpp)
+target_include_directories(fqtree PUBLIC include)# ${STXXL_INCLUDE_DIRS})
+target_link_libraries (fqtree PUBLIC util)# ${STXXL_LIBRARIES})
+
+add_executable (mqtree src/tests/mqtree.cpp)
+target_include_directories(mqtree PUBLIC include)# ${STXXL_INCLUDE_DIRS})
+target_link_libraries (mqtree PUBLIC util)# ${STXXL_LIBRARIES})
 

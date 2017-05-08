@@ -20,77 +20,16 @@ using namespace geos::geom;
 
 namespace geo {
 	namespace ds {
-		namespace util {
-
-			// Iterface for MQTree that allows writing
-			// to disk.
-			class Writer {
-			public:
-				virtual void doWrite() = 0;
-				virtual ~Writer() {}
-			};
-
-			static void writer(Writer* qt) {
-				qt->doWrite();
-			}
-
-			// A catalog item for MQTRee. Stores the number of
-			// items in a disk location, and its offset from the
-			// beginning of the file.
-			template <class T>
-			class CatItem {
-			private:
-				uint64_t m_idx;
-				uint64_t m_iidx;
-
-			public:
-				std::vector<std::pair<uint64_t, uint64_t> > items;
-
-				CatItem() : m_idx(0), m_iidx(0) {}
-
-				uint64_t update(uint64_t count, uint64_t& position) {
-					uint64_t pos = position;
-					position += count * sizeof(T);
-					items.push_back(std::make_pair(count, pos));
-					return pos;
-				}
-
-				// Reset the position iterator.
-				void reset() {
-					m_idx = 0;
-					m_iidx = 0;
-				}
-
-				// Get the position in memory of the next item in the catalog.
-				bool next(uint64_t* pos) {
-					while(m_idx < items.size()) {
-						if(m_iidx < items[m_idx].first) {
-							// The start position is stored; add to it the position
-							// of the item at the given index.
-							*pos = items[m_idx].second + m_iidx * (uint64_t) sizeof(T);
-							++m_iidx;
-							return true;
-						} else {
-							m_iidx = 0;
-							++m_idx;
-						}
-					}
-					return false;
-				}
-			};
-		}
-
-		using namespace geo::ds::util;
 
 		// An in-memory quadtree.
 		template <class T>
-		class QTree {
+		class MQTree {
 		protected:
 			// The geographic boundary corresponding to this tree. Will be reshaped to a square
 			// using the longer side.
 			Bounds m_bounds;
 			// The four sub-quads
-			std::unique_ptr<QTree> m_nodes[4];
+			std::unique_ptr<MQTree> m_nodes[4];
 			// The list of items stored in the current node if not split.
 			std::list<T> m_items;
 			// The max tree depth. TODO: Should be small enough to prevent degenerate nodes.
@@ -122,7 +61,7 @@ namespace geo {
 			}
 
 			// Returns the node for the given index; creates it if necessary.
-			QTree* node(uint8_t idx) {
+			MQTree* node(uint8_t idx) {
 				if(!m_nodes[idx].get()) {
 					Bounds bounds;
 					if(idx & 1) {
@@ -139,13 +78,13 @@ namespace geo {
 						bounds.miny(m_bounds.miny());
 						bounds.maxy(m_bounds.midy());
 					}
-					m_nodes[idx].reset(new QTree(bounds, m_maxDepth, m_maxCount, m_depth + 1));
+					m_nodes[idx].reset(new MQTree(bounds, m_maxDepth, m_maxCount, m_depth + 1));
 				}
 				return m_nodes[idx].get();
 			}
 
 			// Returns the node for the given point; creates it if necessary.
-			QTree* node(double x, double y) {
+			MQTree* node(double x, double y) {
 				return node(index(x, y));
 			}
 
@@ -172,7 +111,7 @@ namespace geo {
 			}
 
 			// Construct a sub-node.
-			QTree(const Bounds& bounds, int maxDepth, int maxCount, int depth) :
+			MQTree(const Bounds& bounds, int maxDepth, int maxCount, int depth) :
 				m_bounds(bounds),
 				m_maxDepth(maxDepth),
 				m_maxCount(maxCount),
@@ -185,7 +124,7 @@ namespace geo {
 		public:
 
 			// Construct a QTree with the given bounds, depth and count.
-			QTree(const Bounds& bounds, int maxDepth, int maxCount) :
+			MQTree(const Bounds& bounds, int maxDepth, int maxCount) :
 				m_bounds(bounds),
 				m_maxDepth(maxDepth),
 				m_maxCount(maxCount),
@@ -401,7 +340,7 @@ namespace geo {
 				return false;
 			}
 
-			~QTree() {
+			~MQTree() {
 			}
 
 		};
@@ -416,7 +355,7 @@ namespace geo {
 			// The four sub-quads
 			std::unique_ptr<FQTree> m_nodes[4];
 			// The list of items stored in the current node if not split.
-			std::list<T> m_items;
+			std::vector<T> m_items;
 			// Items used by the iterator.
 			std::list<T> m_iterItems;
 			// The max tree depth. TODO: Should be small enough to prevent degenerate nodes.
@@ -456,7 +395,7 @@ namespace geo {
 			}
 
 			// Returns the node for the given index; creates it if necessary.
-			QTree* node(uint8_t idx) {
+			FQTree* node(uint8_t idx) {
 				if(!m_nodes[idx].get()) {
 					Bounds bounds;
 					if(idx & 1) {
@@ -480,7 +419,7 @@ namespace geo {
 			}
 
 			// Returns the node for the given point; creates it if necessary.
-			QTree* node(double x, double y) {
+			FQTree* node(double x, double y) {
 				return node(index(x, y));
 			}
 
@@ -495,7 +434,8 @@ namespace geo {
 			void split() {
 				flush();
 				std::lock_guard<std::mutex> lk(m_fmtx);
-				std::vector<T> items(m_fpos / sizeof(T));
+				std::vector<T> items(m_count);
+				load(items);
 				for(T& item : items)
 					node(item.x, item.y)->addItem(std::move(item));
 				m_split = true;
@@ -508,7 +448,7 @@ namespace geo {
 				if(m_bounds.intersects(bounds)) {
 					flush();
 					if(!m_split) {
-						std::vector<T> items;
+						std::vector<T> items(m_count);
 						load(items);
 						output.insert(output.end(), items.begin(), items.end());
 					} else {
@@ -534,6 +474,45 @@ namespace geo {
 
 				Util::mkdir(dir);
 				m_fpath = Util::pathJoin(dir, "items");
+
+				save();
+			}
+
+			void save() {
+				std::ofstream f(Util::pathJoin(m_fdir, "props"));
+				f << m_bounds.minx() << "," << m_bounds.miny() << "," << m_bounds.maxx() << "," << m_bounds.maxy() << "\n";
+				f << m_maxDepth << "," << m_maxCount << "\n";
+			}
+
+			void crawl() {
+				std::string fitems = Util::pathJoin(m_fdir, "items");
+				for(int i = 0; i < 4; ++i) {
+					std::string fdir = Util::pathJoin(m_fdir, std::to_string(i));
+					if(Util::exists(fdir)) {
+						FQTree* t = new FQTree(fdir, m_maxDepth, m_maxCount, m_depth + 1);
+						m_nodes[i].reset(t);
+						m_split = true;
+					}
+				}
+				if(!m_split && Util::exists(fitems)) {
+					m_bounds.collapse();
+					std::ifstream f(Util::pathJoin(m_fdir, "props"));
+					char buf[32];
+					f.get(buf, 32, ',');
+					m_bounds.minx(atof(buf));
+					f.get(buf, 32, ',');
+					m_bounds.miny(atof(buf));
+					f.get(buf, 32, ',');
+					m_bounds.maxx(atof(buf));
+					f.get(buf, 32, ';');
+					m_bounds.maxy(atof(buf));
+					f.get(buf, 32, ',');
+					m_maxDepth = atoi(buf);
+					f.get(buf, 32, ';');
+					m_maxCount = atoi(buf);
+				} else {
+					g_runerr("Directory structure is corrupt.");
+				}
 			}
 
 		public:
@@ -553,6 +532,21 @@ namespace geo {
 				m_bounds.cube();
 				Util::mkdir(dir);
 				m_fpath = Util::pathJoin(dir, "items");
+
+				save();
+			}
+
+			FQTree(const std::string& dir, int maxDepth = 0, int maxCount = 0, int depth = 0) :
+				m_maxDepth(maxDepth),
+				m_maxCount(maxCount),
+				m_depth(depth),
+				m_count(0),
+				m_split(false),
+				m_iterIdx(0),
+				m_fdir(dir),
+				m_fpos(0) {
+
+				crawl();
 			}
 
 			// The total number of items in the node.
@@ -584,6 +578,7 @@ namespace geo {
 					node(item.x, item.y)->addItem(item);
 				} else {
 					m_items.push_back(item);
+					++m_count;
 				}
 			}
 
@@ -591,6 +586,7 @@ namespace geo {
 				if(m_bounds.contains(uitem.x, uitem.y)) {
 					flush();
 					if(!m_split) {
+						m_items.resize(m_count);
 						load(m_items);
 						for(auto it = m_items.begin(); it != m_items.end(); ) {
 							if(it->x == uitem.x && it->y == uitem.y) {
@@ -612,6 +608,7 @@ namespace geo {
 				flush();
 				if(m_bounds.contains(uitem.x, uitem.y)) {
 					if(!m_split) {
+						m_items.resize(m_count);
 						load(m_items);
 						for(T& item : m_items) {
 							if(item.x == uitem.x && item.y == uitem.y)
@@ -737,7 +734,7 @@ namespace geo {
 			void reset() {
 				flush();
 				if(!m_split) {
-					m_iterItems.clear();
+					m_iterItems.resize(m_count);
 					load(m_iterItems);
 					m_iter = m_iterItems.begin();
 				} else {
@@ -781,7 +778,7 @@ namespace geo {
 						}
 						std::fseek(f, m_fpos, SEEK_SET);
 						int written = 0;
-						if(!(written = std::fwrite(m_items, sizeof(T), m_items.size(), f)))
+						if(!(written = std::fwrite(m_items.data(), sizeof(T), m_items.size(), f)))
 							g_runerr("Failed to write items.");
 						std::fclose(f);
 						m_fpos += sizeof(T) * written;
