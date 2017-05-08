@@ -396,6 +396,14 @@ double GridProps::tly() const {
 	return m_trans[3];
 }
 
+void GridProps::setTLX(double x) {
+	m_trans[0] = 0;
+}
+
+void GridProps::setTLY(double y) {
+	m_trans[3] = y;
+}
+
 void GridProps::setDataType(DataType type) {
 	m_type = type;
 }

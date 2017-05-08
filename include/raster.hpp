@@ -143,6 +143,10 @@ namespace geo {
 
     		double tly() const;
 
+    		void setTLX(double);
+
+    		void setTLY(double);
+
     		// Set the number of bands.
     		void setBands(int bands);
 
