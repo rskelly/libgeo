@@ -143,10 +143,6 @@ namespace geo {
 
     		double tly() const;
 
-    		void setTLX(double);
-
-    		void setTLY(double);
-
     		// Set the number of bands.
     		void setBands(int bands);
 
@@ -454,7 +450,7 @@ namespace geo {
             // Callback is an optional function reference with a single float
             // between 0 and 1, for status tracking.
             void smooth(Grid &smoothed, double sigma, int size, int band = 1,
-                geo::util::Callbacks *status = nullptr, 
+                Status* status = nullptr,
                 bool *cancel = nullptr);
 
             // The radius is given with cells as the unit, but

@@ -396,14 +396,6 @@ double GridProps::tly() const {
 	return m_trans[3];
 }
 
-void GridProps::setTLX(double x) {
-	m_trans[0] = 0;
-}
-
-void GridProps::setTLY(double y) {
-	m_trans[3] = y;
-}
-
 void GridProps::setDataType(DataType type) {
 	m_type = type;
 }
@@ -772,14 +764,14 @@ void Grid::voidFillIDW(double radius, int count, double exp, int band) {
 using namespace geo::raster::util;
 
 void Grid::smooth(Grid &smoothed, double sigma, int size, int band,
-		Callbacks *status, bool *cancel) {
+		Status* status, bool *cancel) {
 
 	const GridProps& gp = props();
 
 	if (!cancel)
 		cancel = &_cancel;
 	if (status)
-		status->stepCallback(0.01f);
+		status->update(0.01f);
 	if (sigma <= 0)
 		g_argerr("Sigma must be > 0.");
 	if (size < 3)
@@ -797,7 +789,7 @@ void Grid::smooth(Grid &smoothed, double sigma, int size, int band,
 	std::atomic<int> curTile(0);
 
 	if (status)
-		status->stepCallback(0.02f);
+		status->update(0.02f);
 
 	std::unique_ptr<TileIterator> iter = iterator(512, 512, size, band);
 	int tiles = iter->count();
@@ -838,11 +830,11 @@ void Grid::smooth(Grid &smoothed, double sigma, int size, int band,
 		tile.writeTo(smoothed);
 
 		if (status)
-			status->stepCallback(0.2f + (float) ++curTile / tiles * 0.97f);
+			status->update(g_min(0.99f, 0.2f + (float) curTile++ / tiles * 0.97f));
 	}
 
 	if (status)
-		status->stepCallback(1.0);
+		status->update(1.0);
 }
 
 Grid::~Grid() {
