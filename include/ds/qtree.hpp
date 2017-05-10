@@ -31,24 +31,15 @@ namespace geo {
 			}
 		};
 
-		template <class T>
-		class QTree {
-		public:
-			virtual void addItem(const T& item) = 0;
-			virtual void removeItem(const T& item) = 0;
-			virtual void updateItem(const T& item) = 0;
-			virtual ~QTree() {}
-		};
-
 		// An in-memory quadtree.
 		template <class T>
-		class MQTree : public QTree<T> {
+		class QTree {
 		protected:
 			// The geographic boundary corresponding to this tree. Will be reshaped to a square
 			// using the longer side.
 			Bounds m_bounds;
 			// The four sub-quads
-			std::unique_ptr<MQTree> m_nodes[4];
+			std::unique_ptr<QTree> m_nodes[4];
 			// The list of items stored in the current node if not split.
 			std::list<T> m_items;
 			// The max tree depth. TODO: Should be small enough to prevent degenerate nodes.
@@ -71,7 +62,7 @@ namespace geo {
 			}
 
 			// Returns the node for the given index; creates it if necessary.
-			MQTree* node(uint8_t idx) {
+			QTree* node(uint8_t idx) {
 				if(!m_nodes[idx].get()) {
 					Bounds bounds;
 					if(idx & 1) {
@@ -88,13 +79,13 @@ namespace geo {
 						bounds.miny(m_bounds.miny());
 						bounds.maxy(m_bounds.midy());
 					}
-					m_nodes[idx].reset(new MQTree(bounds, m_maxDepth, m_maxCount, m_depth + 1));
+					m_nodes[idx].reset(new QTree(bounds, m_maxDepth, m_maxCount, m_depth + 1));
 				}
 				return m_nodes[idx].get();
 			}
 
 			// Returns the node for the given point; creates it if necessary.
-			MQTree* node(double x, double y) {
+			QTree* node(double x, double y) {
 				return node(index(x, y));
 			}
 
@@ -121,7 +112,7 @@ namespace geo {
 			}
 
 			// Construct a sub-node.
-			MQTree(const Bounds& bounds, int maxDepth, int maxCount, int depth) :
+			QTree(const Bounds& bounds, int maxDepth, int maxCount, int depth) :
 				m_bounds(bounds),
 				m_maxDepth(maxDepth),
 				m_maxCount(maxCount),
@@ -134,7 +125,7 @@ namespace geo {
 		public:
 
 			// Construct a QTree with the given bounds, depth and count.
-			MQTree(const Bounds& bounds, int maxDepth, int maxCount) :
+			QTree(const Bounds& bounds, int maxDepth, int maxCount) :
 				m_bounds(bounds),
 				m_maxDepth(maxDepth),
 				m_maxCount(maxCount),
@@ -300,7 +291,6 @@ namespace geo {
 						if(result.size() > n) {
 							qtree_sorter<T> sorter(x, y);
 							result.sort(sorter);
-							//std::sort(result.begin(), result.end(), sorter);
 						}
 						uint64_t i = 0;
 						for(T& item : result) {
@@ -350,14 +340,14 @@ namespace geo {
 				return false;
 			}
 
-			~MQTree() {
+			~QTree() {
 			}
 
 		};
 
 		// An file-backed quadtree.
 		template <class T>
-		class FQTree : public QTree<T> {
+		class FQTree {
 		protected:
 						// The geographic boundary corresponding to this tree. Will be reshaped to a square
 			// using the longer side.
@@ -367,7 +357,7 @@ namespace geo {
 			// The list of items stored in the current node if not split.
 			std::vector<T> m_items;
 			// Items used by the iterator.
-			std::list<T> m_iterItems;
+			std::vector<T> m_iterItems;
 			// The max tree depth. TODO: Should be small enough to prevent degenerate nodes.
 			uint32_t m_maxDepth;
 			// Max number of items before splitting a node.
@@ -380,7 +370,7 @@ namespace geo {
 			bool m_split;
 
 			// An iterator for traversing the current node's items.
-			typename std::list<T>::iterator m_iter;
+			typename std::vector<T>::iterator m_iter;
 			// An index for traversing the current node's sub-nodes.
 			uint8_t m_iterIdx;
 

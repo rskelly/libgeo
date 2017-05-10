@@ -28,7 +28,7 @@ int main(int argc, char** argv) {
 	double sr = 10.0;
 	int sc = 0;
 
-	MQTree<PPoint> t(b, 10, 100);
+	QTree<PPoint> t(b, 10, 100);
 	Stopwatch sw;
 	sw.start();
 	for(int i = 0; i < count; ++i) {
