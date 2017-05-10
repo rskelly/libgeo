@@ -21,9 +21,28 @@ using namespace geos::geom;
 namespace geo {
 	namespace ds {
 
+		// Sorts the items.
+		template <class T>
+		struct qtree_sorter {
+			double x, y;
+			qtree_sorter(double x, double y) : x(x), y(y) {}
+			bool operator()(const T& a, const T& b) {
+				return  (g_sq(x - a.x) + g_sq(y - a.y)) < (g_sq(x - b.x) + g_sq(y - b.y));
+			}
+		};
+
+		template <class T>
+		class QTree {
+		public:
+			virtual void addItem(const T& item) = 0;
+			virtual void removeItem(const T& item) = 0;
+			virtual void updateItem(const T& item) = 0;
+			virtual ~QTree() {}
+		};
+
 		// An in-memory quadtree.
 		template <class T>
-		class MQTree {
+		class MQTree : public QTree<T> {
 		protected:
 			// The geographic boundary corresponding to this tree. Will be reshaped to a square
 			// using the longer side.
@@ -45,15 +64,6 @@ namespace geo {
 			typename std::list<T>::iterator m_iter;
 			// An index for traversing the current node's sub-nodes.
 			uint8_t m_iterIdx;
-
-			// Sorts the items.
-			struct qtree_sorter {
-				double x, y;
-				qtree_sorter(double x, double y) : x(x), y(y) {}
-				bool operator()(const T& a, const T& b) {
-					return  (g_sq(x - a.x) + g_sq(y - a.y)) < (g_sq(x - b.x) + g_sq(y - b.y));
-				}
-			};
 
 			// Returns the index of a sub-node given a point.
 			int index(double x, double y) {
@@ -288,7 +298,7 @@ namespace geo {
 					search(x, y, outside, inside, std::back_inserter(result));
 					if(result.size() >= n) {
 						if(result.size() > n) {
-							struct qtree_sorter sorter(x, y);
+							qtree_sorter<T> sorter(x, y);
 							result.sort(sorter);
 							//std::sort(result.begin(), result.end(), sorter);
 						}
@@ -347,7 +357,7 @@ namespace geo {
 
 		// An file-backed quadtree.
 		template <class T>
-		class FQTree {
+		class FQTree : public QTree<T> {
 		protected:
 						// The geographic boundary corresponding to this tree. Will be reshaped to a square
 			// using the longer side.
@@ -379,15 +389,6 @@ namespace geo {
 			size_t m_fpos;
 
 			std::mutex m_fmtx;
-
-			// Sorts the items.
-			struct qtree_sorter {
-				double x, y;
-				qtree_sorter(double x, double y) : x(x), y(y) {}
-				bool operator()(const T& a, const T& b) {
-					return  (g_sq(x - a.x) + g_sq(y - a.y)) < (g_sq(x - b.x) + g_sq(y - b.y));
-				}
-			};
 
 			// Returns the index of a sub-node given a point.
 			int index(double x, double y) {
@@ -711,7 +712,7 @@ namespace geo {
 					search(x, y, outside, inside, std::back_inserter(result));
 					if(result.size() >= n) {
 						if(result.size() > n) {
-							struct qtree_sorter sorter(x, y);
+							qtree_sorter<T> sorter(x, y);
 							result.sort(sorter);
 						}
 						uint64_t i = 0;
