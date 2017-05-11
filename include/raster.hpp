@@ -275,6 +275,10 @@ namespace geo {
         	// source (if there is one) and reads the next one.
         	Tile next();
 
+        	// Creates a Tile using the given template. This Tile
+        	// is independent of the iterator.
+        	Tile create(Tile &tpl);
+
         	// Destroy the TileIterator.
         	~TileIterator();
         };
