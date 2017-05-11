@@ -75,55 +75,66 @@ namespace geo {
 					if(row > this->maxRow) this->maxRow = row;
 				}
 
-				// Returns true if the range of rows given by start and end was finalized
-				// within the given thread, or by a thread whose block is completed.
-				// The checked range includes one row above and one below,
-				// which is required to guarantee that a polygon is completed.
-				bool isRangeFinalized(const std::vector<bool> &finalRows) const {
-					int start = g_max(minRow - 1, 0);
-					int end = g_min(maxRow + 2, (int) finalRows.size());
-					for (int i = start; i < end; ++i) {
-						if (!finalRows[i])
-							return false;
-					}
-					return true;
-				}
-
 				Geometry* poly(bool removeHoles, bool removeDangles) {
+
+					// Union the list of geometries.
 					geos::operation::geounion::CascadedPolygonUnion u(&geoms);
-					Geometry* geom0 = u.Union();
-					if(geom0->getGeometryTypeId() != GEOS_MULTIPOLYGON) {
+					Geometry* g = u.Union();
+
+					// If the geometry wasn't a multipolygon,
+					if(g->getGeometryTypeId() != GEOS_MULTIPOLYGON) {
 						std::vector<Geometry*> geoms0;
-						geoms0.push_back(geom0);
+						geoms0.push_back(g);
 						Geometry* m = fact->createMultiPolygon(geoms0);
-						delete geom0;
-						geom0 = m;
+						delete g;
+						g = m;
 					}
-					if(removeHoles || removeDangles) {
+
+					if(removeDangles || removeHoles) {
 						std::vector<Geometry*> geoms0;
-						double area = 0;
-						for(size_t i = 0; i < geom0->getNumGeometries(); ++i) {
-							Polygon* p = dynamic_cast<Polygon*>(geom0->getGeometryN(i)->clone());
-							if(removeDangles) {
-								double a = p->getArea();
-								if(a < area)
-									continue;
-								area = a;
+
+						if(removeDangles) {
+							// Only keep the part with the largest area...
+							double area = 0;
+							const Geometry* poly0 = nullptr;
+							for(size_t i = 0; i < g->getNumGeometries(); ++i) {
+								const Geometry* poly = g->getGeometryN(i);
+								double a = poly->getArea();
+								if(a > area) {
+									poly0 = poly;
+									area = a;
+								}
 							}
-							if(removeHoles) {
-								CoordinateSequence* c = p->getExteriorRing()->getCoordinates();
-								LinearRing* r = fact->createLinearRing(c);
-								Polygon* p0 = fact->createPolygon(r, nullptr);
-								geoms0.push_back(p0);
-							} else {
-								geoms0.push_back(p);
+							geoms0.push_back(poly0->clone());
+						} else {
+							// ...or keep them all.
+							for(size_t i = 0; i < g->getNumGeometries(); ++i) {
+								const Geometry* poly = g->getGeometryN(i);
+								geoms0.push_back(poly->clone());
 							}
 						}
-						Geometry* m = fact->createMultiPolygon(geoms0);
-						delete geom0;
-						geom0 = m;
+
+						if(removeHoles) {
+							for(size_t i = 0; i < geoms0.size(); ++i) {
+								Polygon* poly = dynamic_cast<Polygon*>(geoms0[i]);
+								// Only modify the polys with interior rings (i.e. holes).
+								if(poly->getNumInteriorRing()) {
+									CoordinateSequence* c = poly->getExteriorRing()->getCoordinates();
+									LinearRing* r = fact->createLinearRing(c);
+									Polygon* poly0 = fact->createPolygon(r, nullptr);
+									delete poly;
+									geoms0[i] = poly0;
+								}
+							}
+						}
+
+						delete g;
+						g = fact->createMultiPolygon(geoms0);
+						for(auto& geom : geoms0)
+							delete geom;
 					}
-					return geom0;
+
+					return g;
 				}
 
 				~Poly() {
@@ -1778,7 +1789,10 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 
 			// Get the current ID, skip if nodata.
 			uint64_t id0 = rowBuf.getInt(c, 0);
-			if(id0 == nd) continue;
+			if(id0 == nd || id0 == 0) continue;
+
+			// Update the set of active IDs.
+			current.insert(id0);
 
 			// Get the coord of one corner of the polygon.
 			double x0 = gp.toX(c);
@@ -1791,6 +1805,9 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 
 				// If the ID changes, capture and output the polygon.
 				if(id0 > 0 && id1 != id0) {
+
+					// Update the set of active IDs.
+					current.insert(id1);
 
 					// Coord of the other corner.
 					double x1 = gp.toX(c);
@@ -1814,9 +1831,6 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 						polys[id0]->update(geom, r);
 					}
 
-					// Update the set of active IDs.
-					current.insert(id0);
-
 					--c; // Back up the counter by one, to start with the new ID.
 					break;
 				}
@@ -1827,7 +1841,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 
 		{
 			std::unique_lock<std::mutex> lck(m_pqmtx);
-			while(polyQ.size() > 1000)
+			while(polyQ.size() > 10)
 				m_cond2.wait(lck);
 			for(auto it = polys.begin(); it != polys.end();) {
 				if(current.find(it->first) == current.end()) {
@@ -1844,7 +1858,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 	while(!polys.empty()) {
 		{
 			std::unique_lock<std::mutex> lck(m_pqmtx);
-			while(polyQ.size() > 1000)
+			while(polyQ.size() > 10)
 				m_cond2.wait(lck);
 			int i = 0;
 			for(auto it = polys.begin(); i < 1000 && it != polys.end(); ++i) {
