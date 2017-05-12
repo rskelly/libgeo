@@ -50,12 +50,12 @@ namespace geo {
 			class Poly {
 			public:
 				uint64_t id;
-				const GeometryFactory* fact;
+				const GeometryFactory& fact;
 				std::vector<Polygon*> geoms;
 				int minRow, maxRow;
 				bool dispose;
 
-				Poly(uint64_t id, Polygon* poly, int row, const GeometryFactory* fact) :
+				Poly(uint64_t id, Polygon* poly, int row, const GeometryFactory& fact) :
 					id(id), fact(fact), minRow(row), maxRow(row), dispose(true) {
 					update(poly, row);
 				}
@@ -85,7 +85,7 @@ namespace geo {
 					if(g->getGeometryTypeId() != GEOS_MULTIPOLYGON) {
 						std::vector<Geometry*> geoms0;
 						geoms0.push_back(g);
-						Geometry* m = fact->createMultiPolygon(geoms0);
+						Geometry* m = fact.createMultiPolygon(geoms0);
 						delete g;
 						g = m;
 					}
@@ -120,8 +120,8 @@ namespace geo {
 								// Only modify the polys with interior rings (i.e. holes).
 								if(poly->getNumInteriorRing()) {
 									CoordinateSequence* c = poly->getExteriorRing()->getCoordinates();
-									LinearRing* r = fact->createLinearRing(c);
-									Polygon* poly0 = fact->createPolygon(r, nullptr);
+									LinearRing* r = fact.createLinearRing(c);
+									Polygon* poly0 = fact.createPolygon(r, nullptr);
 									delete poly;
 									geoms0[i] = poly0;
 								}
@@ -129,7 +129,7 @@ namespace geo {
 						}
 
 						delete g;
-						g = fact->createMultiPolygon(geoms0);
+						g = fact.createMultiPolygon(geoms0);
 						for(auto& geom : geoms0)
 							delete geom;
 					}
@@ -1741,8 +1741,6 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 	int cols = m_props.cols();
 	int rows = m_props.rows();
 	uint64_t nd = m_props.nodata();
-	// TODO: Perturbation to allow polygon union
-	double yShift0 = m_props.resolutionY() > 0 ? G_DBL_MIN_POS : -G_DBL_MIN_POS;
 
 	// Generate a unique fID for each feature.
 	std::atomic<uint64_t> fid(0);
@@ -1751,7 +1749,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 
 	// For creating GEOS objects.
 	GEOSContextHandle_t gctx = OGRGeometry::createGEOSContext();
-	const GeometryFactory* gf = GeometryFactory::getDefaultInstance();
+	GeometryFactory gf;
 
 	if(OGRERR_NONE != layer->StartTransaction())
 		g_runerr("Failed to start transaction.");
@@ -1795,8 +1793,8 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 			current.insert(id0);
 
 			// Get the coord of one corner of the polygon.
-			double x0 = gp.toX(c);
-			double y0 = gp.toY(r);
+			double x0 = std::round(gp.toX(c) * 1000.0) / 1000.0;
+			double y0 = std::round(gp.toY(r) * 1000.0) / 1000.0;
 
 			// Scan right...
 			while(++c <= cols) {
@@ -1810,18 +1808,18 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 					current.insert(id1);
 
 					// Coord of the other corner.
-					double x1 = gp.toX(c);
-					double y1 = gp.toY(r) + gp.resolutionY() + yShift0;
+					double x1 = std::round(gp.toX(c) * 1000.0) / 1000.0;
+					double y1 = std::round((gp.toY(r) + gp.resolutionY()) * 1000.0) / 1000.0;
 
 					// Build the geometry.
-					CoordinateSequence* seq = gf->getCoordinateSequenceFactory()->create((size_t)0, 2);
+					CoordinateSequence* seq = gf.getCoordinateSequenceFactory()->create((size_t)0, 2);
 					seq->add(Coordinate(x0, y0));
 					seq->add(Coordinate(x1, y0));
 					seq->add(Coordinate(x1, y1));
 					seq->add(Coordinate(x0, y1));
 					seq->add(Coordinate(x0, y0));
-					LinearRing* ring = gf->createLinearRing(seq);
-					Polygon* geom = gf->createPolygon(ring, NULL);
+					LinearRing* ring = gf.createLinearRing(seq);
+					Polygon* geom = gf.createPolygon(ring, NULL);
 
 					// If it's already in the list, merge it, otherwise add it.
 					if(polys.find(id0) == polys.end()) {
