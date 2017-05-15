@@ -54,6 +54,7 @@ namespace geo {
 				uint64_t id;
 				const GeometryFactory* fact;
 				std::vector<Polygon*> geoms;
+				Geometry* poly;
 				int minRow, maxRow;
 				bool dispose;
 
@@ -104,7 +105,11 @@ namespace geo {
 					return true;
 				}
 
-				Geometry* poly(bool removeHoles, bool removeDangles) {
+				Geometry* getPoly() {
+					return poly;
+				}
+
+				void generate(bool removeHoles, bool removeDangles) {
 					geos::operation::geounion::CascadedPolygonUnion u(&geoms);
 					Geometry* geom0 = u.Union();
 					if(geom0->getGeometryTypeId() != GEOS_MULTIPOLYGON) {
@@ -138,12 +143,14 @@ namespace geo {
 						delete geom0;
 						geom0 = m;
 					}
-					return geom0;
+					poly = geom0;
 				}
 
 				~Poly() {
 					for(Geometry* g : geoms)
 						delete g;
+					if(poly)
+						delete poly;
 				}
 
 			};
@@ -1721,8 +1728,7 @@ static void processGeomQueue(std::queue<std::unique_ptr<Poly> >* q,
 		}
 		pcond2->notify_one();
 		// Retrieve the unioned geometry.
-		OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx,
-				(GEOSGeom) p->poly(removeHoles, removeDangles));
+		OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx, (GEOSGeom) p->getPoly());
 		// Create and append the feature.
 		OGRFeature feat(layer->GetLayerDefn());
 		feat.SetGeometry(geom);
@@ -1892,12 +1898,14 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 					id0 = id1;
 				}
 			}
+			finished[r] = true;
 		}
+
+		std::list<std::unique_ptr<Poly> > geoms;
 
 		#pragma omp critical(__polys)
 		{
-			for(int i = block * bufSize; i < g_min(rows, (block + 1) * bufSize); ++i)
-				finished[i] = true;
+			// Merge into main polys list.
 			for(auto& p : polys0) {
 				if(!polys.count(p.first)) {
 					polys[p.first].reset(p.second.release()); // Don't delete, transfer.
@@ -1906,16 +1914,25 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 				}
 			}
 
-			std::unique_lock<std::mutex> lck(pqmtx);
-			while(polyQ.size() > 100)
-				pcond2.wait(lck);
+			// Find polys that are ready to write.
 			for(auto it = polys.begin(); it != polys.end(); ) {
 				if(it->second->rangeComplete(finished)) {
-					polyQ.push(std::move(it->second));
+					geoms.push_back(std::move(it->second));
 					it = polys.erase(it);
 				} else {
 					++it;
 				}
+			}
+		}
+
+		{
+			std::unique_lock<std::mutex> lck(pqmtx);
+			while(polyQ.size() > 100)
+				pcond2.wait(lck);
+			// Generate polygon and add Poly to the write queue.
+			for(std::unique_ptr<Poly>& p : geoms) {
+				p->generate(removeDangles, removeHoles);
+				polyQ.push(std::move(p));
 			}
 		}
 		pcond1.notify_one();
