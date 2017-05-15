@@ -157,8 +157,10 @@ namespace geo {
 
 			// Add an item to the node.
 			void addItem(const T& item) {
-				if(!m_bounds.contains(item.x, item.y))
-					g_runerr("Item is out of bounds for QTree.");
+				if(!m_bounds.contains(item.x, item.y)) {
+					g_warn("Item is out of bounds for QTree.");
+					return;
+				}
 				if(m_depth < m_maxDepth && m_items.size() == m_maxCount)
 					split();
 				if(m_split) {
