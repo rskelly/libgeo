@@ -261,8 +261,8 @@ namespace geo {
 
 			class G_DLL_EXPORT LRUCacheItem {
 			public:
-				void* data;
 				int col, row, band;
+				void* data;
 
 				LRUCacheItem(int col, int row, int band, uint64_t size) :
 					col(col), row(row), band(band),
@@ -277,8 +277,8 @@ namespace geo {
 
 			class G_DLL_EXPORT LRUCache {
 			private:
-				int m_slots;
-				int m_size;
+				size_t m_slots;
+				size_t m_size;
 				uint64_t m_time;
 				GDALDataset* m_ds;
 				std::map<uint64_t, std::string> m_timeItems;
@@ -299,7 +299,7 @@ namespace geo {
 				}
 
 			public:
-				LRUCache(int slots, int size, GDALDataset* ds) :
+				LRUCache(size_t slots, size_t size, GDALDataset* ds) :
 					m_slots(slots), m_size(size), m_time(0),
 					m_ds(ds) {}
 
@@ -308,7 +308,6 @@ namespace geo {
 					if(m_items.find(idx) == m_items.end()) {
 						while(m_items.size() >= m_slots)
 							evict();
-						int rows, cols;
 						m_items[idx].reset(new LRUCacheItem(col, row, band, m_size));
 						++m_time;
 						m_timeItems[m_time] = idx;
@@ -1774,8 +1773,6 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 	int cols = m_props.cols();
 	int rows = m_props.rows();
 	uint64_t nd = m_props.nodata();
-	// TODO: Perturbation to allow polygon union
-	double yShift0 = m_props.resolutionY() > 0 ? G_DBL_MIN_POS : -G_DBL_MIN_POS;
 
 	// Generate a unique fID for each feature.
 	std::atomic<uint64_t> fid(0);
