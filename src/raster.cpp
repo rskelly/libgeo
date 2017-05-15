@@ -50,12 +50,12 @@ namespace geo {
 			class Poly {
 			public:
 				uint64_t id;
-				const GeometryFactory& fact;
+				const GeometryFactory* fact;
 				std::vector<Polygon*> geoms;
 				int minRow, maxRow;
 				bool dispose;
 
-				Poly(uint64_t id, Polygon* poly, int row, const GeometryFactory& fact) :
+				Poly(uint64_t id, Polygon* poly, int row, const GeometryFactory* fact) :
 					id(id), fact(fact), minRow(row), maxRow(row), dispose(true) {
 					update(poly, row);
 				}
@@ -75,66 +75,55 @@ namespace geo {
 					if(row > this->maxRow) this->maxRow = row;
 				}
 
+				// Returns true if the range of rows given by start and end was finalized
+				// within the given thread, or by a thread whose block is completed.
+				// The checked range includes one row above and one below,
+				// which is required to guarantee that a polygon is completed.
+				bool isRangeFinalized(const std::vector<bool> &finalRows) const {
+					int start = g_max(minRow - 1, 0);
+					int end = g_min(maxRow + 2, (int) finalRows.size());
+					for (int i = start; i < end; ++i) {
+						if (!finalRows[i])
+							return false;
+					}
+					return true;
+				}
+
 				Geometry* poly(bool removeHoles, bool removeDangles) {
-
-					// Union the list of geometries.
 					geos::operation::geounion::CascadedPolygonUnion u(&geoms);
-					Geometry* g = u.Union();
-
-					// If the geometry wasn't a multipolygon,
-					if(g->getGeometryTypeId() != GEOS_MULTIPOLYGON) {
+					Geometry* geom0 = u.Union();
+					if(geom0->getGeometryTypeId() != GEOS_MULTIPOLYGON) {
 						std::vector<Geometry*> geoms0;
-						geoms0.push_back(g);
-						Geometry* m = fact.createMultiPolygon(geoms0);
-						delete g;
-						g = m;
+						geoms0.push_back(geom0);
+						Geometry* m = fact->createMultiPolygon(geoms0);
+						delete geom0;
+						geom0 = m;
 					}
-
-					if(removeDangles || removeHoles) {
+					if(removeHoles || removeDangles) {
 						std::vector<Geometry*> geoms0;
-
-						if(removeDangles) {
-							// Only keep the part with the largest area...
-							double area = 0;
-							const Geometry* poly0 = nullptr;
-							for(size_t i = 0; i < g->getNumGeometries(); ++i) {
-								const Geometry* poly = g->getGeometryN(i);
-								double a = poly->getArea();
-								if(a > area) {
-									poly0 = poly;
-									area = a;
-								}
+						double area = 0;
+						for(size_t i = 0; i < geom0->getNumGeometries(); ++i) {
+							Polygon* p = dynamic_cast<Polygon*>(geom0->getGeometryN(i)->clone());
+							if(removeDangles) {
+								double a = p->getArea();
+								if(a < area)
+									continue;
+								area = a;
 							}
-							geoms0.push_back(poly0->clone());
-						} else {
-							// ...or keep them all.
-							for(size_t i = 0; i < g->getNumGeometries(); ++i) {
-								const Geometry* poly = g->getGeometryN(i);
-								geoms0.push_back(poly->clone());
+							if(removeHoles) {
+								CoordinateSequence* c = p->getExteriorRing()->getCoordinates();
+								LinearRing* r = fact->createLinearRing(c);
+								Polygon* p0 = fact->createPolygon(r, nullptr);
+								geoms0.push_back(p0);
+							} else {
+								geoms0.push_back(p);
 							}
 						}
-
-						if(removeHoles) {
-							for(size_t i = 0; i < geoms0.size(); ++i) {
-								Polygon* poly = dynamic_cast<Polygon*>(geoms0[i]);
-								// Only modify the polys with interior rings (i.e. holes).
-								if(poly->getNumInteriorRing()) {
-									CoordinateSequence* c = poly->getExteriorRing()->getCoordinates();
-									LinearRing* r = fact.createLinearRing(c);
-									Polygon* poly0 = fact.createPolygon(r, nullptr);
-									delete poly;
-									geoms0[i] = poly0;
-								}
-							}
-						}
-
-						delete g;
-						g = fact.createMultiPolygon(geoms0);
-						for(auto& geom : geoms0)
-							delete geom;
+						Geometry* m = fact->createMultiPolygon(geoms0);
+						delete geom0;
+						geom0 = m;
 					}
-
-					return g;
+					return geom0;
 				}
 
 				~Poly() {
@@ -279,6 +268,70 @@ namespace geo {
 					break;
 				}
 			}
+
+			class G_DLL_EXPORT LRUCacheItem {
+			public:
+				void* data;
+				int col, row, band;
+
+				LRUCacheItem(int col, int row, int band, uint64_t size) :
+					col(col), row(row), band(band),
+					data(nullptr) {
+					data = malloc(size);
+				}
+
+				~LRUCacheItem() {
+					free(data);
+				}
+			};
+
+			class G_DLL_EXPORT LRUCache {
+			private:
+				int m_slots;
+				int m_size;
+				uint64_t m_time;
+				GDALDataset* m_ds;
+				std::map<uint64_t, std::string> m_timeItems;
+				std::unordered_map<std::string, uint64_t> m_itemsTime;
+				std::unordered_map<std::string, std::unique_ptr<LRUCacheItem> > m_items;
+
+				void evict() {
+					auto it = m_timeItems.begin();
+					uint64_t time = it->first;
+					std::string idx = it->second;
+					m_items.erase(idx);
+					m_timeItems.erase(time);
+					m_itemsTime.erase(idx);
+				}
+
+				std::string getIdx(int col, int row, int band) {
+					return std::to_string(col) + std::string(":") + std::to_string(row) + std::string(":") + std::to_string(band);
+				}
+
+			public:
+				LRUCache(int slots, int size, GDALDataset* ds) :
+					m_slots(slots), m_size(size), m_time(0),
+					m_ds(ds) {}
+
+				void* get(int col, int row, int band) {
+					std::string idx = getIdx(col, row, band);
+					if(m_items.find(idx) == m_items.end()) {
+						while(m_items.size() >= m_slots)
+							evict();
+						int rows, cols;
+						m_items[idx].reset(new LRUCacheItem(col, row, band, m_size));
+						++m_time;
+						m_timeItems[m_time] = idx;
+						m_itemsTime[idx] = m_time;
+					} else {
+						m_timeItems.erase(m_time);
+						++m_time;
+						m_timeItems[m_time] = idx;
+						m_itemsTime[idx] = m_time;
+					}
+					return m_items[idx]->data;
+				}
+			};
 
 		} //util
 	} // raster
@@ -464,6 +517,11 @@ void GridProps::setTrans(double trans[6]) {
 	setResolution(m_trans[1], m_trans[5]);
 }
 
+void GridProps::setTrans(double tlx, double resX, double tx, double tly, double resY, double ty) {
+	double t[] = {tlx, resX, tx, tly, ty, resY};
+	setTrans(t);
+}
+
 void GridProps::trans(double trans[6]) const {
 	for(int i = 0; i < 6; ++i)
 		trans[i] = m_trans[i];
@@ -615,19 +673,6 @@ Tile TileIterator::next() {
 	m_source.writeTo(*tile, cols, rows, srcCol, srcRow, dstCol, dstRow, m_band, 1);
 
 	return Tile(tile, &m_source, m_cols, m_rows, col, row, m_buffer, srcCol, srcRow, dstCol, dstRow, m_band, props.writable());
-}
-
-Tile TileIterator::create(Tile &tpl) {
-
-	const GridProps& props = m_source.props();
-
-	GridProps p(props);
-	p.setSize(m_cols + m_buffer * 2, m_rows + m_buffer * 2);
-	MemRaster* tile = new MemRaster(p);
-
-	m_source.writeTo(*tile, tpl.m_cols, tpl.m_rows, tpl.m_srcCol, tpl.m_srcRow, tpl.m_dstCol, tpl.m_dstRow, m_band, 1);
-
-	return Tile(tile, &m_source, m_cols, m_rows, tpl.m_col, tpl.m_row, m_buffer, tpl.m_srcCol, tpl.m_srcRow, tpl.m_dstCol, tpl.m_dstRow, m_band, props.writable());
 }
 
 TileIterator::~TileIterator() {
@@ -1504,7 +1549,7 @@ GDALDataType Raster::getGDType() const {
 double Raster::getFloat(int col, int row, int band) {
 	int bcol = col / m_bcols;
 	int brow = row / m_brows;
-	if(bcol != m_bcol || brow != m_brow) {
+	if(bcol != m_bcol || brow != m_brow || band != m_bband) {
 		if(m_dirty) {
 			GDALRasterBand* bnd = m_ds->GetRasterBand(m_bband);
 			if(!bnd)
@@ -1544,7 +1589,7 @@ double Raster::getFloat(double x, double y, int band) {
 int Raster::getInt(int col, int row, int band) {
 	int bcol = col / m_bcols;
 	int brow = row / m_brows;
-	if(bcol != m_bcol || brow != m_brow) {
+	if(bcol != m_bcol || brow != m_brow || band != m_bband) { // TODO: No effective cacheing if the band changes.
 		if(m_dirty) {
 			GDALRasterBand* bnd = m_ds->GetRasterBand(m_bband);
 			if(!bnd)
@@ -1741,6 +1786,8 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 	int cols = m_props.cols();
 	int rows = m_props.rows();
 	uint64_t nd = m_props.nodata();
+	// TODO: Perturbation to allow polygon union
+	double yShift0 = m_props.resolutionY() > 0 ? G_DBL_MIN_POS : -G_DBL_MIN_POS;
 
 	// Generate a unique fID for each feature.
 	std::atomic<uint64_t> fid(0);
@@ -1749,7 +1796,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 
 	// For creating GEOS objects.
 	GEOSContextHandle_t gctx = OGRGeometry::createGEOSContext();
-	GeometryFactory gf;
+	const GeometryFactory* gf = GeometryFactory::getDefaultInstance();
 
 	if(OGRERR_NONE != layer->StartTransaction())
 		g_runerr("Failed to start transaction.");
@@ -1787,14 +1834,11 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 
 			// Get the current ID, skip if nodata.
 			uint64_t id0 = rowBuf.getInt(c, 0);
-			if(id0 == nd || id0 == 0) continue;
-
-			// Update the set of active IDs.
-			current.insert(id0);
+			if(id0 == nd) continue;
 
 			// Get the coord of one corner of the polygon.
-			double x0 = std::round(gp.toX(c) * 1000.0) / 1000.0;
-			double y0 = std::round(gp.toY(r) * 1000.0) / 1000.0;
+			double x0 = gp.toX(c);
+			double y0 = gp.toY(r);
 
 			// Scan right...
 			while(++c <= cols) {
@@ -1804,22 +1848,19 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 				// If the ID changes, capture and output the polygon.
 				if(id0 > 0 && id1 != id0) {
 
-					// Update the set of active IDs.
-					current.insert(id1);
-
 					// Coord of the other corner.
-					double x1 = std::round(gp.toX(c) * 1000.0) / 1000.0;
-					double y1 = std::round((gp.toY(r) + gp.resolutionY()) * 1000.0) / 1000.0;
+					double x1 = gp.toX(c);
+					double y1 = gp.toY(r) + gp.resolutionY() + yShift0;
 
 					// Build the geometry.
-					CoordinateSequence* seq = gf.getCoordinateSequenceFactory()->create((size_t)0, 2);
+					CoordinateSequence* seq = gf->getCoordinateSequenceFactory()->create((size_t)0, 2);
 					seq->add(Coordinate(x0, y0));
 					seq->add(Coordinate(x1, y0));
 					seq->add(Coordinate(x1, y1));
 					seq->add(Coordinate(x0, y1));
 					seq->add(Coordinate(x0, y0));
-					LinearRing* ring = gf.createLinearRing(seq);
-					Polygon* geom = gf.createPolygon(ring, NULL);
+					LinearRing* ring = gf->createLinearRing(seq);
+					Polygon* geom = gf->createPolygon(ring, NULL);
 
 					// If it's already in the list, merge it, otherwise add it.
 					if(polys.find(id0) == polys.end()) {
@@ -1828,6 +1869,9 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 					} else {
 						polys[id0]->update(geom, r);
 					}
+
+					// Update the set of active IDs.
+					current.insert(id0);
 
 					--c; // Back up the counter by one, to start with the new ID.
 					break;
@@ -1839,7 +1883,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 
 		{
 			std::unique_lock<std::mutex> lck(m_pqmtx);
-			while(polyQ.size() > 10)
+			while(polyQ.size() > 1000)
 				m_cond2.wait(lck);
 			for(auto it = polys.begin(); it != polys.end();) {
 				if(current.find(it->first) == current.end()) {
@@ -1856,7 +1900,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 	while(!polys.empty()) {
 		{
 			std::unique_lock<std::mutex> lck(m_pqmtx);
-			while(polyQ.size() > 10)
+			while(polyQ.size() > 1000)
 				m_cond2.wait(lck);
 			int i = 0;
 			for(auto it = polys.begin(); i < 1000 && it != polys.end(); ++i) {
