@@ -53,13 +53,13 @@ namespace geo {
 			public:
 				uint64_t id;
 				const GeometryFactory* fact;
-				std::vector<Polygon*> geoms;
-				Geometry* poly;
+				Geometry* final;
 				int minRow, maxRow;
 				bool dispose;
+				std::vector<Polygon*> geoms;
 
 				Poly(uint64_t id, Polygon* poly, int minRow, int maxRow, const GeometryFactory* fact) :
-					id(id), fact(fact), minRow(minRow), maxRow(maxRow), dispose(true) {
+					id(id), fact(fact), final(nullptr), minRow(minRow), maxRow(maxRow), dispose(true) {
 					update(poly, minRow, maxRow);
 				}
 
@@ -106,7 +106,7 @@ namespace geo {
 				}
 
 				Geometry* getPoly() {
-					return poly;
+					return final;
 				}
 
 				void generate(bool removeHoles, bool removeDangles) {
@@ -143,14 +143,14 @@ namespace geo {
 						delete geom0;
 						geom0 = m;
 					}
-					poly = geom0;
+					final = geom0;
 				}
 
 				~Poly() {
 					for(Geometry* g : geoms)
 						delete g;
-					if(poly)
-						delete poly;
+					if(final)
+						delete final;
 				}
 
 			};
@@ -1712,23 +1712,20 @@ void Raster::setFloat(double x, double y, double v, int band) {
 
 // Processes the polygon queue from polygonize.
 static void processGeomQueue(std::queue<std::unique_ptr<Poly> >* q,
-		std::mutex* pqmtx, std::condition_variable* pcond1, std::condition_variable* pcond2,
+		std::mutex* pqmtx, std::condition_variable* pcond1,
 		std::atomic<uint64_t>* fid, GEOSContextHandle_t gctx, OGRLayer* layer,
 		bool removeHoles, bool removeDangles, bool* running) {
 	std::unique_ptr<Poly> p;
 	while(*running || !q->empty()) {
-		{
-			std::unique_lock<std::mutex> lck(*pqmtx);
-			while(*running && q->empty())
-				pcond1->wait(lck);
-			if(q->empty())
-				break;
-			p.swap(q->front());
-			q->pop();
+		if(q->empty()) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+			continue;
 		}
-		pcond2->notify_one();
+		p.swap(q->front());
+		q->pop();
 		// Retrieve the unioned geometry.
-		OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx, (GEOSGeom) p->getPoly());
+		Geometry* g = p->getPoly();
+		OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx, (GEOSGeom) g);
 		// Create and append the feature.
 		OGRFeature feat(layer->GetLayerDefn());
 		feat.SetGeometry(geom);
@@ -1812,22 +1809,22 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 	// Used to manage the interaction of the polygonizing/writing threads.
 	std::mutex pqmtx;
 	std::condition_variable pcond1;
-	std::condition_variable pcond2;
 
 	// Set up a writer thread to write out polygons as they're produced.
 	std::queue<std::unique_ptr<Poly> > polyQ;
 	bool running = true;
 
 	std::thread writer(processGeomQueue, &polyQ,
-			&pqmtx, &pcond1, &pcond2, &fid, gctx, layer,
+			&pqmtx, &pcond1, &fid, gctx, layer,
 			removeHoles, removeDangles, &running);
 
 	int bufSize = 128;
 	int blocks = rows / bufSize + 1;
 
-	#pragma omp parallel for schedule(static, 1) // Process blocks sequentially to stop polys dict from getting too large.
+	#pragma omp parallel for// schedule(static, 1) // Process blocks sequentially to stop polys dict from getting too large.
 	for(int block = 0; block < blocks; ++block) {
 
+		std::cerr << "block " << block << "\n";
 		status->update((float) ++stat / blocks);
 
 		if(*cancel)
@@ -1901,7 +1898,22 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 			finished[r] = true;
 		}
 
-		std::list<std::unique_ptr<Poly> > geoms;
+		std::list<std::unique_ptr<Poly> > geoms0;
+
+		// Find polys that are ready to write.
+		/*
+		{
+			std::lock_guard<std::mutex> lck(pqmtx);
+			for(auto it = polys0.begin(); it != polys0.end(); ) {
+				if(it->second->rangeComplete(finished)) {
+					geoms0.push_back(std::move(it->second));
+					it = polys0.erase(it);
+				} else {
+					++it;
+				}
+			}
+		}
+		*/
 
 		#pragma omp critical(__polys)
 		{
@@ -1914,10 +1926,14 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 				}
 			}
 
+		}
+		#pragma omp critical(__polys)
+		{
+
 			// Find polys that are ready to write.
 			for(auto it = polys.begin(); it != polys.end(); ) {
 				if(it->second->rangeComplete(finished)) {
-					geoms.push_back(std::move(it->second));
+					geoms0.push_back(std::move(it->second));
 					it = polys.erase(it);
 				} else {
 					++it;
@@ -1926,29 +1942,24 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 		}
 
 		{
-			std::unique_lock<std::mutex> lck(pqmtx);
-			while(polyQ.size() > 100)
-				pcond2.wait(lck);
+			std::lock_guard<std::mutex> lck(pqmtx);
 			// Generate polygon and add Poly to the write queue.
-			for(std::unique_ptr<Poly>& p : geoms) {
-				p->generate(removeDangles, removeHoles);
+			for(std::unique_ptr<Poly>& p : geoms0) {
+				p->generate(removeHoles, removeDangles);
 				polyQ.push(std::move(p));
 			}
 		}
-		pcond1.notify_one();
 	}
 
 	{
-		// Should never be reached.
-		std::unique_lock<std::mutex> lck(pqmtx);
-		for(auto& it : polys)
+		std::lock_guard<std::mutex> lck(pqmtx);
+		for(auto& it : polys) {
+			it.second->generate(removeHoles, removeDangles);
 			polyQ.push(std::move(it.second));
+		}
 	}
-	pcond1.notify_one();
 
 	running = false;
-	pcond1.notify_all();
-	pcond2.notify_all();
 	writer.join();
 
 	if(OGRERR_NONE != layer->CommitTransaction())
