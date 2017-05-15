@@ -664,6 +664,15 @@ Tile TileIterator::next() {
 	return Tile(tile, &m_source, m_cols, m_rows, col, row, m_buffer, srcCol, srcRow, dstCol, dstRow, m_band, props.writable());
 }
 
+Tile TileIterator::create(Tile &tpl) {
+	const GridProps& props = m_source.props();
+	GridProps p(props);
+	p.setSize(m_cols + m_buffer * 2, m_rows + m_buffer * 2);
+	MemRaster* tile = new MemRaster(p);
+	m_source.writeTo(*tile, tpl.m_cols, tpl.m_rows, tpl.m_srcCol, tpl.m_srcRow, tpl.m_dstCol, tpl.m_dstRow, m_band, 1);
+	return Tile(tile, &m_source, m_cols, m_rows, tpl.m_col, tpl.m_row, m_buffer, tpl.m_srcCol, tpl.m_srcRow, tpl.m_dstCol, tpl.m_dstRow, m_band, props.writable());
+}
+
 TileIterator::~TileIterator() {
 }
 
