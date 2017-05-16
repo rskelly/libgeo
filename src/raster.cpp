@@ -1813,7 +1813,6 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 	// Set up a writer thread to write out polygons as they're produced.
 	std::queue<std::unique_ptr<Poly> > polyQ;
 	bool running = true;
-
 	std::thread writer(processGeomQueue, &polyQ,
 			&pqmtx, &pcond1, &fid, gctx, layer,
 			removeHoles, removeDangles, &running);
@@ -1821,10 +1820,9 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 	int bufSize = 128;
 	int blocks = rows / bufSize + 1;
 
-	#pragma omp parallel for// schedule(static, 1) // Process blocks sequentially to stop polys dict from getting too large.
+	#pragma omp parallel for schedule(static, 1) // Process blocks sequentially to stop polys dict from getting too large.
 	for(int block = 0; block < blocks; ++block) {
 
-		std::cerr << "block " << block << "\n";
 		status->update((float) ++stat / blocks);
 
 		if(*cancel)
@@ -1900,21 +1898,6 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 
 		std::list<std::unique_ptr<Poly> > geoms0;
 
-		// Find polys that are ready to write.
-		/*
-		{
-			std::lock_guard<std::mutex> lck(pqmtx);
-			for(auto it = polys0.begin(); it != polys0.end(); ) {
-				if(it->second->rangeComplete(finished)) {
-					geoms0.push_back(std::move(it->second));
-					it = polys0.erase(it);
-				} else {
-					++it;
-				}
-			}
-		}
-		*/
-
 		#pragma omp critical(__polys)
 		{
 			// Merge into main polys list.
@@ -1929,7 +1912,6 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 		}
 		#pragma omp critical(__polys)
 		{
-
 			// Find polys that are ready to write.
 			for(auto it = polys.begin(); it != polys.end(); ) {
 				if(it->second->rangeComplete(finished)) {
