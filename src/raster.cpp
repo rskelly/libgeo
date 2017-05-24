@@ -68,13 +68,14 @@ namespace geo {
 				}
 
 				void update(Polygon* u, int minRow, int maxRow) {
-					geoms.push_back(dynamic_cast<Polygon*>(u->clone()));
+					geoms.push_back(u);
 					update(minRow, maxRow);
 				}
 
-				void update(const std::vector<Polygon*>& u, int minRow, int maxRow) {
+				void update(std::vector<Polygon*>& u, int minRow, int maxRow) {
 					for (Polygon* p : u)
-						geoms.push_back(dynamic_cast<Polygon*>(p->clone()));
+						geoms.push_back(p);
+					u.clear();
 					update(minRow, maxRow);
 				}
 
@@ -121,22 +122,29 @@ namespace geo {
 					}
 					if(removeHoles || removeDangles) {
 						std::vector<Geometry*> geoms0;
-						double area = 0;
-						for(size_t i = 0; i < geom0->getNumGeometries(); ++i) {
-							Polygon* p = dynamic_cast<Polygon*>(geom0->getGeometryN(i)->clone());
-							if(removeDangles) {
+						if(removeDangles) {
+							double area = 0;
+							const Polygon* g = nullptr;
+							for(size_t i = 0; i < geom0->getNumGeometries(); ++i) {
+								const Polygon* p = dynamic_cast<const Polygon*>(geom0->getGeometryN(i));
 								double a = p->getArea();
-								if(a < area)
-									continue;
-								area = a;
+								if(a > area) {
+									area = a;
+									g = p;
+								}
 							}
-							if(removeHoles) {
-								CoordinateSequence* c = p->getExteriorRing()->getCoordinates();
+							geoms0.push_back(g->clone());
+						} else {
+							geoms0.insert(geoms0.begin(), geoms.begin(), geoms.end());
+						}
+						if(removeHoles) {
+							for(size_t i = 0; i < geoms0.size(); ++i) {
+								CoordinateSequence* c = dynamic_cast<Polygon*>(geoms0[i])->getExteriorRing()->getCoordinates();
 								LinearRing* r = fact->createLinearRing(c);
-								Polygon* p0 = fact->createPolygon(r, nullptr);
-								geoms0.push_back(p0);
-							} else {
-								geoms0.push_back(p);
+								delete geoms0[i];
+								geoms0[i] = fact->createPolygon(r, nullptr);
+								delete r;
+								delete c;
 							}
 						}
 						Geometry* m = fact->createMultiPolygon(geoms0);
@@ -1798,9 +1806,6 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 	if(OGRERR_NONE != layer->StartTransaction())
 		g_runerr("Failed to start transaction.");
 
-	MemRaster inrast(m_props);
-	writeTo(inrast);
-
 	// Keeps polygons created in thread.
 	std::unordered_map<uint64_t, std::unique_ptr<Poly> > polys;
 	std::vector<bool> finished(rows);
@@ -1819,6 +1824,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 
 	int bufSize = 128;
 	int blocks = rows / bufSize + 1;
+	double snap = 100.0;
 
 	#pragma omp parallel for schedule(static, 1) // Process blocks sequentially to stop polys dict from getting too large.
 	for(int block = 0; block < blocks; ++block) {
@@ -1838,11 +1844,14 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 
 		// Write into the buffer.
 		#pragma omp critical(__inrast)
-		inrast.writeTo(rowBuf, cols, bufHeight, 0, block * bufSize, 0, 0, band);
+		writeTo(rowBuf, cols, bufHeight, 0, block * bufSize, 0, 0, band);
 
 		std::unordered_map<uint64_t, std::unique_ptr<Poly> > polys0;
 
 		for(int rr = 0; rr < bufHeight; ++rr) {
+
+			if(*cancel)
+				continue;
 
 			int r = block * bufSize + rr;
 
@@ -1853,8 +1862,8 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 				if(id0 == nd || id0 == 0) continue;
 
 				// Get the coord of one corner of the polygon.
-				double x0 = std::round(gp.toX(c) * 1000.0) / 1000.0;
-				double y0 = std::round(gp.toY(r) * 1000.0) / 1000.0;
+				double x0 = std::round(gp.toX(c) * snap) / snap;
+				double y0 = std::round(gp.toY(r) * snap) / snap;
 
 				// Scan right...
 				while(++c <= cols) {
@@ -1865,8 +1874,8 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 					if(id0 > 0 && id1 != id0) {
 
 						// Coord of the other corner.
-						double x1 = std::round(gp.toX(c) * 1000.0) / 1000.0;
-						double y1 = std::round((gp.toY(r) + gp.resolutionY()) * 1000.0) / 1000.0;
+						double x1 = std::round(gp.toX(c) * snap) / snap;
+						double y1 = std::round((gp.toY(r) + gp.resolutionY()) * snap) / snap;
 
 						// Build the geometry.
 						CoordinateSequence* seq = gf->getCoordinateSequenceFactory()->create((size_t)0, 2);
@@ -1885,8 +1894,6 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 							polys0[id0]->update(geom, r, r);
 						}
 
-						delete geom;
-
 						--c; // Back up the counter by one, to start with the new ID.
 						break;
 					}
@@ -1898,18 +1905,18 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 
 		std::list<std::unique_ptr<Poly> > geoms0;
 
-		#pragma omp critical(__polys)
-		{
-			// Merge into main polys list.
-			for(auto& p : polys0) {
+		// Merge into main polys list.
+		for(auto& p : polys0) {
+			#pragma omp critical(__polys)
+			{
 				if(!polys.count(p.first)) {
 					polys[p.first].reset(p.second.release()); // Don't delete, transfer.
 				} else {
 					polys[p.first]->update(*(p.second)); // Copy contents; delete on map destruct
 				}
 			}
-
 		}
+
 		#pragma omp critical(__polys)
 		{
 			// Find polys that are ready to write.
@@ -1923,22 +1930,19 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 			}
 		}
 
-		{
+		// Generate polygon and add Poly to the write queue.
+		for(std::unique_ptr<Poly>& p : geoms0) {
+			p->generate(removeHoles, removeDangles);
 			std::lock_guard<std::mutex> lck(pqmtx);
-			// Generate polygon and add Poly to the write queue.
-			for(std::unique_ptr<Poly>& p : geoms0) {
-				p->generate(removeHoles, removeDangles);
-				polyQ.push(std::move(p));
-			}
+			polyQ.push(std::move(p));
 		}
+
 	}
 
-	{
+	for(auto& it : polys) {
+		it.second->generate(removeHoles, removeDangles);
 		std::lock_guard<std::mutex> lck(pqmtx);
-		for(auto& it : polys) {
-			it.second->generate(removeHoles, removeDangles);
-			polyQ.push(std::move(it.second));
-		}
+		polyQ.push(std::move(it.second));
 	}
 
 	running = false;
