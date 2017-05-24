@@ -39,7 +39,9 @@ using namespace geo::raster;
 using namespace geos::geom;
 using namespace geos::operation::geounion;
 
-bool _cancel = false;
+// Dummy cancel variable for when a cancel flag
+// isn't passed.
+static bool s_cancel = false;
 
 namespace geo {
 
@@ -51,28 +53,42 @@ namespace geo {
 			public:
 				uint64_t id;
 				const GeometryFactory* fact;
-				std::vector<Polygon*> geoms;
+				Geometry* final;
 				int minRow, maxRow;
 				bool dispose;
+				std::vector<Polygon*> geoms;
 
-				Poly(uint64_t id, Polygon* poly, int row, const GeometryFactory* fact) :
-					id(id), fact(fact), minRow(row), maxRow(row), dispose(true) {
-					update(poly, row);
+				Poly(uint64_t id, Polygon* poly, int minRow, int maxRow, const GeometryFactory* fact) :
+					id(id), fact(fact), final(nullptr), minRow(minRow), maxRow(maxRow), dispose(true) {
+					update(poly, minRow, maxRow);
 				}
 
-				void update(Polygon* u, int row) {
-					geoms.push_back(u);
-					update(row);
+				void update(Poly& p) {
+					update(p.geoms, p.minRow, p.maxRow);
 				}
 
-				void update(const std::vector<Polygon*>& u, int row) {
+				void update(Polygon* u, int minRow, int maxRow) {
+					geoms.push_back(dynamic_cast<Polygon*>(u->clone()));
+					update(minRow, maxRow);
+				}
+
+				void update(std::vector<Polygon*>& u, int minRow, int maxRow) {
 					for (Polygon* p : u)
-						update(p, row);
+						geoms.push_back(dynamic_cast<Polygon*>(p->clone()));
+					update(minRow, maxRow);
 				}
 
-				void update(int row) {
-					if(row < this->minRow) this->minRow = row;
-					if(row > this->maxRow) this->maxRow = row;
+				void update(int minRow, int maxRow) {
+					if(minRow < this->minRow) this->minRow = minRow;
+					if(maxRow > this->maxRow) this->maxRow = maxRow;
+				}
+
+				bool rangeComplete(const std::vector<bool>& rows) {
+					for(int i = g_max(0, minRow - 1); i < g_min((int) rows.size(), maxRow + 2); ++i) {
+						if(!rows[i])
+							return false;
+					}
+					return true;
 				}
 
 				// Returns true if the range of rows given by start and end was finalized
@@ -89,9 +105,15 @@ namespace geo {
 					return true;
 				}
 
-				Geometry* poly(bool removeHoles, bool removeDangles) {
+				Geometry* getPoly() {
+					return final;
+				}
+
+				void generate(bool removeHoles, bool removeDangles) {
 					geos::operation::geounion::CascadedPolygonUnion u(&geoms);
 					Geometry* geom0 = u.Union();
+					if (geom0)
+						return;
 					if(geom0->getGeometryTypeId() != GEOS_MULTIPOLYGON) {
 						std::vector<Geometry*> geoms0;
 						geoms0.push_back(geom0);
@@ -101,62 +123,46 @@ namespace geo {
 					}
 					if(removeHoles || removeDangles) {
 						std::vector<Geometry*> geoms0;
-						double area = 0;
-						for(size_t i = 0; i < geom0->getNumGeometries(); ++i) {
-							Polygon* p = dynamic_cast<Polygon*>(geom0->getGeometryN(i)->clone());
-							if(removeDangles) {
+						if(removeDangles) {
+							double area = 0;
+							const Geometry* g = nullptr;
+							for(size_t i = 0; i < geom0->getNumGeometries(); ++i) {
+								const Geometry* p = geom0->getGeometryN(i);
 								double a = p->getArea();
-								if(a < area)
-									continue;
-								area = a;
+								if(a > area) {
+									area = a;
+									g = p;
+								}
 							}
-							if(removeHoles) {
-								CoordinateSequence* c = p->getExteriorRing()->getCoordinates();
+							geoms0.push_back(g->clone());
+						} else {
+							geoms0.insert(geoms0.begin(), geoms.begin(), geoms.end());
+						}
+						if(removeHoles) {
+							for(size_t i = 0; i < geoms0.size(); ++i) {
+								CoordinateSequence* c = dynamic_cast<Polygon*>(geoms0[i])->getExteriorRing()->getCoordinates();
 								LinearRing* r = fact->createLinearRing(c);
-								Polygon* p0 = fact->createPolygon(r, nullptr);
-								geoms0.push_back(p0);
-							} else {
-								geoms0.push_back(p);
+								delete geoms0[i];
+								geoms0[i] = fact->createPolygon(r, nullptr);
+								delete r;
+								delete c;
 							}
 						}
 						Geometry* m = fact->createMultiPolygon(geoms0);
 						delete geom0;
 						geom0 = m;
 					}
-					return geom0;
+					final = geom0;
 				}
 
 				~Poly() {
 					for(Geometry* g : geoms)
 						delete g;
+					if(final)
+						delete final;
 				}
 
 			};
-
-			// Keeps track of polygonization progress and provides a cancellation mechanism.
-			class PolyProgressData {
-			public:
-				Status *status;
-				bool *cancel;
-				bool _cancel;
-
-				PolyProgressData(Status *status, bool *cancel) :
-					status(status), cancel(cancel), _cancel(false) {
-					if (cancel == nullptr)
-						cancel = &_cancel;
-				}
-			};
-
-			// Callback for polygonization.
-			int polyProgress(double dfComplete, const char *pszMessage, void *pProgressArg) {
-				PolyProgressData *data = (PolyProgressData*) pProgressArg;
-				if (data) {
-					if(data->status)
-						data->status->update((float) dfComplete);
-					return *(data->cancel) ? 0 : 1;
-				}
-				return 1;
-			}
 
 			int getTypeSize(DataType type) {
 				switch(type) {
@@ -268,6 +274,71 @@ namespace geo {
 					break;
 				}
 			}
+
+			/*
+			class G_DLL_EXPORT LRUCacheItem {
+			public:
+				int col, row, band;
+				void* data;
+
+				LRUCacheItem(int col, int row, int band, uint64_t size) :
+					col(col), row(row), band(band),
+					data(nullptr) {
+					data = malloc(size);
+				}
+
+				~LRUCacheItem() {
+					free(data);
+				}
+			};
+
+			class G_DLL_EXPORT LRUCache {
+			private:
+				size_t m_slots;
+				size_t m_size;
+				uint64_t m_time;
+				GDALDataset* m_ds;
+				std::map<uint64_t, std::string> m_timeItems;
+				std::unordered_map<std::string, uint64_t> m_itemsTime;
+				std::unordered_map<std::string, std::unique_ptr<LRUCacheItem> > m_items;
+
+				void evict() {
+					auto it = m_timeItems.begin();
+					uint64_t time = it->first;
+					std::string idx = it->second;
+					m_items.erase(idx);
+					m_timeItems.erase(time);
+					m_itemsTime.erase(idx);
+				}
+
+				std::string getIdx(int col, int row, int band) {
+					return std::to_string(col) + std::string(":") + std::to_string(row) + std::string(":") + std::to_string(band);
+				}
+
+			public:
+				LRUCache(size_t slots, size_t size, GDALDataset* ds) :
+					m_slots(slots), m_size(size), m_time(0),
+					m_ds(ds) {}
+
+				void* get(int col, int row, int band) {
+					std::string idx = getIdx(col, row, band);
+					if(m_items.find(idx) == m_items.end()) {
+						while(m_items.size() >= m_slots)
+							evict();
+						m_items[idx].reset(new LRUCacheItem(col, row, band, m_size));
+						++m_time;
+						m_timeItems[m_time] = idx;
+						m_itemsTime[idx] = m_time;
+					} else {
+						m_timeItems.erase(m_time);
+						++m_time;
+						m_timeItems[m_time] = idx;
+						m_itemsTime[idx] = m_time;
+					}
+					return m_items[idx]->data;
+				}
+			};
+			*/
 
 		} //util
 	} // raster
@@ -453,6 +524,11 @@ void GridProps::setTrans(double trans[6]) {
 	setResolution(m_trans[1], m_trans[5]);
 }
 
+void GridProps::setTrans(double tlx, double resX, double tx, double tly, double resY, double ty) {
+	double t[] = {tlx, resX, tx, tly, ty, resY};
+	setTrans(t);
+}
+
 void GridProps::trans(double trans[6]) const {
 	for(int i = 0; i < 6; ++i)
 		trans[i] = m_trans[i];
@@ -604,6 +680,15 @@ Tile TileIterator::next() {
 	m_source.writeTo(*tile, cols, rows, srcCol, srcRow, dstCol, dstRow, m_band, 1);
 
 	return Tile(tile, &m_source, m_cols, m_rows, col, row, m_buffer, srcCol, srcRow, dstCol, dstRow, m_band, props.writable());
+}
+
+Tile TileIterator::create(Tile &tpl) {
+	const GridProps& props = m_source.props();
+	GridProps p(props);
+	p.setSize(m_cols + m_buffer * 2, m_rows + m_buffer * 2);
+	MemRaster* tile = new MemRaster(p);
+	m_source.writeTo(*tile, tpl.m_cols, tpl.m_rows, tpl.m_srcCol, tpl.m_srcRow, tpl.m_dstCol, tpl.m_dstRow, m_band, 1);
+	return Tile(tile, &m_source, m_cols, m_rows, tpl.m_col, tpl.m_row, m_buffer, tpl.m_srcCol, tpl.m_srcRow, tpl.m_dstCol, tpl.m_dstRow, m_band, props.writable());
 }
 
 TileIterator::~TileIterator() {
@@ -764,14 +849,14 @@ void Grid::voidFillIDW(double radius, int count, double exp, int band) {
 using namespace geo::raster::util;
 
 void Grid::smooth(Grid &smoothed, double sigma, int size, int band,
-		Callbacks *status, bool *cancel) {
+		Status* status, bool *cancel) {
 
 	const GridProps& gp = props();
 
 	if (!cancel)
-		cancel = &_cancel;
+		cancel = &s_cancel;
 	if (status)
-		status->stepCallback(0.01f);
+		status->update(0.01f);
 	if (sigma <= 0)
 		g_argerr("Sigma must be > 0.");
 	if (size < 3)
@@ -789,7 +874,7 @@ void Grid::smooth(Grid &smoothed, double sigma, int size, int band,
 	std::atomic<int> curTile(0);
 
 	if (status)
-		status->stepCallback(0.02f);
+		status->update(0.02f);
 
 	std::unique_ptr<TileIterator> iter = iterator(512, 512, size, band);
 	int tiles = iter->count();
@@ -830,11 +915,11 @@ void Grid::smooth(Grid &smoothed, double sigma, int size, int band,
 		tile.writeTo(smoothed);
 
 		if (status)
-			status->stepCallback(0.2f + (float) ++curTile / tiles * 0.97f);
+			status->update(g_min(0.99f, 0.2f + (float) curTile++ / tiles * 0.97f));
 	}
 
 	if (status)
-		status->stepCallback(1.0);
+		status->update(1.0);
 }
 
 Grid::~Grid() {
@@ -1480,7 +1565,7 @@ GDALDataType Raster::getGDType() const {
 double Raster::getFloat(int col, int row, int band) {
 	int bcol = col / m_bcols;
 	int brow = row / m_brows;
-	if(bcol != m_bcol || brow != m_brow) {
+	if(bcol != m_bcol || brow != m_brow || band != m_bband) {
 		if(m_dirty) {
 			GDALRasterBand* bnd = m_ds->GetRasterBand(m_bband);
 			if(!bnd)
@@ -1520,7 +1605,7 @@ double Raster::getFloat(double x, double y, int band) {
 int Raster::getInt(int col, int row, int band) {
 	int bcol = col / m_bcols;
 	int brow = row / m_brows;
-	if(bcol != m_bcol || brow != m_brow) {
+	if(bcol != m_bcol || brow != m_brow || band != m_bband) { // TODO: No effective cacheing if the band changes.
 		if(m_dirty) {
 			GDALRasterBand* bnd = m_ds->GetRasterBand(m_bband);
 			if(!bnd)
@@ -1636,34 +1721,27 @@ void Raster::setFloat(double x, double y, double v, int band) {
 	setFloat(m_props.toCol(x), m_props.toRow(y), v, band);
 }
 
-std::mutex m_pqmtx;
-std::condition_variable m_cond1;
-std::condition_variable m_cond2;
-
 // Processes the polygon queue from polygonize.
-static void processGeomQueue(std::queue<std::unique_ptr<Poly> > &q, std::atomic<uint64_t> &fid,
-		GEOSContextHandle_t gctx, OGRLayer* layer, bool removeHoles, bool removeDangles,
-		bool& running) {
+static void processGeomQueue(std::queue<std::unique_ptr<Poly> >* q,
+		std::mutex* pqmtx, std::condition_variable* pcond1,
+		std::atomic<uint64_t>* fid, GEOSContextHandle_t gctx, OGRLayer* layer,
+		bool removeHoles, bool removeDangles, bool* running) {
 	std::unique_ptr<Poly> p;
-	while(running) {
-		{
-			std::unique_lock<std::mutex> lck(m_pqmtx);
-			while(running && q.empty())
-				m_cond1.wait(lck);
-			if(!running || q.empty())
-				break;
-			p = std::move(q.front());
-			q.pop();
-			m_cond2.notify_one();
+	while(*running || !q->empty()) {
+		if(q->empty()) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+			continue;
 		}
+		p.swap(q->front());
+		q->pop();
 		// Retrieve the unioned geometry.
-		OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx,
-				(GEOSGeom) p->poly(removeHoles, removeDangles));
+		Geometry* g = p->getPoly();
+		OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx, (GEOSGeom) g);
 		// Create and append the feature.
 		OGRFeature feat(layer->GetLayerDefn());
 		feat.SetGeometry(geom);
 		feat.SetField("id", (GIntBig) p->id);
-		feat.SetFID(++fid);
+		feat.SetFID(++(*fid));
 		delete geom;
 		if(OGRERR_NONE != layer->CreateFeature(&feat))
 			g_runerr("Failed to add geometry.");
@@ -1678,11 +1756,12 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 		g_runerr("Only integer rasters can be polygonized.");
 
 	if(cancel == nullptr)
-		cancel = &_cancel;
+		cancel = &s_cancel;
 
 	GDALAllRegister();
 
 	// Remove the original file; some can't be overwritten directly.
+	// This will not take care of any auxillary files (e.g. shapefiles)
 	Util::rm(filename);
 
 	// Get the vector driver.
@@ -1717,8 +1796,6 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 	int cols = m_props.cols();
 	int rows = m_props.rows();
 	uint64_t nd = m_props.nodata();
-	// TODO: Perturbation to allow polygon union
-	double yShift0 = m_props.resolutionY() > 0 ? G_DBL_MIN_POS : -G_DBL_MIN_POS;
 
 	// Generate a unique fID for each feature.
 	std::atomic<uint64_t> fid(0);
@@ -1732,119 +1809,147 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 	if(OGRERR_NONE != layer->StartTransaction())
 		g_runerr("Failed to start transaction.");
 
-	MemRaster inrast(m_props);
-	writeTo(inrast);
-
-	// Buffer for reading/polygonizing.
-	GridProps gp(m_props);
-	gp.setSize(cols, 1);
-	MemRaster rowBuf(gp);
-
 	// Keeps polygons created in thread.
 	std::unordered_map<uint64_t, std::unique_ptr<Poly> > polys;
-	std::unordered_set<uint64_t> current;
+	std::vector<bool> finished(rows);
+	std::fill(finished.begin(), finished.end(), false);
+
+	// Used to manage the interaction of the polygonizing/writing threads.
+	std::mutex pqmtx;
+	std::condition_variable pcond1;
 
 	// Set up a writer thread to write out polygons as they're produced.
 	std::queue<std::unique_ptr<Poly> > polyQ;
 	bool running = true;
-	std::thread writer(processGeomQueue, std::ref(polyQ), std::ref(fid), gctx, layer, removeHoles, removeDangles, std::ref(running));
+	std::thread writer(processGeomQueue, &polyQ,
+			&pqmtx, &pcond1, &fid, gctx, layer,
+			removeHoles, removeDangles, &running);
 
-	for(int r = 0; r < rows; ++r) {
+	int bufSize = 128;
+	int blocks = rows / bufSize + 1;
+	double snap = 100.0;
 
-		status->update((float) r / rows);
+	#pragma omp parallel for schedule(static, 1) // Process blocks sequentially to stop polys dict from getting too large.
+	for(int block = 0; block < blocks; ++block) {
+
+		status->update((float) ++stat / blocks);
 
 		if(*cancel)
 			continue;
 
+		int bufHeight = g_min(bufSize, rows - (block + 1) * bufSize);
+		if(bufHeight < 1) continue;
+
+		// Buffer for reading/polygonizing.
+		GridProps gp(m_props);
+		gp.setSize(cols, bufHeight);
+		MemRaster rowBuf(gp);
+
 		// Write into the buffer.
-		inrast.writeTo(rowBuf, cols, 1, 0, r, 0, 0, band);
+		#pragma omp critical(__inrast)
+		writeTo(rowBuf, cols, bufHeight, 0, block * bufSize, 0, 0, band);
 
-		current.clear();
+		std::unordered_map<uint64_t, std::unique_ptr<Poly> > polys0;
 
-		for(int c = 0; c < cols; ++c) {
+		for(int rr = 0; rr < bufHeight; ++rr) {
 
-			// Get the current ID, skip if nodata.
-			uint64_t id0 = rowBuf.getInt(c, 0);
-			if(id0 == nd) continue;
+			if(*cancel)
+				continue;
 
-			// Get the coord of one corner of the polygon.
-			double x0 = gp.toX(c);
-			double y0 = gp.toY(r);
+			int r = block * bufSize + rr;
 
-			// Scan right...
-			while(++c <= cols) {
+			for(int c = 0; c < cols; ++c) {
 
-				uint64_t id1 = c < cols ? rowBuf.getInt(c, 0) : 0;
+				// Get the current ID, skip if nodata.
+				uint64_t id0 = rowBuf.getInt(c, rr);
+				if(id0 == nd || id0 == 0) continue;
 
-				// If the ID changes, capture and output the polygon.
-				if(id0 > 0 && id1 != id0) {
+				// Get the coord of one corner of the polygon.
+				double x0 = std::round(gp.toX(c) * snap) / snap;
+				double y0 = std::round(gp.toY(r) * snap) / snap;
 
-					// Coord of the other corner.
-					double x1 = gp.toX(c);
-					double y1 = gp.toY(r) + gp.resolutionY() + yShift0;
+				// Scan right...
+				while(++c <= cols) {
 
-					// Build the geometry.
-					CoordinateSequence* seq = gf->getCoordinateSequenceFactory()->create((size_t)0, 2);
-					seq->add(Coordinate(x0, y0));
-					seq->add(Coordinate(x1, y0));
-					seq->add(Coordinate(x1, y1));
-					seq->add(Coordinate(x0, y1));
-					seq->add(Coordinate(x0, y0));
-					LinearRing* ring = gf->createLinearRing(seq);
-					Polygon* geom = gf->createPolygon(ring, NULL);
+					uint64_t id1 = c < cols ? rowBuf.getInt(c, rr) : 0;
 
-					// If it's already in the list, merge it, otherwise add it.
-					if(polys.find(id0) == polys.end()) {
-						std::unique_ptr<Poly> p(new Poly(id0, geom, r, gf));
-						polys[id0] = std::move(p);
-					} else {
-						polys[id0]->update(geom, r);
+					// If the ID changes, capture and output the polygon.
+					if(id0 > 0 && id1 != id0) {
+
+						// Coord of the other corner.
+						double x1 = std::round(gp.toX(c) * snap) / snap;
+						double y1 = std::round((gp.toY(r) + gp.resolutionY()) * snap) / snap;
+
+						// Build the geometry.
+						CoordinateSequence* seq = gf->getCoordinateSequenceFactory()->create((size_t)0, 2);
+						seq->add(Coordinate(x0, y0));
+						seq->add(Coordinate(x1, y0));
+						seq->add(Coordinate(x1, y1));
+						seq->add(Coordinate(x0, y1));
+						seq->add(Coordinate(x0, y0));
+						LinearRing* ring = gf->createLinearRing(seq);
+						Polygon* geom = gf->createPolygon(ring, NULL);
+
+						// If it's already in the list, merge it, otherwise add it.
+						if(!polys0.count(id0)) {
+							polys0[id0].reset(new Poly(id0, geom, r, r, gf));
+						} else {
+							polys0[id0]->update(geom, r, r);
+						}
+
+						delete geom;
+						--c; // Back up the counter by one, to start with the new ID.
+						break;
 					}
-
-					// Update the set of active IDs.
-					current.insert(id0);
-
-					--c; // Back up the counter by one, to start with the new ID.
-					break;
+					id0 = id1;
 				}
-				id0 = id1;
 			}
-
+			finished[r] = true;
 		}
 
+		std::list<std::unique_ptr<Poly> > geoms0;
+
+		// Merge into main polys list.
+		for(auto& p : polys0) {
+			#pragma omp critical(__polys)
+			{
+				if(!polys.count(p.first)) {
+					polys[p.first].reset(p.second.release()); // Don't delete, transfer.
+				} else {
+					polys[p.first]->update(*(p.second)); // Copy contents; delete on map destruct
+				}
+			}
+		}
+
+		#pragma omp critical(__polys)
 		{
-			std::unique_lock<std::mutex> lck(m_pqmtx);
-			while(polyQ.size() > 1)
-				m_cond2.wait(lck);
-			for(auto it = polys.begin(); it != polys.end();) {
-				if(current.find(it->first) == current.end()) {
-					polyQ.push(std::move(it->second));
+			// Find polys that are ready to write.
+			for(auto it = polys.begin(); it != polys.end(); ) {
+				if(it->second->rangeComplete(finished)) {
+					geoms0.push_back(std::move(it->second));
 					it = polys.erase(it);
 				} else {
 					++it;
 				}
 			}
 		}
-		m_cond1.notify_one();
+
+		// Generate polygon and add Poly to the write queue.
+		for(std::unique_ptr<Poly>& p : geoms0) {
+			p->generate(removeHoles, removeDangles);
+			std::lock_guard<std::mutex> lck(pqmtx);
+			polyQ.push(std::move(p));
+		}
+
 	}
 
-	while(!polys.empty()) {
-		{
-			std::unique_lock<std::mutex> lck(m_pqmtx);
-			while(polyQ.size() > 1)
-				m_cond2.wait(lck);
-			int i = 0;
-			for(auto it = polys.begin(); i < 1000 && it != polys.end(); ++i) {
-				polyQ.push(std::move(it->second));
-				it = polys.erase(it);
-			}
-		}
-		m_cond1.notify_one();
+	for(auto& it : polys) {
+		it.second->generate(removeHoles, removeDangles);
+		std::lock_guard<std::mutex> lck(pqmtx);
+		polyQ.push(std::move(it.second));
 	}
 
 	running = false;
-	m_cond1.notify_all();
-	m_cond2.notify_all();
 	writer.join();
 
 	if(OGRERR_NONE != layer->CommitTransaction())
