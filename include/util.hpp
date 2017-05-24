@@ -50,6 +50,8 @@ namespace geo {
     		bool m_reset;
     		std::chrono::time_point<std::chrono::system_clock> m_start;
     		std::chrono::time_point<std::chrono::system_clock> m_stop;
+    		bool m_running;
+
     	public:
     		// Create a stopwatch with time formatted as hh:mm:ss
     		Stopwatch();

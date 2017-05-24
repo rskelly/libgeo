@@ -38,7 +38,6 @@ namespace geo {
 			Float64 = 7, Float32 = 6, UInt32 = 5, UInt16 = 4, Byte = 3, Int32 = 2, Int16 = 1, None = 0
 		};
 
-
     	class G_DLL_EXPORT GridProps {
     	private:
     		double m_trans[6];			// The geotransform properties.
@@ -126,6 +125,8 @@ namespace geo {
 
     		// Set the geo transform properties.
     		void setTrans(double m_trans[6]);
+
+    		void setTrans(double tlx, double resX, double tx, double tly, double resY, double ty);
 
     		// Get the geo transform properties.
     		void trans(double m_trans[6]) const;
@@ -274,6 +275,10 @@ namespace geo {
         	// Returns the next tile. Writes the previous tile to
         	// source (if there is one) and reads the next one.
         	Tile next();
+
+        	// Create a Tile using the given tile as a Template.
+        	// Does not interfere with the iterator.
+        	Tile create(Tile &tpl);
 
         	// Destroy the TileIterator.
         	~TileIterator();
@@ -450,7 +455,7 @@ namespace geo {
             // Callback is an optional function reference with a single float
             // between 0 and 1, for status tracking.
             void smooth(Grid &smoothed, double sigma, int size, int band = 1,
-                geo::util::Callbacks *status = nullptr, 
+                Status* status = nullptr,
                 bool *cancel = nullptr);
 
             // The radius is given with cells as the unit, but

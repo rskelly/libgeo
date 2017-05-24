@@ -83,19 +83,19 @@ target_link_libraries (raster ${GDAL_LIBRARY} ${GEOS_LIBRARY} util geo db)
 
 # Build tests ############################################################################################
 
-add_executable (polygonize src/tests/polygonize.cpp)
-target_include_directories(polygonize PUBLIC include)
-target_link_libraries (polygonize PUBLIC raster)
+add_executable (polygonize_test src/tests/polygonize.cpp)
+target_include_directories(polygonize_test PUBLIC include)
+target_link_libraries (polygonize_test PUBLIC raster)
 
-add_executable (smooth src/tests/smooth.cpp)
-target_include_directories(smooth PUBLIC include)
-target_link_libraries (smooth PUBLIC raster)
+add_executable (smooth_test src/tests/smooth.cpp)
+target_include_directories(smooth_test PUBLIC include)
+target_link_libraries (smooth_test PUBLIC raster)
 
-add_executable (quadtree src/tests/quadtree.cpp)
-target_include_directories(quadtree PUBLIC include)
-target_link_libraries (quadtree PUBLIC util rt)
+add_executable (fqtree_test src/tests/fqtree.cpp)
+target_include_directories(fqtree_test PUBLIC include)# ${STXXL_INCLUDE_DIRS})
+target_link_libraries (fqtree_test PUBLIC util)# ${STXXL_LIBRARIES})
 
-add_executable (qtree src/tests/qtree.cpp)
-target_include_directories(qtree PUBLIC include)# ${STXXL_INCLUDE_DIRS})
-target_link_libraries (qtree PUBLIC util)# ${STXXL_LIBRARIES})
+add_executable (mqtree_test src/tests/mqtree.cpp)
+target_include_directories(mqtree_test PUBLIC include)# ${STXXL_INCLUDE_DIRS})
+target_link_libraries (mqtree_test PUBLIC util)# ${STXXL_LIBRARIES})
 

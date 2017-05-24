@@ -15,31 +15,39 @@
 
 using namespace geo::util;
 
-Stopwatch::Stopwatch() :
-		m_reset(true) {}
-
-void Stopwatch::start() {
-	if(m_reset)
-		m_start = std::chrono::system_clock::now();
-}
-
-void Stopwatch::stop() {
-	m_stop = std::chrono::system_clock::now();
+Stopwatch::Stopwatch() : m_reset(false), m_running(false) {
+	m_stop = m_start = std::chrono::system_clock::now();
+	reset();
 }
 
 void Stopwatch::reset() {
 	m_reset = true;
 }
 
+void Stopwatch::start() {
+	if(m_reset)
+		m_start = std::chrono::system_clock::now();
+	m_running = true;
+}
+
+void Stopwatch::stop() {
+	m_stop = std::chrono::system_clock::now();
+	m_running = false;
+}
 std::string Stopwatch::time() {
 	uint64_t sec = millis() / 1000;
 	std::stringstream ss;
-	ss << (sec / 3600) << ":" << ((sec / 60) % 60) << ":" << (sec % 60);
+	uint64_t h = sec / 3600;
+	uint64_t m = (sec / 60) % 60;
+	uint64_t s = sec % 60;
+	ss << h << ":" << (m > 9 ? "" : "0") << m << ":" << (s > 9 ? "" : "0") << s;
 	return ss.str();
 }
 
 uint64_t Stopwatch::millis() {
-	return std::chrono::duration_cast<std::chrono::milliseconds>(m_stop - m_start).count();
+	std::chrono::time_point<std::chrono::system_clock> now = m_running ? std::chrono::system_clock::now() : m_stop;
+	uint64_t ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_start).count();
+	return ms;
 }
 
 void Callbacks::stepCallback(float status) const {
