@@ -126,7 +126,7 @@ namespace geo {
     		// Set the geo transform properties.
     		void setTrans(double m_trans[6]);
 
-    		void setTrans(double tlx, double resX, double tx, double tly, double resY, double ty);
+    		void setTrans(double tlx, double resX, double tly, double resY);
 
     		// Get the geo transform properties.
     		void trans(double m_trans[6]) const;

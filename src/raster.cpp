@@ -347,7 +347,7 @@ namespace geo {
 GridProps::GridProps() :
 		m_cols(0), m_rows(0),
 		m_vsrid(0), m_hsrid(0),		// Vertical and horizontal srid
-		m_bands(0),           		// The number of bands
+		m_bands(1),           		// The number of bands
 		m_writable(false),			// True if the grid is writable
 		m_nodata(0),
 		m_nodataSet(false),
@@ -524,8 +524,8 @@ void GridProps::setTrans(double trans[6]) {
 	setResolution(m_trans[1], m_trans[5]);
 }
 
-void GridProps::setTrans(double tlx, double resX, double tx, double tly, double resY, double ty) {
-	double t[] = {tlx, resX, tx, tly, ty, resY};
+void GridProps::setTrans(double tlx, double resX, double tly, double resY) {
+	double t[] = {tlx, resX, 0, tly, 0, resY};
 	setTrans(t);
 }
 
