@@ -478,6 +478,12 @@ bool Util::rm(const std::string &name) {
 	return remove_all(p) > 0;
 }
 
+uint64_t Util::filesize(const std::string& name) {
+    struct stat stat_buf;
+    int rc = stat(name.c_str(), &stat_buf);
+    return rc == 0 ? stat_buf.st_size : -1;
+}
+
 bool Util::mkdir(const std::string &dir) {
 	using namespace boost::filesystem;
 	path bdir(dir);

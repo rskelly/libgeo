@@ -470,6 +470,9 @@ namespace geo {
             // Remove a file.
             static bool rm(const std::string& name);
 
+            // Return the file size in bytes.
+            static uint64_t filesize(const std::string& name);
+
             // Make a directory.
             static bool mkdir(const std::string& dir);
 
