@@ -1157,23 +1157,19 @@ void MemRaster::writeToRaster(Raster &grd,
 	int typeSize = getTypeSize(gp.dataType());
 	int gcols = gp.cols();
 
-	Buffer buf(cols * rows * typeSize);
 	GDALRasterBand *band = grd.m_ds->GetRasterBand(dstBand);
 
 	char* input  = (char*) grid();
-	char* output = (char*) buf.buf;
 
 	{
-		std::lock_guard<std::mutex> lk(m_mtx);
-		for(int r = 0; r < rows; ++r)
-			std::memcpy(output + r * cols * typeSize, input + ((srcRow + r) * gcols + srcCol) * typeSize, cols * typeSize);
-	}
-
-	{
-		std::lock_guard<std::mutex> lk(grd.m_mtx);
-		if(CPLE_None != band->RasterIO(GF_Write, dstCol, dstRow, cols, rows, output,
-				cols, rows, gtype, 0, 0, 0))
-			g_runerr("Failed to write to: " << grd.filename());
+		std::lock_guard<std::mutex> lk1(grd.m_mtx);
+		std::lock_guard<std::mutex> lk0(m_mtx);
+		for(int r = 0; r < rows; ++r) {
+			//std::memcpy(output + r * cols * typeSize, input + ((srcRow + r) * gcols + srcCol) * typeSize, cols * typeSize);
+			if(CPLE_None != band->RasterIO(GF_Write, dstCol, dstRow + r, cols, 1, input + ((srcRow + r) * gcols + srcCol) * typeSize,
+					cols, 1, gtype, 0, 0, 0))
+				g_runerr("Failed to write to: " << grd.filename());
+		}
 	}
 
 }
