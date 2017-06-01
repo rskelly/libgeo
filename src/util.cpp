@@ -1,4 +1,5 @@
 #include "util.hpp"
+#include "crypto/md5.hpp"
 #include "geo.hpp"
 
 #include <ogr_spatialref.h>
@@ -450,7 +451,7 @@ std::vector<std::pair<int, int> > Util::squareKernel(int size, bool includeCente
 	return offsets;
 }
 
-void Util::copyfile(std::string &srcfile, std::string &dstfile) {
+void Util::copyfile(const std::string &srcfile, const std::string &dstfile) {
 	std::ifstream src(srcfile.c_str(), std::ios::binary);
 	std::ofstream dst(dstfile.c_str(), std::ios::binary);
 	dst << src.rdbuf();
@@ -549,6 +550,12 @@ std::string Util::tmpFile(const std::string &root) {
 	}
 	p = temp_directory_path() / p;
 	return p.string(); // Windows can have wide string paths.
+}
+
+std::string Util::md5(const std::string& input) {
+	geo::crypto::MD5 m(input);
+	m.finalize();
+	return m.hexdigest();
 }
 
 MappedFile::MappedFile(const std::string& root, uint64_t size, bool mapped) :

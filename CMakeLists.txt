@@ -65,7 +65,7 @@ add_library (geo STATIC src/geo.cpp)
 target_include_directories(geo PUBLIC include)
 
 
-add_library (util STATIC src/util.cpp)
+add_library (util STATIC src/util.cpp src/md5.cpp)
 target_include_directories(util PUBLIC include ${Boost_INCLUDE_DIRS} ${GDAL_INCLUDE_DIR})
 if (UNIX AND NOT APPLE)
 	target_link_libraries (util ${Boost_LIBRARIES} ${GDAL_LIBRARY} geo rt)
