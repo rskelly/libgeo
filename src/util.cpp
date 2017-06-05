@@ -2,6 +2,8 @@
 #include "crypto/md5.hpp"
 #include "geo.hpp"
 
+#include <boost/interprocess/creation_tags.hpp>
+
 #include <ogr_spatialref.h>
 
 #include <set>
@@ -558,15 +560,13 @@ std::string Util::md5(const std::string& input) {
 	return m.hexdigest();
 }
 
-MappedFile::MappedFile(const std::string& root, uint64_t size, bool mapped) :
+MappedFile::MappedFile(const std::string& name, uint64_t size, bool mapped) :
 	m_size(0),
 	m_region(nullptr),
-	m_mapping(nullptr),
-	m_mapped(mapped) {
+	m_shmem(nullptr),
+	m_mapped(mapped),
+	m_name(name) {
 
-	if(!Util::mkdir(root))
-		g_runerr("Failed to make temporary directory: " << root);
-	m_filename = Util::tmpFile(root);
 	if (size > 0)
 		reset(size);
 }
@@ -574,10 +574,10 @@ MappedFile::MappedFile(const std::string& root, uint64_t size, bool mapped) :
 MappedFile::MappedFile(uint64_t size, bool mapped) :
 	m_size(0),
 	m_region(nullptr),
-	m_mapping(nullptr),
-	m_mapped(mapped) {
+	m_shmem(nullptr),
+	m_mapped(mapped),
+	m_name("dijital") {
 
-	m_filename = Util::tmpFile();
 	if (size > 0)
 		reset(size);
 }
@@ -585,10 +585,9 @@ MappedFile::MappedFile(uint64_t size, bool mapped) :
 MappedFile::MappedFile(bool mapped) :
 	m_size(0),
 	m_region(nullptr),
-	m_mapping(nullptr),
-	m_mapped(mapped) {
-
-	m_filename = Util::tmpFile();
+	m_shmem(nullptr),
+	m_mapped(mapped),
+	m_name("dijital") {
 }
 
 uint64_t fixSize(uint64_t size) {
@@ -614,14 +613,17 @@ bool MappedFile::read(void* output, uint64_t position, uint64_t length) {
     return true;
 }
 
+static uint64_t mappedIdx = 0;
+
 void MappedFile::reset(uint64_t size) {
 	using namespace boost::interprocess;
 	#pragma omp critical(__mapped_file_reset__)
 	{
 		size = fixSize(size);
 		if(size > m_size) {
-			if(m_mapped && size > Util::diskSpace(Util::parent(m_filename)))
-				g_runerr("Not enough disk space to grow memory.");
+			// TODO: Disk space check.
+			//if(m_mapped && size > Util::diskSpace(Util::parent(m_filename)))
+			//	g_runerr("Not enough disk space to grow memory.");
 			uint64_t oldSize = m_size;
 			m_size = size;
 			if(m_region) {
@@ -629,25 +631,7 @@ void MappedFile::reset(uint64_t size) {
 				delete m_region;
 				m_region = nullptr;
 			}
-			if(m_mapped) {
-				std::FILE* f;
-				if(Util::exists(m_filename)) {
-					f = std::fopen(m_filename.c_str(), "rb+");
-				} else {
-					f = std::fopen(m_filename.c_str(), "wb+");
-				}
-				if(!f)
-					g_runerr("Failed to open mapped file: " << m_filename);
-				if(std::fseek(f, m_size - 1, SEEK_SET)) {
-					std::fclose(f);
-					g_runerr("Failed to resize mapped file.");
-				}
-				if(EOF == std::fputc(0, f)) {
-					std::fclose(f);
-					g_runerr("Failed to resize mapped file.");
-				}
-				std::fclose(f);
-			} else {
+			if(!m_mapped) {
 				std::unique_ptr<Buffer> buf(new Buffer(m_size));
 				if(m_data.get()) {
 					std::memcpy(buf->buf, m_data->buf, oldSize);
@@ -657,10 +641,15 @@ void MappedFile::reset(uint64_t size) {
 			}
 		}
 		if(m_mapped) {
-			if(!m_mapping)
-				m_mapping = new file_mapping(m_filename.c_str(), read_write);
-			if(!m_region)
-				m_region = new mapped_region(*m_mapping, read_write, 0, m_size);
+			if (m_region)
+				delete m_region;
+			if (m_shmem)
+				delete m_shmem;
+			std::stringstream ss;
+			ss << m_name << "_" << mappedIdx++;
+			m_shmem = new shared_memory_object(open_or_create, ss.str().c_str(), read_write);
+			m_shmem->truncate(m_size);
+			m_region = new mapped_region(*m_shmem, read_write, 0, m_size);
 		}
 	}
 }
@@ -679,9 +668,8 @@ size_t MappedFile::pageSize() const {
 
 MappedFile::~MappedFile() {
 	if(m_mapped) {
-		m_mapping->remove(m_filename.c_str());
+		delete m_shmem;
 		delete m_region;
-		delete m_mapping;
 	}
 }
 

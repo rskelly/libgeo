@@ -51,7 +51,7 @@ namespace geo {
     		std::string m_projection;	// The WKT representation of the projection
     		std::string m_driver;
 
-    	public:
+		public:
 
     		GridProps();
 
@@ -616,8 +616,6 @@ namespace geo {
             bool m_mmapped;
             GridProps m_props;
             std::unique_ptr<geo::util::MappedFile> m_mappedFile;
-            std::unique_ptr<boost::interprocess::mapped_region> m_region;
-            std::unique_ptr<boost::interprocess::file_mapping> m_mapping;
             std::mutex m_mtx;
 
             // Checks if the grid has been initialized. Throws exception otherwise.

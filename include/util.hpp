@@ -5,6 +5,7 @@
 
 #include <boost/interprocess/mapped_region.hpp>
 #include <boost/interprocess/file_mapping.hpp>
+#include <boost/interprocess/shared_memory_object.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/algorithm/string/case_conv.hpp>
 #include <boost/algorithm/string/join.hpp>
@@ -230,6 +231,7 @@ namespace geo {
             uint64_t m_size;
             boost::interprocess::mapped_region* m_region;
 			boost::interprocess::file_mapping* m_mapping;
+			boost::interprocess::shared_memory_object* m_shmem;
 			std::string m_filename;
 			bool m_mapped;
 			std::unique_ptr<Buffer> m_data;
