@@ -507,7 +507,6 @@ std::string Util::extension(const std::string &filename) {
 	std::string ext = p.extension().string();
 	if(ext.size())
 		ext = ext.substr(1);
-	//lower(ext);
 	return ext;
 }
 
