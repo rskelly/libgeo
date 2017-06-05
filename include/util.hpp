@@ -444,8 +444,11 @@ namespace geo {
             // Uppercase and return a copy of the string.
             static std::string upper(const std::string& str);
 
+			// Generate an MD5 hash of the string.
+			static std::string md5(const std::string& input);
+			
             // Move the file.
-            static void copyfile(std::string& srcfile, std::string& dstfile);
+            static void copyfile(const std::string& srcfile, const std::string& dstfile);
 
             // Create a temporary file at the given root folder. If no root is given,
             // a relative path is created.
