@@ -348,11 +348,12 @@ std::string MD5::hexdigest() const
 }
 
 //////////////////////////////
-
+/*
 std::ostream& operator<<(std::ostream& out, MD5 md5)
 {
-  return out << md5.hexdigest();
+  return out << md5.hexdigest(); // TODO: Operator ambiguous in VS.
 }
+*/
 
 //////////////////////////////
 

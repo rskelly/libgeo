@@ -227,12 +227,12 @@ namespace geo {
         // Maintains a memory-mapped file, and gives access to the mapped data.
         class MappedFile {
         private:
+			bool m_mapped;
             uint64_t m_size;
+			std::string m_name;
+			std::unique_ptr<Buffer> m_data;
             boost::interprocess::mapped_region* m_region;
 			boost::interprocess::shared_memory_object* m_shmem;
-			std::string m_filename;
-			bool m_mapped;
-			std::unique_ptr<Buffer> m_data;
 
         public:
 
@@ -241,7 +241,7 @@ namespace geo {
             MappedFile(uint64_t size, bool mapped = true);
             MappedFile(bool mapped = true);
 
-            const std::string& filename() const;
+            const std::string& name() const;
 
             void* data();
 

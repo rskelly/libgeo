@@ -560,33 +560,37 @@ std::string Util::md5(const std::string& input) {
 }
 
 MappedFile::MappedFile(const std::string& name, uint64_t size, bool mapped) :
-	m_size(0),
-	m_region(nullptr),
-	m_shmem(nullptr),
 	m_mapped(mapped),
-	m_name(name) {
+	m_size(0),
+	m_name("dijital"),
+	m_region(nullptr),
+	m_shmem(nullptr) {
 
 	if (size > 0)
 		reset(size);
 }
 
 MappedFile::MappedFile(uint64_t size, bool mapped) :
-	m_size(0),
-	m_region(nullptr),
-	m_shmem(nullptr),
 	m_mapped(mapped),
-	m_name("dijital") {
+	m_size(0),
+	m_name("dijital"),
+	m_region(nullptr),
+	m_shmem(nullptr) {
 
 	if (size > 0)
 		reset(size);
 }
 
 MappedFile::MappedFile(bool mapped) :
-	m_size(0),
-	m_region(nullptr),
-	m_shmem(nullptr),
 	m_mapped(mapped),
-	m_name("dijital") {
+	m_size(0),
+	m_name("dijital"),
+	m_region(nullptr),
+	m_shmem(nullptr) {
+}
+
+const std::string& MappedFile::name() const {
+	return m_name;
 }
 
 uint64_t fixSize(uint64_t size) {
@@ -612,7 +616,7 @@ bool MappedFile::read(void* output, uint64_t position, uint64_t length) {
     return true;
 }
 
-static uint64_t mappedIdx = 0;
+static uint64_t s_mappedIdx = 0;
 
 void MappedFile::reset(uint64_t size) {
 	using namespace boost::interprocess;
@@ -645,7 +649,7 @@ void MappedFile::reset(uint64_t size) {
 			if (m_shmem)
 				delete m_shmem;
 			std::stringstream ss;
-			ss << m_name << "_" << mappedIdx++;
+			ss << m_name << "_" << s_mappedIdx++;
 			m_shmem = new shared_memory_object(open_or_create, ss.str().c_str(), read_write);
 			m_shmem->truncate(m_size);
 			m_region = new mapped_region(*m_shmem, read_write, 0, m_size);
