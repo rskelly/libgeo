@@ -138,7 +138,7 @@ namespace geo {
 
 			// The total number of items in the node.
 			uint64_t count() const {
-				if(m_split) {
+				if(!m_split) {
 					return m_items.size();
 				} else {
 					uint64_t c = 0;
