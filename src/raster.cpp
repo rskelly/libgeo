@@ -105,15 +105,17 @@ namespace geo {
 					return true;
 				}
 
+				// Return the pointer to the unioned polygon.
 				Geometry* getPoly() {
 					return final;
 				}
 
+				// Generate the unioned polygon from its parts. Remove dangles and holes if required.
 				void generate(bool removeHoles, bool removeDangles) {
 					geos::operation::geounion::CascadedPolygonUnion u(&geoms);
 					Geometry* geom0 = u.Union();
-					if (geom0)
-						return;
+					if (!geom0)
+						g_runerr("Failed to compute geometry."); //return;
 					if(geom0->getGeometryTypeId() != GEOS_MULTIPOLYGON) {
 						std::vector<Geometry*> geoms0;
 						geoms0.push_back(geom0);
