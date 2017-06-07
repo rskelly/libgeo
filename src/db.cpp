@@ -171,7 +171,7 @@ void DB::flush() {
 
 DB::~DB() {
 	flush();
-	// GDALClose(m_ds);
+	GDALClose(m_ds);
 }
 
 std::map<std::string, std::set<std::string> > DB::extensions() {
