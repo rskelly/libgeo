@@ -95,13 +95,15 @@ namespace geo {
 
 		// Simple class for capturing status from utility functions.
 		class Status {
+		private:
+			Callbacks *m_callbacks;
+			float m_start, m_end;
 		public:
-			Callbacks *callbacks;
-			float start, end;
-
 			Status(Callbacks *callbacks, float start, float end);
-
-			void update(float s);
+			void update(float s, const std::string& msg = "");
+			float start() const;
+			float end() const;
+			Callbacks* callbacks() const;
 		};
 
         class Point {

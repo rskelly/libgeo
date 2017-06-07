@@ -69,10 +69,29 @@ Callbacks::~Callbacks() {
 }
 
 Status::Status(Callbacks *callbacks, float start, float end) :
-	callbacks(callbacks), start(start), end(end) {
+	m_callbacks(callbacks), m_start(start), m_end(end) {
 }
-void Status::update(float s) {
-	callbacks->stepCallback(start + (end - start) * s);
+
+Callbacks* Status::callbacks() const {
+	return m_callbacks;
+}
+
+float Status::start() const {
+	return m_start;
+}
+
+float Status::end()  const {
+	return m_end;
+}
+
+void Status::update(float s, const std::string& msg) {
+	if(!m_callbacks) {
+		g_debug("Status: " << s << ", " << msg);
+	} else {
+		m_callbacks->stepCallback(m_start + (m_end - m_start) * s);
+		if(!msg.empty())
+			m_callbacks->statusCallback(msg);
+	}
 }
 
 Point::Point(double x, double y, double z) :
