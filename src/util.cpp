@@ -523,10 +523,7 @@ std::string Util::parent(const std::string& file) {
 std::string Util::extension(const std::string &filename) {
 	using namespace boost::filesystem;
 	path p(filename);
-	std::string ext = p.extension().string();
-	if(ext.size())
-		ext = ext.substr(1);
-	return ext;
+	return p.extension().string();
 }
 
 std::string& Util::lower(std::string &str) {

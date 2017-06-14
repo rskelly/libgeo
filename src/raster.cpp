@@ -1253,7 +1253,7 @@ std::map<std::string, std::set<std::string> > Raster::extensions() {
 					std::list<std::string> lst;
 					Util::splitString(std::back_inserter(lst), std::string(ext));
 					for(const std::string &item : lst)
-						extensions[desc].insert(Util::lower(item));
+						extensions[desc].insert("." + Util::lower(item));
 				}
 
 			}
