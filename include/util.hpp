@@ -4,7 +4,7 @@
 #include "geo.hpp"
 
 #include <boost/interprocess/mapped_region.hpp>
-#include <boost/interprocess/shared_memory_object.hpp>
+#include <boost/interprocess/file_mapping.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/algorithm/string/case_conv.hpp>
 #include <boost/algorithm/string/join.hpp>
@@ -95,15 +95,13 @@ namespace geo {
 
 		// Simple class for capturing status from utility functions.
 		class Status {
-		private:
-			Callbacks *m_callbacks;
-			float m_start, m_end;
 		public:
+			Callbacks *callbacks;
+			float start, end;
+
 			Status(Callbacks *callbacks, float start, float end);
-			void update(float s, const std::string& msg = "");
-			float start() const;
-			float end() const;
-			Callbacks* callbacks() const;
+
+			void update(float s);
 		};
 
         class Point {
@@ -229,12 +227,12 @@ namespace geo {
         // Maintains a memory-mapped file, and gives access to the mapped data.
         class MappedFile {
         private:
-			bool m_mapped;
             uint64_t m_size;
-			std::string m_name;
-			std::unique_ptr<Buffer> m_data;
             boost::interprocess::mapped_region* m_region;
-			boost::interprocess::shared_memory_object* m_shmem;
+			boost::interprocess::file_mapping* m_mapping;
+			std::string m_filename;
+			bool m_mapped;
+			std::unique_ptr<Buffer> m_data;
 
         public:
 
@@ -243,7 +241,7 @@ namespace geo {
             MappedFile(uint64_t size, bool mapped = true);
             MappedFile(bool mapped = true);
 
-            const std::string& name() const;
+            const std::string& filename() const;
 
             void* data();
 
@@ -446,9 +444,6 @@ namespace geo {
             // Uppercase and return a copy of the string.
             static std::string upper(const std::string& str);
 
-			// Generate an MD5 hash of the string.
-			static std::string md5(const std::string& input);
-			
             // Move the file.
             static void copyfile(const std::string& srcfile, const std::string& dstfile);
 
@@ -489,6 +484,9 @@ namespace geo {
             // Get the file extension.
             static std::string extension(const std::string& filename);
 
+            // Get the file's basename including directory.
+            static std::string basename(const std::string& filename);
+
             // Populates the list with the files contained in dir. If ext is specified, filters
             // the files by that extension (case-insensitive). If dir is a file, it is added to the list.
             // Returns the number of files found.
@@ -527,6 +525,8 @@ namespace geo {
             // Returns a memory-mapped file.
             static std::unique_ptr<MappedFile> mapFile(const std::string& filename,
                 uint64_t size, bool remove = true);
+
+            static std::string md5(const std::string& input);
 
         };
 
