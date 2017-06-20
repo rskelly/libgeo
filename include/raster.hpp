@@ -770,6 +770,9 @@ namespace geo {
             // Flush the current block to the dataset.
             void flush();
 
+            // Flush a dirty read/write block to the dataset.
+            void flushDirty();
+
             // Vectorize the raster.
             void polygonize(const std::string &filename, const std::string &layerName, 
                 const std::string &driver, uint16_t srid = 0, uint16_t band = 1,
