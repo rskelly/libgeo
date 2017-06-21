@@ -218,7 +218,6 @@ namespace geo {
             
             void fromString(const std::string&);
 
-            // Align the bounds to the given position using the given resolution.
             void align(double x, double y, double xres, double yres);
             
         };
