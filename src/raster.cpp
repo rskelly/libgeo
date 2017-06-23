@@ -12,6 +12,7 @@
 
 #include <gdal.h>
 #include <gdal_alg.h>
+#include <gdal_utils.h>
 #include <ogr_feature.h>
 #include <ogrsf_frmts.h>
 #include <cpl_string.h>
@@ -1914,6 +1915,23 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 		g_runerr("Failed to commit transation.");
 
 	GDALClose(ds);
+}
+
+void Raster::createVirtualRaster(const std::vector<std::string>& files, const std::string& outfile) {
+
+	std::vector<GDALDataset*> ds;
+	for(const std::string& file : files) {
+		GDALDataset* d = (GDALDataset *) GDALOpen(file.c_str(), GA_ReadOnly);
+		if(d)
+			ds.push_back(d);
+	}
+	GDALDataset** lstds = ds.data();
+
+	int error;
+	GDALDataset* vds = (GDALDataset*) GDALBuildVRT(outfile.c_str(), ds.size(), (void**) lstds, NULL, NULL, &error);
+	if(!vds)
+		g_runerr("Failed to create VRT.");
+	GDALClose(vds);
 }
 
 void Raster::flush() {
