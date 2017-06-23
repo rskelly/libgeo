@@ -483,6 +483,11 @@ bool Util::exists(const std::string &name) {
 	return boost::filesystem::exists(p);
 }
 
+std::string Util::basename(const std::string &name) {
+	boost::filesystem::path p(name);
+	return boost::filesystem::basename(p);
+}
+
 std::string Util::pathJoin(const std::string& a, const std::string& b) {
 	boost::filesystem::path pa(a);
 	boost::filesystem::path pb(b);

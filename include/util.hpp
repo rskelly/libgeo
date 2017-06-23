@@ -459,6 +459,8 @@ namespace geo {
             // Returns true if the file exists.
             static bool exists(const std::string& name);
 
+            static std::string basename(const std::string& name);
+
             // Returns true if the parent folder exists.
             static bool pathExists(const std::string& name);
 
