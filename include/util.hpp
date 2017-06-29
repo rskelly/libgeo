@@ -452,6 +452,9 @@ namespace geo {
             // Move the file.
             static void copyfile(const std::string& srcfile, const std::string& dstfile);
 
+            // Return the basename of the file.
+            static std::string basename(const std::string& filename);
+
             // Create a temporary file at the given root folder. If no root is given,
             // a relative path is created.
             static std::string tmpFile(const std::string& root = "");
