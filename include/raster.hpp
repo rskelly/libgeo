@@ -723,12 +723,12 @@ namespace geo {
 
             static std::string getDriverForFilename(const std::string &filename);
 
-            static void createVirtualRaster(const std::vector<std::string>& files, const std::string& outfile);
+            static void createVirtualRaster(const std::vector<std::string>& files, const std::string& outfile, double nodata);
 
             template <class T>
-            static void createVirtualRaster(T begin, T end, const std::string& outfile) {
+            static void createVirtualRaster(T begin, T end, const std::string& outfile, double nodata) {
             	std::vector<std::string> files(begin, end);
-            	return createVirtualRaster(files, outfile);
+            	return createVirtualRaster(files, outfile, nodata);
             }
 
             // Return the filename for this raster.

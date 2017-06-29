@@ -986,12 +986,11 @@ void MemRaster::init(const GridProps &pr, bool mapped) {
 		m_grid = nullptr;
 		size_t typeSize = getTypeSize(m_props.dataType());
 		size_t size = typeSize * m_props.cols() * m_props.rows();
-		if(m_mappedFile.get())
-			delete m_mappedFile.release();
 		if (mapped) {
 			m_mappedFile.reset(new MappedFile(size));
 			m_grid = m_mappedFile->data();
 		} else {
+			m_mappedFile.reset();
 			m_grid = malloc(size);
 		}
 		if (!m_grid)
@@ -1917,7 +1916,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 	GDALClose(ds);
 }
 
-void Raster::createVirtualRaster(const std::vector<std::string>& files, const std::string& outfile) {
+void Raster::createVirtualRaster(const std::vector<std::string>& files, const std::string& outfile, double nodata) {
 
 	std::vector<GDALDataset*> ds;
 	for(const std::string& file : files) {
@@ -1927,10 +1926,24 @@ void Raster::createVirtualRaster(const std::vector<std::string>& files, const st
 	}
 	GDALDataset** lstds = ds.data();
 
-	int error;
-	GDALDataset* vds = (GDALDataset*) GDALBuildVRT(outfile.c_str(), ds.size(), (void**) lstds, NULL, NULL, &error);
-	if(!vds)
-		g_runerr("Failed to create VRT.");
+	{
+		char opt1[128];
+		char opt2[128];
+		std::sprintf(opt1, "-srcnodata %.6f", nodata);
+		std::sprintf(opt2, "-vrtnodata %.6f", nodata);
+		char* copts[2] = {&opt1[0], &opt2[0]};
+		GDALBuildVRTOptions* opts = GDALBuildVRTOptionsNew(copts, NULL);
+		int error;
+		GDALDataset* vds = (GDALDataset*) GDALBuildVRT(outfile.c_str(), ds.size(), (void**) lstds, NULL, opts, &error);
+		GDALBuildVRTOptionsFree(opts);
+		if(!vds)
+			g_runerr("Failed to create VRT.");
+		GDALClose(vds);
+	}
+
+	GDALDataset* vds = (GDALDataset*) GDALOpen(outfile.c_str(), GA_Update);
+	for(int i = 1; i <= vds->GetRasterCount(); ++i)
+		vds->GetRasterBand(i)->SetNoDataValue(nodata);
 	GDALClose(vds);
 }
 
