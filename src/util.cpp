@@ -409,12 +409,16 @@ std::string Bounds::toString() const {
 void Bounds::align(double x, double y, double xres, double yres) {
 	xres = g_abs(xres);
 	yres = g_abs(yres);
+	while (x < m_minx)
+		x += xres;
 	while (x > m_minx)
 		x -= xres;
 	m_minx = x;
 	while (x < m_maxx)
 		x += xres;
 	m_maxx = x;
+	while (y < m_miny)
+		y += yres;
 	while (y > m_miny)
 		y -= yres;
 	m_miny = y;
