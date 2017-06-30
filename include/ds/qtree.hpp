@@ -420,7 +420,10 @@ namespace geo {
 				std::FILE* f = std::fopen(m_fpath.c_str(), "rb");
 				if(!f)
 					g_runerr("Failed to open file for split.");
-				std::fread(items.data(), sizeof(T), items.size(), f);
+				if(!std::fread(items.data(), sizeof(T), items.size(), f)) {
+					std::fclose(f);
+					g_runerr("Failed to read file for split.");
+				}
 			}
 
 			// Split the node; distribute items to subnodes.
