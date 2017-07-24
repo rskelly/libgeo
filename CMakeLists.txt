@@ -27,6 +27,8 @@ elseif(${WIN32})
 else()
 	option(CGAL_DISABLE_ROUNDING_MATH_CHECK "Disable rounding math check in CGAL. This permits Valgrind to run." ON)
 	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-pragmas")
+	set (LIB_PATH /usr/lib/x86_64-linux-gnu)
+	set (INC_PATH /usr/include)
 endif()
 
 # disallow in-source builds
@@ -66,7 +68,7 @@ target_include_directories(geo PUBLIC include)
 
 
 add_library (util STATIC src/util.cpp src/md5.cpp)
-target_include_directories(util PUBLIC include ${Boost_INCLUDE_DIRS} ${GDAL_INCLUDE_DIR})
+target_include_directories(util PUBLIC include ${INC_PATH} ${Boost_INCLUDE_DIRS} ${GDAL_INCLUDE_DIR})
 if (UNIX AND NOT APPLE)
 	target_link_libraries (util ${Boost_LIBRARIES} ${GDAL_LIBRARY} geo rt)
 else ()
@@ -74,11 +76,11 @@ else ()
 endif ()
 
 add_library (db STATIC src/db.cpp)
-target_include_directories(db PUBLIC include ${Boost_INCLUDE_DIRS} ${GDAL_INCLUDE_DIR})
+target_include_directories(db PUBLIC include ${INC_PATH} ${Boost_INCLUDE_DIRS} ${GDAL_INCLUDE_DIR})
 target_link_libraries (db ${GDAL_LIBRARY} util geo)
 
 add_library (raster STATIC src/raster.cpp)
-target_include_directories(raster PUBLIC include ${Boost_INCLUDE_DIRS} ${GDAL_INCLUDE_DIR})
+target_include_directories(raster PUBLIC include ${INC_PATH} ${Boost_INCLUDE_DIRS} ${GDAL_INCLUDE_DIR})
 target_link_libraries (raster ${GDAL_LIBRARY} ${GEOS_LIBRARY} util geo db)
 
 # Build tests ############################################################################################
