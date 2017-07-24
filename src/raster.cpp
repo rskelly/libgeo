@@ -12,13 +12,13 @@
 
 #include <gdal.h>
 #include <gdal_alg.h>
-#include <gdal_utils.h>
 #include <ogr_feature.h>
 #include <ogrsf_frmts.h>
 #include <cpl_string.h>
 #include <cpl_port.h>
 #include <cpl_string.h>
 
+#include <geos/geom/PrecisionModel.h>
 #include <geos/geom/GeometryFactory.h>
 #include <geos/geom/CoordinateSequenceFactory.h>
 #include <geos/geom/CoordinateArraySequence.h>
@@ -39,6 +39,9 @@ using namespace geo::util;
 using namespace geo::raster;
 using namespace geos::geom;
 using namespace geos::operation::geounion;
+
+#define _MSC_VER 1
+
 
 // Dummy cancel variable for when a cancel flag
 // isn't passed.
@@ -116,46 +119,42 @@ namespace geo {
 					geos::operation::geounion::CascadedPolygonUnion u(&geoms);
 					Geometry* geom0 = u.Union();
 					if (!geom0)
-						g_runerr("Failed to compute geometry."); //return;
-					if(geom0->getGeometryTypeId() != GEOS_MULTIPOLYGON) {
-						std::vector<Geometry*> geoms0;
-						geoms0.push_back(geom0);
-						Geometry* m = fact->createMultiPolygon(geoms0);
-						delete geom0;
-						geom0 = m;
-					}
-					if(removeHoles || removeDangles) {
-						std::vector<Geometry*> geoms0;
-						if(removeDangles) {
-							double area = 0;
-							const Geometry* g = nullptr;
-							for(size_t i = 0; i < geom0->getNumGeometries(); ++i) {
-								const Geometry* p = geom0->getGeometryN(i);
-								double a = p->getArea();
-								if(a > area) {
-									area = a;
-									g = p;
-								}
-							}
-							geoms0.push_back(g->clone());
-						} else {
-							geoms0.insert(geoms0.begin(), geoms.begin(), geoms.end());
-						}
-						if(removeHoles) {
-							for(size_t i = 0; i < geoms0.size(); ++i) {
-								CoordinateSequence* c = dynamic_cast<Polygon*>(geoms0[i])->getExteriorRing()->getCoordinates();
-								LinearRing* r = fact->createLinearRing(c);
-								delete geoms0[i];
-								geoms0[i] = fact->createPolygon(r, nullptr);
-								delete r;
-								delete c;
+						g_runerr("Failed to compute geometry.");
+
+					Polygon* poly = nullptr;
+
+					// If the result isn't a polygon, find the largest geometry it contains
+					// and discard the rest.
+					if(geom0->getGeometryTypeId() == GEOS_MULTIPOLYGON) {
+						double area = 0;
+						Geometry* g = nullptr;
+						for(size_t i = 0; i < geom0->getNumGeometries(); ++i) {
+							Geometry* p = geom0->getGeometryN(i)->clone();
+							double a = p->getArea();
+							if(a > area) {
+								area = a;
+								g = p;
 							}
 						}
-						Geometry* m = fact->createMultiPolygon(geoms0);
 						delete geom0;
-						geom0 = m;
+						poly = dynamic_cast<Polygon*>(g);
+					} else {
+						poly = dynamic_cast<Polygon*>(geom0);
 					}
-					final = geom0;
+
+					if(!poly)
+						g_runerr("Failed to compute polygon.");
+
+					if(removeHoles && poly->getNumInteriorRing() > 0) {
+						// Keep the outer ring.
+						CoordinateSequence* c = poly->getExteriorRing()->getCoordinates();
+						LinearRing* r = fact->createLinearRing(c);
+						Polygon* p = fact->createPolygon(r, nullptr);
+						delete poly;
+						poly = p;
+					}
+
+					final = poly;
 				}
 
 				~Poly() {
@@ -166,6 +165,14 @@ namespace geo {
 				}
 
 			};
+
+#ifdef _MSC_VER
+			// Progress function for GDALPolygonize
+			int gdalProgress(double v, const char* m, void* s) {
+				((Status*) s)->update(v);
+				return 1;
+			}
+#endif
 
 			int getTypeSize(DataType type) {
 				switch(type) {
@@ -986,11 +993,12 @@ void MemRaster::init(const GridProps &pr, bool mapped) {
 		m_grid = nullptr;
 		size_t typeSize = getTypeSize(m_props.dataType());
 		size_t size = typeSize * m_props.cols() * m_props.rows();
+		if(m_mappedFile.get())
+			delete m_mappedFile.release();
 		if (mapped) {
 			m_mappedFile.reset(new MappedFile(size));
 			m_grid = m_mappedFile->data();
 		} else {
-			m_mappedFile.reset();
 			m_grid = malloc(size);
 		}
 		if (!m_grid)
@@ -1438,6 +1446,16 @@ void Raster::writeToRaster(Raster &grd,
 			int dstCol, int dstRow,
 			int srcBand, int dstBand) {
 
+	if(m_dirty) {
+		GDALRasterBand* bnd = m_ds->GetRasterBand(m_bband);
+		if(!bnd)
+			g_runerr("Failed to find band " << m_bband);
+		std::lock_guard<std::mutex> lk(m_mtx);
+		if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, m_block))
+			g_runerr("Failed to flush to: " << filename());
+		m_dirty = false;
+	}
+
 	if (&grd == this)
 		g_runerr("Recursive call to readBlock.");
 	if(srcBand < 1 || srcBand > m_props.bands())
@@ -1460,20 +1478,21 @@ void Raster::writeToRaster(Raster &grd,
 	int typeSize = getTypeSize(type);
 	Buffer buf(cols * rows * typeSize);
 
-	std::lock_guard<std::mutex> lk(m_mtx);
-
-	flushDirty();
-
 	GDALRasterBand* srcBnd = m_ds->GetRasterBand(srcBand);
 	if(!srcBnd)
 		g_runerr("Failed to find source band " << srcBand);
 	GDALRasterBand* dstBnd = grd.m_ds->GetRasterBand(dstBand);
 	if(!dstBnd)
 		g_runerr("Failed to find destination band " << dstBand);
-	if(CPLE_None != srcBnd->RasterIO(GF_Read, srcCol, srcRow, cols, rows, buf.buf, cols, rows, gtype, 0, 0, 0))
-		g_runerr("Failed to read from: " << grd.filename());
-	if(CPLE_None != dstBnd->RasterIO(GF_Write, dstCol, dstRow, cols, rows, buf.buf, cols, rows, gtype, 0, 0, 0))
-		g_runerr("Failed to write to: " << filename());
+	{
+		std::lock_guard<std::mutex> lk(m_mtx);
+		if(CPLE_None != srcBnd->RasterIO(GF_Read, srcCol, srcRow, cols, rows,
+				buf.buf, cols, rows, gtype, 0, 0, 0))
+			g_runerr("Failed to read from: " << grd.filename());
+		if(CPLE_None != dstBnd->RasterIO(GF_Write, dstCol, dstRow, cols, rows,
+				buf.buf, cols, rows, gtype, 0, 0, 0))
+			g_runerr("Failed to write to: " << filename());
+	}
 }
 
 void Raster::writeToMemRaster(MemRaster &grd,
@@ -1481,6 +1500,16 @@ void Raster::writeToMemRaster(MemRaster &grd,
 		int srcCol, int srcRow,
 		int dstCol, int dstRow,
 		int srcBand, int dstBand) {
+
+	if(m_dirty) {
+		GDALRasterBand* bnd = m_ds->GetRasterBand(m_bband);
+		if(!bnd)
+			g_runerr("Failed to find band " << bnd);
+		std::lock_guard<std::mutex> lk(m_mtx);
+		if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, m_block))
+			g_runerr("Failed to flush to: " << filename());
+		m_dirty = false;
+	}
 
 	if(srcBand < 1 || srcBand > m_props.bands())
 		g_argerr("Invalid source band: " << srcBand);
@@ -1498,19 +1527,16 @@ void Raster::writeToMemRaster(MemRaster &grd,
 	GDALDataType gtype = dataType2GDT(gp.dataType());
 	uint64_t typeSize = getTypeSize(gp.dataType());
 	uint64_t gcols = gp.cols();
-	Buffer buf(cols * rows * typeSize);
 
+	Buffer buf(cols * rows * typeSize);
+	GDALRasterBand *band = m_ds->GetRasterBand(srcBand);
+	if(!band)
+		g_runerr("Failed to find band " << srcBand);
 	{
 		std::lock_guard<std::mutex> lk(m_mtx);
-
-		flushDirty();
-
-		GDALRasterBand *band = m_ds->GetRasterBand(srcBand);
-		if(!band)
-			g_runerr("Failed to find band " << srcBand);
-		if(CPLE_None != band->RasterIO(GF_Read, srcCol, srcRow, cols, rows, buf.buf, cols, rows, gtype, 0, 0, 0))
+		if(CPLE_None != band->RasterIO(GF_Read, srcCol, srcRow, cols, rows, buf.buf,
+				cols, rows, gtype, 0, 0, 0))
 			g_runerr("Failed to read from: " << filename());
-
 	}
 
 	char* output = (char*) grd.grid();
@@ -1542,37 +1568,34 @@ GDALDataType Raster::getGDType() const {
 	return dataType2GDT(m_props.dataType());
 }
 
-void Raster::flushDirty() {
-	if(m_dirty) {
-		GDALRasterBand* bnd = m_ds->GetRasterBand(m_bband);
-		if(!bnd)
-			g_runerr("Failed to find band " << bnd);
-		if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, m_block))
-			g_runerr("Failed to flush to: " << filename());
-		m_dirty = false;
-	}
-}
-
 double Raster::getFloat(int col, int row, int band) {
-	double v = 0;
-	{
-		std::lock_guard<std::mutex> lk(m_mtx);
-		int bcol = col / m_bcols;
-		int brow = row / m_brows;
-		if(bcol != m_bcol || brow != m_brow || band != m_bband) {
-			flushDirty();
-			GDALRasterBand *rb = m_ds->GetRasterBand(band);
-			if(!rb)
-				g_argerr("Failed to find band " << band);
+	int bcol = col / m_bcols;
+	int brow = row / m_brows;
+	if(bcol != m_bcol || brow != m_brow || band != m_bband) {
+		if(m_dirty) {
+			GDALRasterBand* bnd = m_ds->GetRasterBand(m_bband);
+			if(!bnd)
+				g_runerr("Failed to find band " << bnd);
+			std::lock_guard<std::mutex> lk(m_mtx);
+			if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, m_block))
+				g_runerr("Failed to flush to: " << filename());
+			m_dirty = false;
+		}
+		GDALRasterBand *rb = m_ds->GetRasterBand(band);
+		if(!rb)
+			g_argerr("Failed to find band " << band);
+		{
+			std::lock_guard<std::mutex> lk(m_mtx);
 			if(CPLE_None != rb->ReadBlock(bcol, brow, m_block))
 				g_runerr("Failed to read from: " << filename());
-			m_bcol = bcol;
-			m_brow = brow;
-			m_bband = band;
 		}
-		int idx = (row % m_brows) * m_bcols + (col % m_bcols);
-		readFromBlock(m_block, getGDType(), &v, idx);
+		m_bcol = bcol;
+		m_brow = brow;
+		m_bband = band;
 	}
+	int idx = (row % m_brows) * m_bcols + (col % m_bcols);
+	double v = 0;
+	readFromBlock(m_block, getGDType(), &v, idx);
 	return v;
 }
 
@@ -1586,25 +1609,33 @@ double Raster::getFloat(double x, double y, int band) {
 }
 
 int Raster::getInt(int col, int row, int band) {
-	int v = 0;
-	{
-		std::lock_guard<std::mutex> lk(m_mtx);
-		int bcol = col / m_bcols;
-		int brow = row / m_brows;
-		if(bcol != m_bcol || brow != m_brow || band != m_bband) { // TODO: No effective cacheing if the band changes.
-			flushDirty();
-			GDALRasterBand *rb = m_ds->GetRasterBand(band);
-			if(!rb)
-				g_argerr("Failed to find band " << band);
+	int bcol = col / m_bcols;
+	int brow = row / m_brows;
+	if(bcol != m_bcol || brow != m_brow || band != m_bband) { // TODO: No effective cacheing if the band changes.
+		if(m_dirty) {
+			GDALRasterBand* bnd = m_ds->GetRasterBand(m_bband);
+			if(!bnd)
+				g_runerr("Failed to find band " << m_bband);
+			std::lock_guard<std::mutex> lk(m_mtx);
+			if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, m_block))
+				g_runerr("Failed to flush to: " << filename());
+			m_dirty = false;
+		}
+		GDALRasterBand *rb = m_ds->GetRasterBand(band);
+		if(!rb)
+			g_argerr("Failed to find band " << band);
+		{
+			std::lock_guard<std::mutex> lk(m_mtx);
 			if(CPLE_None != rb->ReadBlock(bcol, brow, m_block))
 				g_runerr("Failed to read from: " << filename());
-			m_bcol = bcol;
-			m_brow = brow;
-			m_bband = band;
 		}
-		int idx = (row % m_brows) * m_bcols + (col % m_bcols);
-		readFromBlock(m_block, getGDType(), &v, idx);
+		m_bcol = bcol;
+		m_brow = brow;
+		m_bband = band;
 	}
+	int idx = (row % m_brows) * m_bcols + (col % m_bcols);
+	int v = 0;
+	readFromBlock(m_block, getGDType(), &v, idx);
 	return v;
 }
 
@@ -1627,49 +1658,65 @@ void Raster::setInt(double x, double y, int v, int band) {
 void Raster::setFloat(int col, int row, double v, int band) {
 	if (!m_props.writable())
 		g_runerr("This raster is not writable.");
-	{
-		std::lock_guard<std::mutex> lk(m_mtx);
-		int bcol = col / m_bcols;
-		int brow = row / m_brows;
-		if(bcol != m_bcol || brow != m_brow || band != m_band) {
-			flushDirty();
-			GDALRasterBand *rb = m_ds->GetRasterBand(band);
-			if(!rb)
-				g_argerr("Failed to find band " << band);
+	int bcol = col / m_bcols;
+	int brow = row / m_brows;
+	if(bcol != m_bcol || brow != m_brow || band != m_band) {
+		if(m_dirty) {
+			GDALRasterBand* bnd = m_ds->GetRasterBand(m_bband);
+			if(!bnd)
+				g_runerr("Failed to find band " << m_bband);
+			std::lock_guard<std::mutex> lk(m_mtx);
+			if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, m_block))
+				g_runerr("Failed to flush to: " << filename());
+			m_dirty = false;
+		}
+		GDALRasterBand *rb = m_ds->GetRasterBand(band);
+		if(!rb)
+			g_argerr("Failed to find band " << band);
+		{
+			std::lock_guard<std::mutex> lk(m_mtx);
 			if(CPLE_None != rb->ReadBlock(bcol, brow, m_block))
 				g_runerr("Failed to read from: " << filename());
-			m_bcol = bcol;
-			m_brow = brow;
-			m_bband = band;
 		}
-		int idx = (row % m_brows) * m_bcols + (col % m_bcols);
-		writeToBlock(m_block, getGDType(), v, idx);
-		m_dirty = true;
+		m_bcol = bcol;
+		m_brow = brow;
+		m_bband = band;
 	}
+	int idx = (row % m_brows) * m_bcols + (col % m_bcols);
+	writeToBlock(m_block, getGDType(), v, idx);
+	m_dirty = true;
 }
 
 void Raster::setInt(int col, int row, int v, int band) {
 	if (!m_props.writable())
 		g_runerr("This raster is not writable.");
-	{
-		std::lock_guard<std::mutex> lk(m_mtx);
-		int bcol = col / m_bcols;
-		int brow = row / m_brows;
-		if(bcol != m_bcol || brow != m_brow || band != m_band) {
-			flushDirty();
-			GDALRasterBand *rb = m_ds->GetRasterBand(band);
-			if(!rb)
-				g_argerr("Failed to find band " << band);
+	int bcol = col / m_bcols;
+	int brow = row / m_brows;
+	if(bcol != m_bcol || brow != m_brow || band != m_band) {
+		if(m_dirty) {
+			GDALRasterBand* bnd = m_ds->GetRasterBand(m_bband);
+			if(!bnd)
+				g_runerr("Failed to find band " << m_bband);
+			std::lock_guard<std::mutex> lk(m_mtx);
+			if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, m_block))
+				g_runerr("Failed to flush to: " << filename());
+			m_dirty = false;
+		}
+		GDALRasterBand *rb = m_ds->GetRasterBand(band);
+		if(!rb)
+			g_argerr("Failed to find band " << band);
+		{
+			std::lock_guard<std::mutex> lk(m_mtx);
 			if(CPLE_None != rb->ReadBlock(bcol, brow, m_block))
 				g_runerr("Failed to read from: " << filename());
-			m_bcol = bcol;
-			m_brow = brow;
-			m_bband = band;
 		}
-		int idx = (row % m_brows) * m_bcols + (col % m_bcols);
-		writeToBlock(m_block, getGDType(), v, idx);
-		m_dirty = true;
+		m_bcol = bcol;
+		m_brow = brow;
+		m_bband = band;
 	}
+	int idx = (row % m_brows) * m_bcols + (col % m_bcols);
+	writeToBlock(m_block, getGDType(), v, idx);
+	m_dirty = true;
 }
 
 void Raster::setFloat(uint64_t idx, double v, int band) {
@@ -1679,6 +1726,8 @@ void Raster::setFloat(uint64_t idx, double v, int band) {
 void Raster::setFloat(double x, double y, double v, int band) {
 	setFloat(m_props.toCol(x), m_props.toRow(y), v, band);
 }
+
+#ifndef _MSC_VER
 
 // Processes the polygon queue from polygonize.
 static void processGeomQueue(std::queue<std::unique_ptr<Poly> >* q,
@@ -1706,6 +1755,8 @@ static void processGeomQueue(std::queue<std::unique_ptr<Poly> >* q,
 			g_runerr("Failed to add geometry.");
 	}
 }
+
+#endif
 
 void Raster::polygonize(const std::string &filename, const std::string &layerName,
 		const std::string &driver, uint16_t srid, uint16_t band,
@@ -1741,7 +1792,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 	OGRSpatialReference sr;
 	sr.importFromEPSG(srid);
 	char **lopts = NULL;
-	OGRLayer *layer = ds->CreateLayer(layerName.c_str(), &sr, wkbMultiPolygon, lopts);
+	OGRLayer *layer = ds->CreateLayer(layerName.c_str(), &sr, wkbPolygon, lopts);
 	CPLFree(lopts);
 	if(!layer) {
 		GDALClose(ds);
@@ -1751,6 +1802,13 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 	// There's only one field -- an ID.
 	OGRFieldDefn field( "id", OFTInteger);
 	layer->CreateField(&field);
+
+#ifdef _MSC_VER
+
+	// The multi-threaded hocus-pocus doesn't work on WIN.
+	GDALPolygonize(m_ds->GetRasterBand(band), NULL, layer, 0, NULL, &gdalProgress, status);
+
+#else
 
 	int cols = m_props.cols();
 	int rows = m_props.rows();
@@ -1763,7 +1821,9 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 
 	// For creating GEOS objects.
 	GEOSContextHandle_t gctx = OGRGeometry::createGEOSContext();
-	const GeometryFactory* gf = GeometryFactory::getDefaultInstance();
+	double snap = 100.0;
+	PrecisionModel pm(snap);
+	GeometryFactory gf(&pm);
 
 	if(OGRERR_NONE != layer->StartTransaction())
 		g_runerr("Failed to start transaction.");
@@ -1786,17 +1846,18 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 
 	int bufSize = 128;
 	int blocks = rows / bufSize + 1;
-	double snap = 100.0;
 
-	#pragma omp parallel for schedule(static, 1) // Process blocks sequentially to stop polys dict from getting too large.
-	for(int block = 0; block < blocks; ++block) {
+	//#pragma omp parallel for schedule(static, 1) // Process blocks sequentially to stop polys dict from getting too large.
+	for(int block = 0; block <= blocks; ++block) {
+
+		g_debug("Block " << block << " of " << blocks);
 
 		status->update((float) ++stat / blocks);
 
 		if(*cancel)
 			continue;
 
-		int bufHeight = g_min(bufSize, rows - (block + 1) * bufSize);
+		int bufHeight = g_min(bufSize, rows - block * bufSize);
 		if(bufHeight < 1) continue;
 
 		// Buffer for reading/polygonizing.
@@ -1805,6 +1866,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 		MemRaster rowBuf(gp);
 
 		// Write into the buffer.
+		#pragma omp critical(__inrast)
 		writeTo(rowBuf, cols, bufHeight, 0, block * bufSize, 0, 0, band);
 
 		std::unordered_map<uint64_t, std::unique_ptr<Poly> > polys0;
@@ -1823,8 +1885,8 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 				if(id0 == nd || id0 == 0) continue;
 
 				// Get the coord of one corner of the polygon.
-				double x0 = std::round(gp.toX(c) * snap) / snap;
-				double y0 = std::round(gp.toY(r) * snap) / snap;
+				double x0 = gp.toX(c);
+				double y0 = gp.toY(r);
 
 				// Scan right...
 				while(++c <= cols) {
@@ -1835,22 +1897,22 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 					if(id0 > 0 && id1 != id0) {
 
 						// Coord of the other corner.
-						double x1 = std::round(gp.toX(c) * snap) / snap;
-						double y1 = std::round((gp.toY(r) + gp.resolutionY()) * snap) / snap;
+						double x1 = gp.toX(c);
+						double y1 = gp.toY(r) + gp.resolutionY();
 
 						// Build the geometry.
-						CoordinateSequence* seq = gf->getCoordinateSequenceFactory()->create((size_t)0, 2);
+						CoordinateSequence* seq = gf.getCoordinateSequenceFactory()->create((size_t)0, 2);
 						seq->add(Coordinate(x0, y0));
 						seq->add(Coordinate(x1, y0));
 						seq->add(Coordinate(x1, y1));
 						seq->add(Coordinate(x0, y1));
 						seq->add(Coordinate(x0, y0));
-						LinearRing* ring = gf->createLinearRing(seq);
-						Polygon* geom = gf->createPolygon(ring, NULL);
+						LinearRing* ring = gf.createLinearRing(seq);
+						Polygon* geom = gf.createPolygon(ring, NULL);
 
 						// If it's already in the list, merge it, otherwise add it.
 						if(!polys0.count(id0)) {
-							polys0[id0].reset(new Poly(id0, geom, r, r, gf));
+							polys0[id0].reset(new Poly(id0, geom, r, r, &gf));
 						} else {
 							polys0[id0]->update(geom, r, r);
 						}
@@ -1913,47 +1975,17 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 	if(OGRERR_NONE != layer->CommitTransaction())
 		g_runerr("Failed to commit transation.");
 
+#endif
+
 	GDALClose(ds);
 }
 
-void Raster::createVirtualRaster(const std::vector<std::string>& files, const std::string& outfile, double nodata) {
-
-	std::vector<GDALDataset*> ds;
-	for(const std::string& file : files) {
-		GDALDataset* d = (GDALDataset *) GDALOpen(file.c_str(), GA_ReadOnly);
-		if(d)
-			ds.push_back(d);
-	}
-	GDALDataset** lstds = ds.data();
-
-	{
-		char opt1[128];
-		char opt2[128];
-		std::sprintf(opt1, "-srcnodata %.6f", nodata);
-		std::sprintf(opt2, "-vrtnodata %.6f", nodata);
-		char* copts[2] = {&opt1[0], &opt2[0]};
-		GDALBuildVRTOptions* opts = GDALBuildVRTOptionsNew(copts, NULL);
-		int error;
-		GDALDataset* vds = (GDALDataset*) GDALBuildVRT(outfile.c_str(), ds.size(), (void**) lstds, NULL, opts, &error);
-		GDALBuildVRTOptionsFree(opts);
-		if(!vds)
-			g_runerr("Failed to create VRT.");
-		GDALClose(vds);
-	}
-
-	GDALDataset* vds = (GDALDataset*) GDALOpen(outfile.c_str(), GA_Update);
-	for(int i = 1; i <= vds->GetRasterCount(); ++i)
-		vds->GetRasterBand(i)->SetNoDataValue(nodata);
-	GDALClose(vds);
-}
-
 void Raster::flush() {
-	std::lock_guard<std::mutex> lck(m_mtx);
-	flushDirty();
 	if(m_brow > -1 && m_bcol > -1 && m_props.writable()) {
 		GDALRasterBand* bnd = m_ds->GetRasterBand(m_band);
 		if(!bnd)
 			g_runerr("Failed to find band " << m_band);
+		std::lock_guard<std::mutex> lk(m_mtx);
 		if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, m_block))
 			g_warn("Failed to write block to " << filename());
 	}
