@@ -992,9 +992,7 @@ void MemRaster::init(const GridProps &pr, bool mapped) {
 		m_mmapped = mapped;
 		m_grid = nullptr;
 		size_t typeSize = getTypeSize(m_props.dataType());
-		size_t size = typeSize * m_props.cols() * m_props.rows();
-		if(m_mappedFile.get())
-			delete m_mappedFile.release();
+		size_t size = MappedFile::fixSize(typeSize * m_props.cols() * m_props.rows());
 		if (mapped) {
 			m_mappedFile.reset(new MappedFile(size));
 			m_grid = m_mappedFile->data();
@@ -1011,7 +1009,7 @@ void MemRaster::fillFloat(double value, int band) {
 	if(m_props.isInt()) {
 		fillInt((int) value, band);
 	} else {
-		size_t chunk = m_mmapped ? m_mappedFile->pageSize() * 1024 : 2048 * 1024;
+		size_t chunk = MappedFile::pageSize();
 		size_t size = m_props.size() * sizeof(double);
 		Buffer buffer(chunk);
 		double* buf = (double*) buffer.buf;
@@ -1021,7 +1019,7 @@ void MemRaster::fillFloat(double value, int band) {
 		{
 			std::lock_guard<std::mutex> lk(m_mtx);
 			for (uint64_t i = 0; i < size; i += chunk) {
-				std::memcpy(grid, buffer.buf, g_min(chunk, size - i));
+				std::memcpy(grid, buffer.buf, chunk);
 				grid += chunk;
 			}
 		}
@@ -1033,7 +1031,7 @@ void MemRaster::fillInt(int value, int band) {
 	if(m_props.isFloat()) {
 		fillFloat((double) value, band);
 	} else {
-		size_t chunk = m_mmapped ? m_mappedFile->pageSize() * 1024 : 2048 * 1024;
+		size_t chunk = MappedFile::pageSize();
 		size_t size = m_props.size() * sizeof(int);
 		Buffer buffer(chunk);
 		int* buf = (int*) buffer.buf;
@@ -1043,7 +1041,7 @@ void MemRaster::fillInt(int value, int band) {
 		{
 			std::lock_guard<std::mutex> lk(m_mtx);
 			for (uint64_t i = 0; i < size; i += chunk) {
-				std::memcpy(grid, buffer.buf, g_min(chunk, size - i));
+				std::memcpy(grid, buffer.buf, chunk);
 				grid += chunk;
 			}
 		}

@@ -4,7 +4,7 @@
 #include "geo.hpp"
 
 #include <boost/interprocess/mapped_region.hpp>
-#include <boost/interprocess/shared_memory_object.hpp>
+#include <boost/interprocess/file_mapping.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/algorithm/string/case_conv.hpp>
 #include <boost/algorithm/string/join.hpp>
@@ -232,9 +232,10 @@ namespace geo {
 			bool m_mapped;
             uint64_t m_size;
 			std::string m_name;
+			std::string m_shmemName;
 			std::unique_ptr<Buffer> m_data;
             boost::interprocess::mapped_region* m_region;
-			boost::interprocess::shared_memory_object* m_shmem;
+			boost::interprocess::file_mapping* m_file;
 
         public:
 
@@ -251,7 +252,8 @@ namespace geo {
             void reset(uint64_t size);
 
             // Return the page size.
-            size_t pageSize() const;
+            static size_t pageSize();
+            static size_t fixSize(size_t size);
 
             // Return the size of mapped memory.
             uint64_t size() const;

@@ -15,6 +15,7 @@
 #include <cmath>
 #include <string>
 #include <tuple>
+#include <memory>
 
 using namespace geo::util;
 
@@ -585,7 +586,7 @@ MappedFile::MappedFile(const std::string& name, uint64_t size, bool mapped) :
 	m_size(0),
 	m_name("dijital"),
 	m_region(nullptr),
-	m_shmem(nullptr) {
+	m_file(nullptr) {
 
 	if (size > 0)
 		reset(size);
@@ -596,7 +597,7 @@ MappedFile::MappedFile(uint64_t size, bool mapped) :
 	m_size(0),
 	m_name("dijital"),
 	m_region(nullptr),
-	m_shmem(nullptr) {
+	m_file(nullptr) {
 
 	if (size > 0)
 		reset(size);
@@ -607,15 +608,15 @@ MappedFile::MappedFile(bool mapped) :
 	m_size(0),
 	m_name("dijital"),
 	m_region(nullptr),
-	m_shmem(nullptr) {
+	m_file(nullptr) {
 }
 
 const std::string& MappedFile::name() const {
 	return m_name;
 }
 
-uint64_t fixSize(uint64_t size) {
-	uint64_t page = boost::interprocess::mapped_region::get_page_size();
+size_t MappedFile::fixSize(size_t size) {
+	size_t page = MappedFile::pageSize();
 	if(size % page == 0) {
 		return size;
 	} else {
@@ -644,36 +645,57 @@ void MappedFile::reset(uint64_t size) {
 	#pragma omp critical(__mapped_file_reset__)
 	{
 		size = fixSize(size);
-		if(size > m_size) {
-			// TODO: Disk space check.
-			//if(m_mapped && size > Util::diskSpace(Util::parent(m_filename)))
-			//	g_runerr("Not enough disk space to grow memory.");
+		if(m_size > 0 && size > m_size) {
 			uint64_t oldSize = m_size;
 			m_size = size;
-			if(m_region) {
-				m_region->flush();
-				delete m_region;
-				m_region = nullptr;
-			}
-			if(!m_mapped) {
-				std::unique_ptr<Buffer> buf(new Buffer(m_size));
-				if(m_data.get()) {
-					std::memcpy(buf->buf, m_data->buf, oldSize);
-					delete m_data.release();
+			if(m_mapped) {
+				if (m_region) {
+					m_region->flush();
+					delete m_region;
 				}
+				if (m_file)
+					delete m_file;
+
+				std::FILE* f = std::fopen(m_shmemName.c_str(), "w+");
+				if(f) {
+					char buf = 0;
+					std::fseek(f, m_size, SEEK_SET);
+					std::fwrite(&buf, m_size, 1, f);
+					std::fclose(f);
+					m_file = new file_mapping(m_shmemName.c_str(), read_write);
+					m_region = new mapped_region(*m_file, read_write);
+				}
+			} else {
+				std::unique_ptr<Buffer> buf(new Buffer(m_size));
+				if(m_data.get())
+					std::memcpy(buf->buf, m_data->buf, oldSize);
 				m_data.reset(buf.release());
 			}
-		}
-		if(m_mapped) {
-			if (m_region)
-				delete m_region;
-			if (m_shmem)
-				delete m_shmem;
-			std::stringstream ss;
-			ss << m_name << "_" << s_mappedIdx++;
-			m_shmem = new shared_memory_object(open_or_create, ss.str().c_str(), read_write);
-			m_shmem->truncate(m_size);
-			m_region = new mapped_region(*m_shmem, read_write, 0, m_size);
+		} else {
+			m_size = size;
+			if(m_mapped) {
+				if (m_region) {
+					m_region->flush();
+					delete m_region;
+				}
+				if (m_file)
+					delete m_file;
+
+				std::stringstream ss;
+				ss << m_name << "_" << s_mappedIdx++;
+				m_shmemName = Util::pathJoin(Util::tmpDir(), ss.str().c_str());
+				{
+					 file_mapping::remove(m_shmemName.c_str());
+					 std::filebuf fbuf;
+					 fbuf.open(m_shmemName.c_str(), std::ios_base::in | std::ios_base::out | std::ios_base::trunc | std::ios_base::binary);
+					 fbuf.pubseekoff(m_size - 1, std::ios_base::beg);
+					 fbuf.sputc(0);
+				}
+				m_file = new file_mapping(m_shmemName.c_str(), read_write);
+				m_region = new mapped_region(*m_file, read_write);
+			} else {
+				m_data.reset(new Buffer(m_size));
+			}
 		}
 	}
 }
@@ -686,14 +708,16 @@ uint64_t MappedFile::size() const {
 	return m_size;
 }
 
-size_t MappedFile::pageSize() const {
+size_t MappedFile::pageSize() {
 	return boost::interprocess::mapped_region::get_page_size();
 }
 
 MappedFile::~MappedFile() {
-	if(m_mapped) {
-		delete m_shmem;
+	if(m_mapped && m_region) {
+		m_region->flush();
+		boost::interprocess::file_mapping::remove(m_shmemName.c_str());
 		delete m_region;
+		delete m_file;
 	}
 }
 
