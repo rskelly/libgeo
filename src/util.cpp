@@ -1,21 +1,13 @@
-#include "util.hpp"
-#include "crypto/md5.hpp"
-#include "geo.hpp"
-
-#include <boost/interprocess/creation_tags.hpp>
+#include <iterator>
+#include <fstream>
+#include <algorithm>
 
 #include <ogr_spatialref.h>
 
-#include <set>
-#include <list>
-#include <sstream>
-#include <algorithm>
-#include <fstream>
-#include <map>
-#include <cmath>
-#include <string>
-#include <tuple>
-#include <memory>
+#include <boost/filesystem.hpp>
+
+#include "crypto/md5.hpp"
+#include "util.hpp"
 
 using namespace geo::util;
 
@@ -699,10 +691,10 @@ void MappedFile::reset(uint64_t size) {
 		}
 	}
 }
-
 void* MappedFile::data() {
 	return m_mapped ? (m_region ? m_region->get_address() : nullptr) : m_data->buf;
 }
+
 
 uint64_t MappedFile::size() const {
 	return m_size;
@@ -736,5 +728,3 @@ std::string CRS::epsg2WKT(int crs) const {
 	ref.exportToWkt(&wkt);
 	return std::string(wkt);
 }
-
-

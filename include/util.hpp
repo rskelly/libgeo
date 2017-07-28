@@ -1,14 +1,26 @@
 #ifndef __UTIL_HPP__
 #define __UTIL_HPP__
 
-#include "geo.hpp"
+/*
+#include <set>
+#include <list>
+#include <fstream>
+#include <vector>
+#include <condition_variable>
+#include <mutex>
+#include <queue>
+#include <cmath>
+#include <sstream>
+#include <string>
+#include <vector>
+#include <tuple>
+*/
 
-#include <boost/interprocess/mapped_region.hpp>
-#include <boost/interprocess/file_mapping.hpp>
-#include <boost/algorithm/string/predicate.hpp>
-#include <boost/algorithm/string/case_conv.hpp>
-#include <boost/algorithm/string/join.hpp>
-#include <boost/filesystem.hpp>
+#include <chrono>
+#include <unordered_map>
+#include <map>
+#include <memory>
+#include <random>
 
 #ifdef _MSC_VER
 #include <float.h>
@@ -21,23 +33,14 @@ namespace std {
 }
 #endif
 
-#include <set>
-#include <list>
-#include <fstream>
-#include <vector>
-#include <map>
-#include <memory>
-#include <condition_variable>
-#include <mutex>
-#include <queue>
-#include <cmath>
-#include <unordered_map>
-#include <sstream>
-#include <string>
-#include <vector>
-#include <tuple>
-#include <chrono>
-#include <random>
+#include <boost/interprocess/mapped_region.hpp>
+#include <boost/interprocess/file_mapping.hpp>
+#include <boost/filesystem.hpp>
+#include <boost/algorithm/string/join.hpp>
+#include <boost/algorithm/string/case_conv.hpp>
+#include <boost/algorithm/string/predicate.hpp>
+
+#include "geo.hpp"
 
 namespace geo {
 
@@ -75,8 +78,9 @@ namespace geo {
 
             Buffer(uint64_t size) {
                 buf = std::malloc(size);
-                if(!buf)
-                	g_runerr("Failed to allocate buffer.");
+				if (!buf) {
+					g_runerr("Failed to allocate buffer.");
+				}
             }
 
             ~Buffer() {
@@ -96,14 +100,14 @@ namespace geo {
 		// Simple class for capturing status from utility functions.
 		class Status {
 		private:
-			Callbacks *m_callbacks;
+			geo::util::Callbacks *m_callbacks;
 			float m_start, m_end;
 		public:
-			Status(Callbacks *callbacks, float start, float end);
+			Status(geo::util::Callbacks *callbacks, float start, float end);
 			void update(float s, const std::string& msg = "");
 			float start() const;
 			float end() const;
-			Callbacks* callbacks() const;
+			geo::util::Callbacks* callbacks() const;
 		};
 
         class Point {
@@ -223,8 +227,6 @@ namespace geo {
             void align(double x, double y, double xres, double yres);
             
         };
-
-        class Util;
 
         // Maintains a memory-mapped file, and gives access to the mapped data.
         class MappedFile {
@@ -537,7 +539,6 @@ namespace geo {
 
         class CRS {
         public:
-
         	std::string epsg2Proj4(int crs) const;
         	std::string epsg2WKT(int crs) const;
         };

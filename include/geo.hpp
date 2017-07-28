@@ -39,7 +39,7 @@
 #define g_deg(x) ((x) * 180.0 / G_PI)
 #define g_rad(x) ((x) * G_PI / 180.0)
 
-extern int g__loglevel;
+G_DLL_EXPORT extern int g__loglevel;
 
 #define G_LOG_TRACE 5
 #define G_LOG_DEBUG 4

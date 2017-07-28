@@ -18,14 +18,17 @@
 #include <cstring>
 #include <string>
 #include <memory>
+#include <mutex>
+#include <set>
 
 #include <boost/interprocess/file_mapping.hpp>
 #include <boost/interprocess/mapped_region.hpp>
+
 #include <gdal_priv.h>
 #include <ogr_spatialref.h>
+
 #include <eigen3/Eigen/Core>
 
-#include "geo.hpp"
 #include "util.hpp"
 
 using namespace geo::util;

@@ -82,6 +82,27 @@ DB::DB(const std::string &file, const std::string &layer, const std::string &dri
 	m_layer(nullptr),
 	m_fdef(nullptr) {
 
+	// If the driver was not given, try to discover it from an existing file,
+	// otherwise fail.
+	if (m_driver.empty()) {
+		GDALDataset* ds = (GDALDataset *)GDALOpenEx(m_file.c_str(), GDAL_OF_VECTOR | GDAL_OF_READONLY, NULL, NULL, NULL);
+		if (!ds)
+			g_runerr("Driver not given and no existing file to read from.");
+		const char* drv = ds->GetDriverName();
+		GDALClose(ds);
+		if(!drv)
+			g_runerr("Driver not given and no existing file to read from.");
+		m_driver = drv;
+		g_warn("Using driver " << drv << " from existing file.");
+	}
+
+	// Check layer name.
+	if (m_layerName.empty()) {
+		m_layerName = "data";
+		g_warn("Using layer name data as none given.");
+	}
+
+	// If replace and file exists, delete the existing file.
     if(replace && Util::exists(file))
         Util::rm(file);
 
@@ -91,6 +112,7 @@ DB::DB(const std::string &file, const std::string &layer, const std::string &dri
     if(!drv)
         g_runerr("Driver not found for " << m_file << " (" << driver << ")");
 
+	// If the file is sqlite, use the spatialite driver.
 	char **dopts = NULL;
 	if(m_driver == "SQLite")
 		dopts = CSLSetNameValue(dopts, "SPATIALITE", "YES");
@@ -99,9 +121,6 @@ DB::DB(const std::string &file, const std::string &layer, const std::string &dri
     if(!m_ds)
         g_runerr("Failed to create data set for " << m_file);
 
-	if(m_layerName.empty())
-		m_layerName = "data";
-
 	char **options = nullptr;
 	OGRSpatialReference *sr = NULL;
 	if(m_srid) {
@@ -109,8 +128,9 @@ DB::DB(const std::string &file, const std::string &layer, const std::string &dri
 		sr->importFromEPSG(m_srid);
 	}
 	m_layer = m_ds->CreateLayer(m_layerName.c_str(), sr, geomType(m_type), options);
-	if(sr)
-		sr->Release();
+	// TODO: This causes a crash in Windows.
+	//if(sr)
+	//	sr->Release();
 
 	if(!m_layer)
 		g_runerr("Failed to create layer, " << m_layerName << ".");

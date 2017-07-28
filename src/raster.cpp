@@ -40,9 +40,6 @@ using namespace geo::raster;
 using namespace geos::geom;
 using namespace geos::operation::geounion;
 
-#define _MSC_VER 1
-
-
 // Dummy cancel variable for when a cancel flag
 // isn't passed.
 static bool s_cancel = false;
@@ -165,6 +162,7 @@ namespace geo {
 				}
 
 			};
+
 
 #ifdef _MSC_VER
 			// Progress function for GDALPolygonize
