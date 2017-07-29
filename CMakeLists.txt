@@ -28,7 +28,7 @@ elseif(${WIN32})
 else()
 	option(CGAL_DISABLE_ROUNDING_MATH_CHECK "Disable rounding math check in CGAL. This permits Valgrind to run." ON)
 	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-pragmas")
-	set (LIB_PATH /usr/lib/x86_64-linux-gnu)
+	set (LIB_PATH /usr/lib/x86_64-linux-gnu /usr/lib)
 	set (INC_PATH /usr/include)
 endif()
 
