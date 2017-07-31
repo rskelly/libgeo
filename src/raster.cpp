@@ -56,12 +56,8 @@ namespace geo {
 				// Add the list of polygons to this instance with the rows
 				// covered by them.
 				void update(std::vector<Polygon*>& u, int minRow, int maxRow) {
-					for (Polygon* p : u) {
-						Polygon* p0 = dynamic_cast<Polygon*>(p->clone());
-						if(!p0)
-							g_runerr("Failed to cast Geometry to Polygon.");
-						geoms.push_back(p0);
-					}
+					for (Polygon* p : u)
+						geoms.push_back(p);
 					update(minRow, maxRow);
 				}
 
@@ -100,10 +96,7 @@ namespace geo {
 				// Add the polygon to this instance with the
 				// rows covered by it.
 				void update(Polygon* u, int minRow, int maxRow) {
-					Polygon* p0 = dynamic_cast<Polygon*>(u->clone());
-					if(!p0)
-						g_runerr("Failed to cast Geometry to Polygon.");
-					geoms.push_back(p0);
+					geoms.push_back(u);
 					update(minRow, maxRow);
 				}
 
@@ -127,15 +120,14 @@ namespace geo {
 				}
 
 				// Generate the unioned polygon from its parts. Remove dangles and holes if required.
-				void generate(const GeometryFactory& fact, bool removeHoles, bool removeDangles) {
+				void generate(const GeometryFactory::unique_ptr& fact, bool removeHoles, bool removeDangles) {
 
 					Geometry* geom;
 
 					// Calculate the union of geometries. This could result in a single
 					// poly or a multi.
 					{
-						geos::operation::geounion::CascadedPolygonUnion u(&geoms);
-						geom = u.Union();
+						geom = geos::operation::geounion::CascadedPolygonUnion::Union(geoms.begin(), geoms.end());
 						if (!geom)
 							g_runerr("Failed to compute geometry.");
 					}
@@ -146,7 +138,7 @@ namespace geo {
 					if(typeId == GEOS_POLYGON) {
 						std::vector<Geometry*> geoms0;
 						geoms0.push_back(geom);
-						Geometry* g = fact.createMultiPolygon(geoms0); // Force copy.
+						Geometry* g = fact->createMultiPolygon(geoms0); // Force copy.
 						delete geom;
 						geom = g;
 					}
@@ -178,10 +170,10 @@ namespace geo {
 						for(size_t i = 0; i < geom->getNumGeometries(); ++i) {
 							const Polygon* p = dynamic_cast<const Polygon*>(geom->getGeometryN(i));
 							const LineString* l = p->getExteriorRing();
-							LinearRing* r = fact.createLinearRing(l->getCoordinates());
-							geoms0.push_back(fact.createPolygon(r, nullptr));
+							LinearRing* r = fact->createLinearRing(l->getCoordinates());
+							geoms0.push_back(fact->createPolygon(r, nullptr));
 						}
-						Geometry* g = fact.createMultiPolygon(geoms0); // Force copy
+						Geometry* g = fact->createMultiPolygon(geoms0); // Force copy
 						delete geom;
 						geom = g;
 					}
@@ -201,15 +193,6 @@ namespace geo {
 				}
 
 			};
-
-
-#ifdef _MSC_VER
-			// Progress function for GDALPolygonize
-			int gdalProgress(double v, const char* m, void* s) {
-				((Status*) s)->update(v);
-				return 1;
-			}
-#endif
 
 			int getTypeSize(DataType type) {
 				switch(type) {
@@ -1762,8 +1745,6 @@ void Raster::setFloat(double x, double y, double v, int band) {
 	setFloat(m_props.toCol(x), m_props.toRow(y), v, band);
 }
 
-#ifndef _MSC_VER
-
 // Processes the polygon queue from polygonize.
 static void processGeomQueue(std::queue<std::unique_ptr<Poly> >* q,
 		std::mutex* pqmtx, std::condition_variable* pcond1,
@@ -1777,6 +1758,10 @@ static void processGeomQueue(std::queue<std::unique_ptr<Poly> >* q,
 		}
 		std::unique_ptr<Poly> p(q->front().release());
 		q->pop();
+		if (!p.get()) {
+			g_warn("Empty Poly.");
+			continue;
+		}
 		// Retrieve the unioned geometry.
 		Geometry* g = p->getPoly();
 		OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx, (GEOSGeom) g);
@@ -1790,8 +1775,6 @@ static void processGeomQueue(std::queue<std::unique_ptr<Poly> >* q,
 			g_runerr("Failed to add geometry.");
 	}
 }
-
-#endif
 
 void Raster::polygonize(const std::string &filename, const std::string &layerName,
 		const std::string &driver, uint16_t srid, uint16_t band,
@@ -1838,13 +1821,6 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 	OGRFieldDefn field( "id", OFTInteger);
 	layer->CreateField(&field);
 
-#ifdef _MSC_VER
-
-	// The multi-threaded hocus-pocus doesn't work on WIN.
-	GDALPolygonize(m_ds->GetRasterBand(band), NULL, layer, 0, NULL, &gdalProgress, status);
-
-#else
-
 	int cols = m_props.cols();
 	int rows = m_props.rows();
 	uint64_t nd = m_props.nodata();
@@ -1858,7 +1834,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 	GEOSContextHandle_t gctx = OGRGeometry::createGEOSContext();
 	double snap = 100.0;
 	PrecisionModel pm(snap);
-	GeometryFactory gf(&pm);
+	GeometryFactory::unique_ptr gf = GeometryFactory::create(&pm);
 
 	if(OGRERR_NONE != layer->StartTransaction())
 		g_runerr("Failed to start transaction.");
@@ -1881,7 +1857,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 			removeHoles, removeDangles, &running);
 
 	int bufSize = 128;
-	int blocks = rows / bufSize + 1;
+	int blocks = (int) (rows / bufSize) + 1;
 
 	#pragma omp parallel
 	{
@@ -1891,7 +1867,7 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 
 		// Process blocks sequentially to stop polys dict from getting too large.
 		#pragma omp for schedule(static, 1)
-		for(int block = 0; block <= blocks; ++block) {
+		for(int block = 0; block < blocks; ++block) {
 
 			status->update((float) ++stat / blocks);
 
@@ -1937,14 +1913,14 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 							double y1 = gp.toY(r) + gp.resolutionY();
 
 							// Build the geometry.
-							CoordinateSequence* seq = gf.getCoordinateSequenceFactory()->create((size_t) 0, 2);
+							CoordinateSequence* seq = gf->getCoordinateSequenceFactory()->create((size_t) 0, 2);
 							seq->add(Coordinate(x0, y0));
 							seq->add(Coordinate(x1, y0));
 							seq->add(Coordinate(x1, y1));
 							seq->add(Coordinate(x0, y1));
 							seq->add(Coordinate(x0, y0));
-							LinearRing* ring = gf.createLinearRing(seq);
-							Polygon* geom = gf.createPolygon(ring, NULL);
+							LinearRing* ring = gf->createLinearRing(seq);
+							Polygon* geom = gf->createPolygon(ring, NULL);
 
 							// Update the polygon list with the new poly.
 							{
@@ -2002,8 +1978,6 @@ void Raster::polygonize(const std::string &filename, const std::string &layerNam
 
 	if(OGRERR_NONE != layer->CommitTransaction())
 		g_runerr("Failed to commit transation.");
-
-#endif
 
 	GDALClose(ds);
 }

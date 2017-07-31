@@ -27,7 +27,7 @@
 #include <gdal_priv.h>
 #include <ogr_spatialref.h>
 
-#include <eigen3/Eigen/Core>
+#include <Eigen/Core>
 
 #include "util.hpp"
 
