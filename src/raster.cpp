@@ -84,8 +84,8 @@ namespace geo {
 				Poly(uint64_t id) :
 					final(nullptr),
 					id(id),
-					minRow(-1),
-					maxRow(-1) {
+					minRow(std::numeric_limits<int>::max()),
+					maxRow(std::numeric_limits<int>::min()) {
 				}
 
 				// Add the contents of the Poly to this instance.
@@ -136,11 +136,9 @@ namespace geo {
 
 					// If the result is a single polygon, turn it into a multi.
 					if(typeId == GEOS_POLYGON) {
-						std::vector<Geometry*> geoms0;
-						geoms0.push_back(geom);
-						Geometry* g = fact->createMultiPolygon(geoms0); // Force copy.
-						delete geom;
-						geom = g;
+						std::vector<Geometry*>* geoms0 = new std::vector<Geometry*>();
+						geoms0->push_back(geom);
+						geom = fact->createMultiPolygon(geoms0); // Do not copy -- take ownership.
 					}
 
 					// If we're removing dangles, throw away all but the
@@ -166,14 +164,14 @@ namespace geo {
 					// If we're removing holes, extract the exterior rings
 					// of all constituent polygons.
 					if(removeHoles) {
-						std::vector<Geometry*> geoms0;
+						std::vector<Geometry*>* geoms0 = new std::vector<Geometry*>();
 						for(size_t i = 0; i < geom->getNumGeometries(); ++i) {
 							const Polygon* p = dynamic_cast<const Polygon*>(geom->getGeometryN(i));
 							const LineString* l = p->getExteriorRing();
 							LinearRing* r = fact->createLinearRing(l->getCoordinates());
-							geoms0.push_back(fact->createPolygon(r, nullptr));
+							geoms0->push_back(fact->createPolygon(r, nullptr));
 						}
-						Geometry* g = fact->createMultiPolygon(geoms0); // Force copy
+						Geometry* g = fact->createMultiPolygon(geoms0); // Do not copy -- take ownership.
 						delete geom;
 						geom = g;
 					}
