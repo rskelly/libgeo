@@ -1876,8 +1876,8 @@ void Raster::polygonize(const std::string& filename, const std::string& layerNam
 
 				#pragma omp critical(_b)
 				{
-					++block;
 					b = block;
+					++block;
 				}
 
 				// If cancelled or no more blocks, quit.
