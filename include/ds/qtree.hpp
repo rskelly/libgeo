@@ -14,6 +14,7 @@
 #include <queue>
 #include <thread>
 #include <condition_variable>
+#include <fstream>
 
 using namespace geo::util;
 using namespace geos::geom;
