@@ -1778,6 +1778,8 @@ void Raster::polygonize(const std::string& filename, const std::string& layerNam
 	OGRSpatialReference sr;
 	sr.importFromEPSG(srid);
 	char **lopts = NULL;
+	if(Util::lower(driver) == "sqlite")
+		lopts = CSLSetNameValue(lopts, "FORMAT", "SPATIALITE");
 	OGRLayer *layer = ds->CreateLayer(layerName.c_str(), &sr, wkbMultiPolygon, lopts);
 	CPLFree(lopts);
 	if(!layer) {
