@@ -7,11 +7,17 @@ using namespace geo::ds;
 
 class PPoint {
 public:
-	double x;
-	double y;
+	double _x;
+	double _y;
 	size_t pos;
-	PPoint(double x, double y) : x(x), y(y), pos(0) {}
-	PPoint() : x(0), y(0), pos(0) {}
+	PPoint(double x, double y) : _x(x), _y(y), pos(0) {}
+	PPoint() : _x(0), _y(0), pos(0) {}
+	double x() const {
+		return _x;
+	}
+	double y() const {
+		return _y;
+	}
 };
 
 int main(int argc, char** argv) {
@@ -53,7 +59,7 @@ int main(int argc, char** argv) {
 		std::cerr << "found " << res.size() << " items out of " << sc << "\n";
 	for(const PPoint& p : res) {
 		if(csv)
-			std::cerr << "2," << p.x << ", " << p.y << "\n";
+			std::cerr << "2," << p.x() << ", " << p.y() << "\n";
 	}
 
 	for(int i = 0; i < 10; ++i) {
@@ -65,7 +71,7 @@ int main(int argc, char** argv) {
 		if(!csv)
 			std::cerr << "found by search " << res.size() << " in " << sw.millis() << "\n";	
 		//for(const PPoint& tt : res)
-		//	std::cerr << "found: " << tt.x << ", " << tt.y << "\n";
+		//	std::cerr << "found: " << tt.x() << ", " << tt.y() << "\n";
 	}
 
 	for(int i = 0; i < 10; ++i) {
@@ -77,10 +83,10 @@ int main(int argc, char** argv) {
 		t.nearest(x, y, 1, std::back_inserter(res));
 		sw.stop();
 		PPoint& d = res.front();
-		double dist = std::sqrt(g_sq(x - d.x) + g_sq(y - d.y));
+		double dist = std::sqrt(g_sq(x - d.x()) + g_sq(y - d.y()));
 		if(!csv)
 			std::cerr << "found nearest " << res.size() << " in " << sw.millis() << " at " << dist << "\n";	
 		//for(const PPoint& tt : res)
-		//	std::cerr << "found: " << tt.x << ", " << tt.y << "\n";
+		//	std::cerr << "found: " << tt.x() << ", " << tt.y() << "\n";
 	}
 }
