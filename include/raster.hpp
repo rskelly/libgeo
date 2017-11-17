@@ -362,22 +362,23 @@ namespace geo {
 
                 int cols = gp.cols();
                 int rows = gp.rows();
-                int size = gp.size();
+                uint64_t size = gp.size();
                 int minc = cols + 1;
                 int minr = rows + 1;
                 int maxc = -1;
                 int maxr = -1;
                 int area = 0;
-                std::queue<std::unique_ptr<Cell> > q;
-                q.push(std::unique_ptr<Cell>(new Cell(col, row)));
+
+                std::queue<Cell> q;
+                q.push(Cell(col, row));
 
                 std::vector<bool> visited(size, false); // Tracks visited pixels.
 
                 while (q.size()) {
 
-                    std::unique_ptr<Cell> cel = std::move(q.front());
-                    row = cel->row;
-                    col = cel->col;
+                    const Cell& cel = q.front();
+                    row = cel.row;
+                    col = cel.col;
                     q.pop();
 
                     uint64_t idx = (uint64_t) row * cols + col;
@@ -393,9 +394,9 @@ namespace geo {
                         visited[idx] = true;
 
                         if (row > 0)
-                            q.push(std::unique_ptr<Cell>(new Cell(col, row - 1)));
+                            q.push(Cell(col, row - 1));
                         if (row < rows - 1)
-                            q.push(std::unique_ptr<Cell>(new Cell(col, row + 1)));
+                            q.push(Cell(col, row + 1));
 
                         int c;
                         for (c = col - 1; c >= 0; --c) {
@@ -406,18 +407,18 @@ namespace geo {
                                 op.fill(c, row);
                                 visited[idx] = true;
                                 if (row > 0)
-                                    q.push(std::unique_ptr<Cell>(new Cell(c, row - 1)));
+                                    q.push(Cell(c, row - 1));
                                 if (row < rows - 1)
-                                    q.push(std::unique_ptr<Cell>(new Cell(c, row + 1)));
+                                    q.push(Cell(c, row + 1));
                             } else {
                                 break;
                             }
                         }
                         if(d8) {
                             if (row > 0)
-                                q.push(std::unique_ptr<Cell>(new Cell(c, row - 1)));
+                                q.push(Cell(c, row - 1));
                             if (row < rows - 1)
-                                q.push(std::unique_ptr<Cell>(new Cell(c, row + 1)));
+                                q.push(Cell(c, row + 1));
                         }
                         for (c = col + 1; c < cols; ++c) {
                             idx = (uint64_t) row * cols + c;
@@ -427,18 +428,18 @@ namespace geo {
                                 op.fill(c, row);
                                 visited[idx] = true;
                                 if (row > 0)
-                                    q.push(std::unique_ptr<Cell>(new Cell(c, row - 1)));
+                                    q.push(Cell(c, row - 1));
                                 if (row < rows - 1)
-                                    q.push(std::unique_ptr<Cell>(new Cell(c, row + 1)));
+                                    q.push(Cell(c, row + 1));
                             } else {
                                 break;
                             }
                         }
                         if(d8) {
                             if (row > 0)
-                                q.push(std::unique_ptr<Cell>(new Cell(c, row - 1)));
+                                q.push(Cell(c, row - 1));
                             if (row < rows - 1)
-                                q.push(std::unique_ptr<Cell>(new Cell(c, row + 1)));
+                                q.push(Cell(c, row + 1));
                         }
                     }
                 }
@@ -457,7 +458,7 @@ namespace geo {
             // Smooth the raster and write the smoothed version to the output raster.
             // Callback is an optional function reference with a single float
             // between 0 and 1, for status tracking.
-            void smooth(Grid &smoothed, double sigma, int size, int band = 1,
+            void smooth(Grid &smoothed, double sigma = 0.84089642, int size = 3, int band = 1,
                 Status* status = nullptr,
                 bool *cancel = nullptr);
 

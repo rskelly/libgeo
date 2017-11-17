@@ -1743,6 +1743,53 @@ void Raster::setFloat(double x, double y, double v, int band) {
 	setFloat(m_props.toCol(x), m_props.toRow(y), v, band);
 }
 
+class PolyQueue {
+private:
+	std::queue<std::unique_ptr<Poly> > m_q;
+	std::condition_variable m_cond;
+	std::mutex m_mtx;
+	bool m_final;
+
+public:
+	PolyQueue() : m_final(false) {}
+
+	void push(std::unique_ptr<Poly>& poly) {
+		std::lock_guard<std::mutex> lock(m_mtx);
+		m_q.push(std::move(poly));
+		m_cond.notify_one();
+	}
+
+	std::unique_ptr<Poly> pop() {
+		std::unique_lock<std::mutex> lock(m_mtx);
+		while(!m_final && m_q.empty())
+			m_cond.wait(lock);
+		std::unique_ptr<Poly> v;
+		if(!m_q.empty()) {
+			v.reset(m_q.front().release());
+			m_q.pop();
+		}
+		return std::move(v);
+	}
+
+	bool empty() {
+		std::lock_guard<std::mutex> lock(m_mtx);
+		return m_q.empty();
+	}
+
+	bool final() {
+		return m_final;
+	}
+
+	void finalize() {
+		{
+			std::lock_guard<std::mutex> lock(m_mtx);
+			m_final = true;
+		}
+		m_cond.notify_all();
+	}
+
+};
+
 void Raster::polygonize(const std::string& filename, const std::string& layerName,
 		const std::string& driver, uint16_t srid, uint16_t band,
 		bool removeHoles, bool removeDangles, Status *status, bool *cancel) {
@@ -1811,13 +1858,13 @@ void Raster::polygonize(const std::string& filename, const std::string& layerNam
 	// Keeps created polygons.
 	std::unordered_map<uint64_t, std::unique_ptr<Poly> > polys;
 	// Keeps finished polys for the write thread to work on.
-	std::queue<std::unique_ptr<Poly> > polyQ;
+	PolyQueue polyQ;
 	// Tracks finished rows.
 	std::vector<char> finished(rows);
 	std::fill(finished.begin(), finished.end(), 0);
 
 	// Keeps a count of the running threads.
-	std::atomic<int> running(1);
+	std::atomic<int> running(0);
 
 	//
 	int bufSize = 128;
@@ -1830,40 +1877,27 @@ void Raster::polygonize(const std::string& filename, const std::string& layerNam
 		if(omp_get_thread_num() == 0) {
 
 			// Use the first thread in the group for writing polys to the DB.
-
-			bool run = true;
-			while(run) {
-				std::unique_ptr<Poly> p;
-				#pragma omp critical(_q)
-				{
-					if(!polyQ.empty()) {
-						p.reset(polyQ.front().release());
-						polyQ.pop();
-					}
-					// Decide whether to exit the loop.
-					run = !*cancel && (running || !polyQ.empty());
+			// The loop runs as long as the queue isn't "finalized" and is not empty.
+			while(!polyQ.final() || !polyQ.empty()) {
+				std::unique_ptr<Poly> p = polyQ.pop();
+				if(p.get()) {
+					// Retrieve the unioned geometry and write it.
+					Geometry* g = p->getPoly();
+					OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx, (GEOSGeom) g);
+					// Create and append the feature.
+					OGRFeature feat(layer->GetLayerDefn());
+					feat.SetGeometry(geom);
+					feat.SetField("id", (GIntBig) p->id);
+					feat.SetFID(++fid);
+					delete geom;
+					if(OGRERR_NONE != layer->CreateFeature(&feat))
+						g_runerr("Failed to add geometry.");
 				}
-				// If there's nothing in the queue. Wait a bit.
-				if(!p.get()) {
-					std::this_thread::sleep_for(std::chrono::milliseconds(100));
-					continue;
-				}
-				// Retrieve the unioned geometry and write it.
-				Geometry* g = p->getPoly();
-				OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(gctx, (GEOSGeom) g);
-				// Create and append the feature.
-				OGRFeature feat(layer->GetLayerDefn());
-				feat.SetGeometry(geom);
-				feat.SetField("id", (GIntBig) p->id);
-				feat.SetFID(++fid);
-				delete geom;
-				if(OGRERR_NONE != layer->CreateFeature(&feat))
-					g_runerr("Failed to add geometry.");
 			}
 
 		} else {
 
-			// Increment the run count. When it reaches 1, we clean up.
+			// Increment the run count. When it reaches 0, we clean up.
 			++running;
 
 			// Buffer for reading raster.
@@ -1979,8 +2013,7 @@ void Raster::polygonize(const std::string& filename, const std::string& layerNam
 				// Generate polygon and add Poly to the write queue.
 				for(auto& p : geoms0) {
 					p->generate(gf, removeHoles, removeDangles);
-					#pragma omp critical(_q)
-					polyQ.push(std::move(p));
+					polyQ.push(p);
 				}
 
 			} // while
@@ -1988,16 +2021,13 @@ void Raster::polygonize(const std::string& filename, const std::string& layerNam
 			// This thread is done. Decrement.
 			--running;
 
-			// If this is the last thread to quit.
-			if(running == 1) {
+			if(running == 0) {
 				// Send the rest of the polygons to the queue.
 				for(auto& it : polys) {
 					it.second->generate(gf, removeHoles, removeDangles);
-					#pragma omp critical(_q)
-					polyQ.push(std::move(it.second));
+					polyQ.push(it.second);
 				}
-				// Decrement -- this causes the write loop to quit.
-				--running;
+				polyQ.finalize();
 			}
 
 		} // thread split
