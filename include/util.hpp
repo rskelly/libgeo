@@ -76,14 +76,27 @@ namespace geo {
         public:
             void *buf;
 
-            Buffer(uint64_t size) {
-                buf = std::malloc(size);
-				if (!buf)
-					g_runerr("Failed to allocate buffer.");
+            Buffer() : buf(nullptr) {}
+
+            Buffer(size_t size) :
+            	buf(nullptr) {
+            	resize(size);
+            }
+
+            void resize(size_t size) {
+            	if(buf) {
+            		std::free(buf);
+            		buf = nullptr;
+            	}
+            	if(size > 0) {
+					buf = std::malloc(size);
+					if (!buf)
+						g_runerr("Failed to allocate buffer.");
+            	}
             }
 
             ~Buffer() {
-                std::free(buf);
+            	resize(0);
             }
         };
 
