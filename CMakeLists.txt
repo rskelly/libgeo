@@ -41,8 +41,8 @@ find_package (OpenMP REQUIRED)
 find_package (Boost COMPONENTS system filesystem date_time REQUIRED)
 find_package (GDAL 2.1 REQUIRED)
 
-find_library (GEOS_LIBRARY geos)
-message (STATUS "GEOS: ${GEOS_LIBRARY}")
+find_library (GEOS_LIBRARY geos REQUIRED)
+find_library (CRYPTO_LIB crypto REQUIRED)
 
 if(OPENMP_FOUND)
 	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_C_FLAGS} -fopenmp")
@@ -66,9 +66,9 @@ target_include_directories(geo PUBLIC include)
 add_library (util STATIC src/util.cpp src/md5.cpp)
 target_include_directories(util PUBLIC include ${INC_PATH} ${Boost_INCLUDE_DIRS} ${GDAL_INCLUDE_DIR})
 if (UNIX AND NOT APPLE)
-	target_link_libraries (util ${Boost_LIBRARIES} ${GDAL_LIBRARY} geo rt)
+	target_link_libraries (util ${Boost_LIBRARIES} ${GDAL_LIBRARY} ${CRYPTO_LIB} geo rt)
 else ()
-	target_link_libraries (util ${Boost_LIBRARIES} ${GDAL_LIBRARY} geo)
+	target_link_libraries (util ${Boost_LIBRARIES} ${GDAL_LIBRARY} ${CRYPTO_LIB} geo)
 endif ()
 
 add_library (db STATIC src/db.cpp)
@@ -79,21 +79,10 @@ add_library (raster STATIC src/raster.cpp)
 #target_include_directories(raster PUBLIC include ${INC_PATH} ${Boost_INCLUDE_DIRS} ${GDAL_INCLUDE_DIR})
 target_link_libraries (raster ${GDAL_LIBRARY} ${GEOS_LIBRARY} util geo db)
 
-# Build tests ############################################################################################
+add_library (ann STATIC ann/src/ANN.cpp ann/src/brute.cpp ann/src/kd_tree.cpp ann/src/kd_util.cpp 
+	ann/src/kd_split.cpp ann/src/kd_dump.cpp ann/src/kd_search.cpp ann/src/kd_pr_search.cpp 
+	ann/src/kd_fix_rad_search.cpp ann/src/bd_tree.cpp ann/src/bd_search.cpp ann/src/bd_pr_search.cpp 
+	ann/src/bd_fix_rad_search.cpp ann/src/perf.cpp)
+target_include_directories(ann PUBLIC ann/include)
 
-add_executable (polygonize src/apps/polygonize.cpp)
-target_include_directories(polygonize PUBLIC include)
-target_link_libraries (polygonize PUBLIC raster)
-
-#add_executable (smooth_test src/tests/smooth.cpp)
-#target_include_directories(smooth_test PUBLIC include)
-#target_link_libraries (smooth_test PUBLIC raster)
-
-add_executable (fqtree_test src/tests/fqtree.cpp)
-target_include_directories(fqtree_test PUBLIC include)# ${STXXL_INCLUDE_DIRS})
-target_link_libraries (fqtree_test PUBLIC util)# ${STXXL_LIBRARIES})
-
-add_executable (mqtree_test src/tests/mqtree.cpp)
-target_include_directories(mqtree_test PUBLIC include)# ${STXXL_INCLUDE_DIRS})
-target_link_libraries (mqtree_test PUBLIC util)# ${STXXL_LIBRARIES})
 
