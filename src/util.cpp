@@ -481,6 +481,11 @@ std::string Util::basename(const std::string &filename) {
 	return boost::filesystem::basename(filename);
 }
 
+std::string Util::filename(const std::string &filename) {
+	boost::filesystem::path p(filename);
+	return p.filename().string();
+}
+
 std::string Util::pathJoin(const std::string& a, const std::string& b) {
 	boost::filesystem::path pa(a);
 	boost::filesystem::path pb(b);
@@ -510,6 +515,18 @@ bool Util::mkdir(const std::string &dir) {
 	if (!boost::filesystem::exists(bdir))
 		return create_directories(bdir);
 	return true;
+}
+
+bool Util::isDir(const std::string& path) {
+	boost::filesystem::path p(path);
+	return boost::filesystem::is_directory(p);
+
+}
+
+bool Util::isFile(const std::string& path) {
+	boost::filesystem::path p(path);
+	return boost::filesystem::is_regular(p);
+
 }
 
 std::string Util::parent(const std::string& file) {
@@ -571,6 +588,46 @@ std::string Util::md5(const std::string& input) {
 	geo::crypto::MD5 m(input);
 	m.finalize();
 	return m.hexdigest();
+}
+
+#include "openssl/sha.h"
+
+std::string Util::sha256(const std::string& input) {
+	const char* str = input.c_str();
+	char outputBuffer[65];
+	unsigned char hash[SHA256_DIGEST_LENGTH];
+	SHA256_CTX sha256;
+	SHA256_Init(&sha256);
+	SHA256_Update(&sha256, str, strlen(str));
+	SHA256_Final(hash, &sha256);
+	for(int i = 0; i < SHA256_DIGEST_LENGTH; i++)
+		sprintf(outputBuffer + (i * 2), "%02x", hash[i]);
+	outputBuffer[64] = 0;
+	return std::string(outputBuffer);
+}
+
+std::string Util::sha256File(const std::string& file) {
+	const char *path = file.c_str();
+	char outputBuffer[65];
+	std::FILE *f = std::fopen(path, "rb");
+	if(!f)
+		throw std::runtime_error("Failed to open file for hashing.");
+	unsigned char hash[SHA256_DIGEST_LENGTH];
+	SHA256_CTX sha256;
+	SHA256_Init(&sha256);
+	const int bufSize = 32768;
+	char *buffer = (char*) malloc(bufSize);
+	if(!buffer)
+		throw std::runtime_error("Failed to allocate buffer for hashing.");
+	int bytesRead = 0;
+	while((bytesRead = std::fread(buffer, 1, bufSize, f)))
+		SHA256_Update(&sha256, buffer, bytesRead);
+	std::fclose(f);
+	SHA256_Final(hash, &sha256);
+	for(int i = 0; i < SHA256_DIGEST_LENGTH; i++)
+		sprintf(outputBuffer + (i * 2), "%02x", hash[i]);
+	free(buffer);
+	return std::string(outputBuffer);
 }
 
 MappedFile::MappedFile(const std::string& name, uint64_t size, bool mapped) :

@@ -78,9 +78,8 @@ namespace geo {
 
             Buffer(uint64_t size) {
                 buf = std::malloc(size);
-				if (!buf) {
+				if (!buf)
 					g_runerr("Failed to allocate buffer.");
-				}
             }
 
             ~Buffer() {
@@ -453,11 +452,17 @@ namespace geo {
 			// Generate an MD5 hash of the string.
 			static std::string md5(const std::string& input);
 			
+			static std::string sha256(const std::string& input);
+
+			static std::string sha256File(const std::string& file);
+
             // Move the file.
             static void copyfile(const std::string& srcfile, const std::string& dstfile);
 
             // Return the basename of the file.
             static std::string basename(const std::string& filename);
+
+            static std::string filename(const std::string& filename);
 
             // Create a temporary file at the given root folder. If no root is given,
             // a relative path is created.
@@ -490,6 +495,10 @@ namespace geo {
             // Make a directory.
             static bool mkdir(const std::string& dir);
 
+            static bool isFile(const std::string& path);
+
+            static bool isDir(const std::string& path);
+
             // Get the parent directory
             static std::string parent(const std::string& filename);
 
@@ -503,14 +512,16 @@ namespace geo {
             static size_t dirlist(T iter, const std::string& dir, const std::string& ext = std::string()) {
                 using namespace boost::filesystem;
                 using namespace boost::algorithm;
+                using namespace boost::system;
                 int i = 0;
                 if (is_regular_file(dir)) {
                     *iter = dir;
                     ++iter;
                     ++i;
                 } else {
+                    error_code ec;
                     directory_iterator end;
-                    directory_iterator di(dir);
+                    directory_iterator di(dir, ec);
                     for (; di != end; ++di) {
                         if (!ext.empty()) {
                             std::string p(di->path().string());
