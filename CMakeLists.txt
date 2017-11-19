@@ -28,6 +28,8 @@ elseif(${WIN32})
 	set (libLAS_LIBRARY_DIRS "C:\\dev\\gisinternals\\lib")
 else()
 	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-pragmas")
+	include_directories (BEFORE SYSTEM include)
+	include_directories (BEFORE SYSTEM ann/include)
 	include_directories (BEFORE SYSTEM /usr/include/eigen3)
 	include_directories (BEFORE SYSTEM /opt/include)
 	link_directories (BEFORE SYSTEM /opt/lib)
@@ -85,4 +87,8 @@ add_library (ann STATIC ann/src/ANN.cpp ann/src/brute.cpp ann/src/kd_tree.cpp an
 	ann/src/bd_fix_rad_search.cpp ann/src/perf.cpp)
 target_include_directories(ann PUBLIC ann/include)
 
+# Tests
+
+add_executable (kdtree_test src/tests/kdtree_test.cpp)
+target_link_libraries (kdtree_test ann ${Boost_LIBRARIES})
 
