@@ -28,8 +28,8 @@ elseif(${WIN32})
 	set (libLAS_LIBRARY_DIRS "C:\\dev\\gisinternals\\lib")
 else()
 	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-pragmas")
-	include_directories (BEFORE SYSTEM include)
-	include_directories (BEFORE SYSTEM ann/include)
+	include_directories (BEFORE SYSTEM ./include)
+	include_directories (BEFORE SYSTEM ./ann/include)
 	include_directories (BEFORE SYSTEM /usr/include/eigen3)
 	include_directories (BEFORE SYSTEM /opt/include)
 	link_directories (BEFORE SYSTEM /opt/lib)
@@ -41,7 +41,7 @@ set (Boost_USE_STATIC_RUNTIME OFF)
 
 find_package (OpenMP REQUIRED)
 find_package (Boost COMPONENTS system filesystem date_time REQUIRED)
-find_package (GDAL 2.1 REQUIRED)
+find_package (GDAL 2.2 REQUIRED)
 
 find_library (GEOS_LIBRARY geos REQUIRED)
 find_library (CRYPTO_LIB crypto REQUIRED)
@@ -61,34 +61,31 @@ link_directories(. ${Boost_LIBRARY_DIRS} ${LIB_PATH})
 
 # Build support libraries ################################################################################
 
-add_library (geo STATIC src/geo.cpp)
+add_library (geo SHARED src/geo.cpp)
 target_include_directories(geo PUBLIC include)
 
 
-add_library (util STATIC src/util.cpp src/md5.cpp)
-target_include_directories(util PUBLIC include ${INC_PATH} ${Boost_INCLUDE_DIRS} ${GDAL_INCLUDE_DIR})
+add_library (geoutil SHARED src/util.cpp src/md5.cpp)
 if (UNIX AND NOT APPLE)
-	target_link_libraries (util ${Boost_LIBRARIES} ${GDAL_LIBRARY} ${CRYPTO_LIB} geo rt)
+	target_link_libraries (geoutil ${Boost_LIBRARIES} ${GDAL_LIBRARY} ${CRYPTO_LIB} geo rt)
 else ()
-	target_link_libraries (util ${Boost_LIBRARIES} ${GDAL_LIBRARY} ${CRYPTO_LIB} geo)
+	target_link_libraries (geoutil ${Boost_LIBRARIES} ${GDAL_LIBRARY} ${CRYPTO_LIB} geo)
 endif ()
 
-add_library (db STATIC src/db.cpp)
-target_include_directories(db PUBLIC include ${INC_PATH} ${Boost_INCLUDE_DIRS} ${GDAL_INCLUDE_DIR})
-target_link_libraries (db ${GDAL_LIBRARY} util geo)
+add_library (geodb SHARED src/db.cpp)
+target_link_libraries (geodb ${GDAL_LIBRARY} geoutil geo)
 
-add_library (raster STATIC src/raster.cpp)
-#target_include_directories(raster PUBLIC include ${INC_PATH} ${Boost_INCLUDE_DIRS} ${GDAL_INCLUDE_DIR})
-target_link_libraries (raster ${GDAL_LIBRARY} ${GEOS_LIBRARY} util geo db)
+add_library (georaster SHARED src/raster.cpp)
+target_link_libraries (georaster geo geoutil geodb ${GDAL_LIBRARY} ${GEOS_LIBRARY} )
 
-add_library (ann STATIC ann/src/ANN.cpp ann/src/brute.cpp ann/src/kd_tree.cpp ann/src/kd_util.cpp 
+add_library (geoann SHARED ann/src/ANN.cpp ann/src/brute.cpp ann/src/kd_tree.cpp ann/src/kd_util.cpp 
 	ann/src/kd_split.cpp ann/src/kd_dump.cpp ann/src/kd_search.cpp ann/src/kd_pr_search.cpp 
 	ann/src/kd_fix_rad_search.cpp ann/src/bd_tree.cpp ann/src/bd_search.cpp ann/src/bd_pr_search.cpp 
 	ann/src/bd_fix_rad_search.cpp ann/src/perf.cpp)
-target_include_directories(ann PUBLIC ann/include)
+target_include_directories(geoann PUBLIC ann/include)
 
 # Tests
 
 add_executable (kdtree_test src/tests/kdtree_test.cpp)
-target_link_libraries (kdtree_test ann ${Boost_LIBRARIES})
+target_link_libraries (kdtree_test geoann ${Boost_LIBRARIES})
 

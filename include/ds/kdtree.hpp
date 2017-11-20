@@ -27,7 +27,7 @@ namespace ds {
 template <class T>
 class KDTree {
 private:
-	std::vector<T*> m_items;
+	std::vector<T> m_items;
 	std::vector<ANNpoint> m_pts;
 	Buffer m_buf;
 	ANNkd_tree* m_tree;
@@ -40,7 +40,7 @@ public:
 		m_dims(dims) {
 	}
 
-	void add(T* item) {
+	void add(T& item) {
 		m_items.push_back(item);
 	}
 
@@ -50,17 +50,23 @@ public:
 	}
 
 	void build() {
+
 		if(m_items.size() < 1)
 			g_runerr("Not enough items.");
+
+		// Clean up existing tree, etc.
 		if(m_tree)
 			destroy();
-		// Set up the point array as tuples of doubles and write the inputs to it.
+
+		// Set up a buffer for the point data, and an array of pointers into the buffer.
 		m_buf.resize(m_items.size() * sizeof(double) * m_dims);
 		m_pts.resize(m_items.size());
+
+		// Write points into the buffer and save pointers.
 		double* data = static_cast<double*>(m_buf.buf);
-		for(int i = 0; i < m_items.size(); ++i) {
-			for(int j = 0; j < m_dims; ++j)
-				data[i + j] = (*m_items[i])[j];
+		for(size_t i = 0; i < m_items.size(); ++i) {
+			for(size_t j = 0; j < m_dims; ++j)
+				data[i + j] = m_items[i][j];
 			m_pts[i] = data + i;
 		}
 		// Set up the tree.
@@ -76,24 +82,34 @@ public:
 	}
 
 	template <class TIter, class DIter>
-	void knn(const T& item, int count, TIter titer, DIter diter, double eps = 0.0) {
+	void knn(const T& item, size_t count, TIter titer, DIter diter, double eps = 0.0) {
+
 		if(!m_tree)
 			g_runerr("Tree not build. Forget to call build?");
 		if(count > m_items.size())
 			count = m_items.size();
 		if(count < 1)
 			g_runerr("Count too small: " << count);
+
 		// Turn the search item into an array of doubles castable to ANNpoint.
 		std::vector<double> pt(m_dims);
 		for(size_t i = 0; i < m_dims; ++i)
 			pt[i] = item[i];
+
 		// Create arrays for indices and distances.
 		std::vector<ANNidx> idx(count);
 		std::vector<ANNdist> dist(count);
-		m_tree->annkSearch(static_cast<ANNpoint>(pt.data()), count, static_cast<ANNidxArray>(idx.data()), static_cast<ANNdistArray>(dist.data()), eps);
-		for(int i = 0; i < count; ++i) {
-			*titer = m_items[idx[i]]; ++titer;
+
+		// Perform search.
+		m_tree->annkSearch(static_cast<ANNpoint>(pt.data()), count, static_cast<ANNidxArray>(idx.data()),
+				static_cast<ANNdistArray>(dist.data()), eps);
+
+		// Populate output iterators.
+		for(size_t i = 0; i < count; ++i) {
+			*titer = m_items[idx[i]];
+			++titer;
 			*diter = std::sqrt(dist[i]);
+			++diter;
 		}
 	}
 
