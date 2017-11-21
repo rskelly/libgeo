@@ -28,11 +28,7 @@ elseif(${WIN32})
 	set (libLAS_LIBRARY_DIRS "C:\\dev\\gisinternals\\lib")
 else()
 	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-pragmas")
-	include_directories (BEFORE SYSTEM ./include)
-	include_directories (BEFORE SYSTEM ./ann/include)
-	include_directories (BEFORE SYSTEM /usr/include/eigen3)
-	include_directories (BEFORE SYSTEM /opt/include)
-	link_directories (BEFORE SYSTEM /opt/lib)
+	include_directories (BEFORE SYSTEM include ann/include /usr/include/eigen3 /opt/include)
 endif()
 
 set (Boost_DEBUG OFF)
@@ -43,8 +39,8 @@ find_package (OpenMP REQUIRED)
 find_package (Boost COMPONENTS system filesystem date_time REQUIRED)
 find_package (GDAL 2.2 REQUIRED)
 
-find_library (GEOS_LIBRARY geos REQUIRED)
-find_library (CRYPTO_LIB crypto REQUIRED)
+find_library (GEOS_LIBRARY NAMES geos PATHS /opt/lib)
+find_library (CRYPTO_LIB crypto)
 
 if(OPENMP_FOUND)
 	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_C_FLAGS} -fopenmp")
@@ -64,16 +60,14 @@ link_directories(. ${Boost_LIBRARY_DIRS} ${LIB_PATH})
 add_library (geo SHARED src/geo.cpp)
 target_include_directories(geo PUBLIC include)
 
-
 add_library (geoutil SHARED src/util.cpp src/md5.cpp)
+target_link_libraries (geoutil ${Boost_LIBRARIES} ${GDAL_LIBRARY} ${CRYPTO_LIB} geo)
 if (UNIX AND NOT APPLE)
-	target_link_libraries (geoutil ${Boost_LIBRARIES} ${GDAL_LIBRARY} ${CRYPTO_LIB} geo rt)
-else ()
-	target_link_libraries (geoutil ${Boost_LIBRARIES} ${GDAL_LIBRARY} ${CRYPTO_LIB} geo)
+	target_link_libraries (geoutil rt)
 endif ()
 
 add_library (geodb SHARED src/db.cpp)
-target_link_libraries (geodb ${GDAL_LIBRARY} geoutil geo)
+target_link_libraries (geodb geo geoutil ${GDAL_LIBRARY})
 
 add_library (georaster SHARED src/raster.cpp)
 target_link_libraries (georaster geo geoutil geodb ${GDAL_LIBRARY} ${GEOS_LIBRARY} )
@@ -84,7 +78,7 @@ add_library (geoann SHARED ann/src/ANN.cpp ann/src/brute.cpp ann/src/kd_tree.cpp
 	ann/src/bd_fix_rad_search.cpp ann/src/perf.cpp)
 target_include_directories(geoann PUBLIC ann/include)
 
-# Tests
+# Tests ##################################################################################################
 
 add_executable (kdtree_test src/tests/kdtree_test.cpp)
 target_link_libraries (kdtree_test geoann ${Boost_LIBRARIES})
