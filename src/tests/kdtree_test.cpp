@@ -29,16 +29,15 @@ int main(int argc, char** argv) {
 
 	using namespace geo::ds;
 
-	std::vector<Pt*> pts;
+	std::vector<Pt> pts;
 	for(int r = 0; r < 10; ++r) {
 		for(int c = 0; c < 10; ++c) {
-			Pt* p = new Pt((double) c, (double) r, (double) (c * r % 11));
-			pts.push_back(p);
+			pts.push_back(Pt((double) c, (double) r, (double) (c * r % 11)));
 		}
 	}
 
 	Pt pt(3, 3, 9);
-	std::vector<Pt*> output;
+	std::vector<Pt> output;
 	std::vector<double> distances;
 
 	KDTree<Pt> kt(3);
@@ -48,7 +47,7 @@ int main(int argc, char** argv) {
 
 	std::cerr << "Found items:\n";
 	for(size_t i = 0; i < output.size(); ++i)
-		std::cerr << (*output[i])[0] << "," << (*output[i])[1] << "," << (*output[i])[2] << "; " << distances[i] << "\n";
+		std::cerr << output[i][0] << "," << output[i][1] << "," << output[i][2] << "; " << distances[i] << "\n";
 
 }
 
