@@ -7,12 +7,12 @@ set (CMAKE_CXX_STANDARD_REQUIRED ON)
 set (CMAKE_CXX_EXTENSIONS OFF)
 set (CMAKE_POSITION_INDEPENDENT_CODE ON)
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -D_GLIBCXX_PARALLEL")
+	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-pragmas")
 
 if (${APPLE})
 	set (CMAKE_C_COMPILER /usr/local/bin/clang-omp CACHE STRING "C compiler" FORCE)
 	set (CMAKE_CXX_COMPILER /usr/local/bin/clang-omp++ CACHE STRING "C++ compiler" FORCE)
 	set (CMAKE_SHARED_LIBRARY_CREATE_CXX_FLAGS "${CMAKE_SHARED_LIBRARY_CREATE_CXX_FLAGS} -undefined dynamic_lookup")
-	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-pragmas")
 elseif(${WIN32})
 	set (Boost_COMPILER -vc140)
 	set (Boost_NO_SYSTEM_PATHS ON)
@@ -27,8 +27,10 @@ elseif(${WIN32})
 	set (libLAS_INCLUDE_DIR "C:\\dev\\gisinternals\\include")
 	set (libLAS_LIBRARY_DIRS "C:\\dev\\gisinternals\\lib")
 else()
-	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-pragmas")
-	include_directories (BEFORE SYSTEM include ann/include /usr/include/eigen3 /opt/include)
+	include_directories (BEFORE SYSTEM include)
+	include_directories (BEFORE SYSTEM ann/include)
+	include_directories (BEFORE SYSTEM /usr/include/eigen3)
+	include_directories (BEFORE SYSTEM /opt/include)
 endif()
 
 set (Boost_DEBUG OFF)
@@ -39,7 +41,7 @@ find_package (OpenMP REQUIRED)
 find_package (Boost COMPONENTS system filesystem date_time REQUIRED)
 find_package (GDAL 2.2 REQUIRED)
 
-find_library (GEOS_LIBRARY NAMES geos PATHS /opt/lib)
+find_library (GEOS_LIBRARY NAMES geos geos_c PATHS /opt/lib NO_DEFAULT_PATH)
 find_library (CRYPTO_LIB crypto)
 
 if(OPENMP_FOUND)
@@ -58,25 +60,20 @@ link_directories(. ${Boost_LIBRARY_DIRS} ${LIB_PATH})
 # Build support libraries ################################################################################
 
 add_library (geo SHARED src/geo.cpp)
-target_include_directories(geo PUBLIC include)
 
 add_library (geoutil SHARED src/util.cpp src/md5.cpp)
-target_link_libraries (geoutil ${Boost_LIBRARIES} ${GDAL_LIBRARY} ${CRYPTO_LIB} geo)
-if (UNIX AND NOT APPLE)
-	target_link_libraries (geoutil rt)
-endif ()
+target_link_libraries (geoutil geo rt ${Boost_LIBRARIES} ${GDAL_LIBRARY} ${CRYPTO_LIB})
 
 add_library (geodb SHARED src/db.cpp)
 target_link_libraries (geodb geo geoutil ${GDAL_LIBRARY})
 
 add_library (georaster SHARED src/raster.cpp)
-target_link_libraries (georaster geo geoutil geodb ${GDAL_LIBRARY} ${GEOS_LIBRARY} )
+target_link_libraries (georaster geo geoutil geodb ${GEOS_LIBRARY} ${GDAL_LIBRARY})
 
 add_library (geoann SHARED ann/src/ANN.cpp ann/src/brute.cpp ann/src/kd_tree.cpp ann/src/kd_util.cpp 
 	ann/src/kd_split.cpp ann/src/kd_dump.cpp ann/src/kd_search.cpp ann/src/kd_pr_search.cpp 
 	ann/src/kd_fix_rad_search.cpp ann/src/bd_tree.cpp ann/src/bd_search.cpp ann/src/bd_pr_search.cpp 
 	ann/src/bd_fix_rad_search.cpp ann/src/perf.cpp)
-target_include_directories(geoann PUBLIC ann/include)
 
 # Tests ##################################################################################################
 
