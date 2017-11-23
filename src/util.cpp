@@ -7,6 +7,7 @@
 #include <boost/filesystem.hpp>
 
 #include "crypto/md5.hpp"
+#include "crypto/uuid.hpp"
 #include "util.hpp"
 
 using namespace geo::util;
@@ -630,34 +631,24 @@ std::string Util::sha256File(const std::string& file) {
 	return std::string(outputBuffer);
 }
 
-MappedFile::MappedFile(const std::string& name, uint64_t size, bool mapped) :
-	m_mapped(mapped),
+MappedFile::MappedFile(const std::string& name, uint64_t size) :
 	m_size(0),
-	m_name("dijital"),
+	m_name(name),
 	m_region(nullptr),
-	m_file(nullptr) {
+	m_shm(nullptr) {
 
 	if (size > 0)
 		reset(size);
 }
 
-MappedFile::MappedFile(uint64_t size, bool mapped) :
-	m_mapped(mapped),
+MappedFile::MappedFile(uint64_t size) :
 	m_size(0),
-	m_name("dijital"),
+	m_name(geo::crypto::UUID::uuid()),
 	m_region(nullptr),
-	m_file(nullptr) {
+	m_shm(nullptr) {
 
 	if (size > 0)
 		reset(size);
-}
-
-MappedFile::MappedFile(bool mapped) :
-	m_mapped(mapped),
-	m_size(0),
-	m_name("dijital"),
-	m_region(nullptr),
-	m_file(nullptr) {
 }
 
 const std::string& MappedFile::name() const {
@@ -687,69 +678,28 @@ bool MappedFile::read(void* output, uint64_t position, uint64_t length) {
     return true;
 }
 
-static uint64_t s_mappedIdx = 0;
-
 void MappedFile::reset(uint64_t size) {
 	using namespace boost::interprocess;
 	#pragma omp critical(__mapped_file_reset__)
 	{
 		size = fixSize(size);
-		if(m_size > 0 && size > m_size) {
-			uint64_t oldSize = m_size;
+		if(size != 0 && size != m_size) {
 			m_size = size;
-			if(m_mapped) {
-				if (m_region) {
-					m_region->flush();
-					delete m_region;
-				}
-				if (m_file)
-					delete m_file;
-
-				std::FILE* f = std::fopen(m_shmemName.c_str(), "w+");
-				if(f) {
-					char buf = 0;
-					std::fseek(f, m_size, SEEK_SET);
-					std::fwrite(&buf, m_size, 1, f);
-					std::fclose(f);
-					m_file = new file_mapping(m_shmemName.c_str(), read_write);
-					m_region = new mapped_region(*m_file, read_write);
-				}
-			} else {
-				std::unique_ptr<Buffer> buf(new Buffer(m_size));
-				if(m_data.get())
-					std::memcpy(buf->buf, m_data->buf, oldSize);
-				m_data.reset(buf.release());
+			if (m_region) {
+				m_region->flush();
+				delete m_region;
 			}
-		} else {
-			m_size = size;
-			if(m_mapped) {
-				if (m_region) {
-					m_region->flush();
-					delete m_region;
-				}
-				if (m_file)
-					delete m_file;
-
-				std::stringstream ss;
-				ss << m_name << "_" << s_mappedIdx++;
-				m_shmemName = Util::pathJoin(Util::tmpDir(), ss.str().c_str());
-				{
-					 file_mapping::remove(m_shmemName.c_str());
-					 std::filebuf fbuf;
-					 fbuf.open(m_shmemName.c_str(), std::ios_base::in | std::ios_base::out | std::ios_base::trunc | std::ios_base::binary);
-					 fbuf.pubseekoff(m_size - 1, std::ios_base::beg);
-					 fbuf.sputc(0);
-				}
-				m_file = new file_mapping(m_shmemName.c_str(), read_write);
-				m_region = new mapped_region(*m_file, read_write);
-			} else {
-				m_data.reset(new Buffer(m_size));
-			}
+			if (m_shm)
+				delete m_shm;
+			m_shm = new shared_memory_object(open_or_create, m_name.c_str(), read_write);
+			m_shm->truncate(m_size);
+			m_region = new mapped_region(*m_shm, read_write);
 		}
 	}
 }
+
 void* MappedFile::data() {
-	return m_mapped ? (m_region ? m_region->get_address() : nullptr) : m_data->buf;
+	return m_region ? m_region->get_address() : nullptr;
 }
 
 
@@ -762,11 +712,10 @@ size_t MappedFile::pageSize() {
 }
 
 MappedFile::~MappedFile() {
-	if(m_mapped && m_region) {
+	if(m_region) {
 		m_region->flush();
-		boost::interprocess::file_mapping::remove(m_shmemName.c_str());
 		delete m_region;
-		delete m_file;
+		delete m_shm;
 	}
 }
 

@@ -1,21 +1,6 @@
 #ifndef __UTIL_HPP__
 #define __UTIL_HPP__
 
-/*
-#include <set>
-#include <list>
-#include <fstream>
-#include <vector>
-#include <condition_variable>
-#include <mutex>
-#include <queue>
-#include <cmath>
-#include <sstream>
-#include <string>
-#include <vector>
-#include <tuple>
-*/
-
 #include <chrono>
 #include <unordered_map>
 #include <map>
@@ -34,7 +19,7 @@ namespace std {
 #endif
 
 #include <boost/interprocess/mapped_region.hpp>
-#include <boost/interprocess/file_mapping.hpp>
+#include <boost/interprocess/shared_memory_object.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/algorithm/string/join.hpp>
 #include <boost/algorithm/string/case_conv.hpp>
@@ -243,20 +228,17 @@ namespace geo {
         // Maintains a memory-mapped file, and gives access to the mapped data.
         class MappedFile {
         private:
-			bool m_mapped;
             uint64_t m_size;
 			std::string m_name;
-			std::string m_shmemName;
 			std::unique_ptr<Buffer> m_data;
             boost::interprocess::mapped_region* m_region;
-			boost::interprocess::file_mapping* m_file;
+			boost::interprocess::shared_memory_object* m_shm;
 
         public:
 
             // Create a mapped file with the given size.
-			MappedFile(const std::string& root, uint64_t size, bool mapped = true);
-            MappedFile(uint64_t size, bool mapped = true);
-            MappedFile(bool mapped = true);
+			MappedFile(const std::string& name, uint64_t size);
+			MappedFile(uint64_t size);
 
             const std::string& name() const;
 
@@ -299,7 +281,9 @@ namespace geo {
 
         };
 
-        // Provides utility methods for working with LiDAR data.
+        /**
+         * Provides utility methods.
+         */
         class Util {
         public:
 
