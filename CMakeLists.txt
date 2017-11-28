@@ -30,6 +30,7 @@ else()
 	include_directories (BEFORE SYSTEM include)
 	include_directories (BEFORE SYSTEM ann/include)
 	include_directories (BEFORE SYSTEM /usr/include/eigen3)
+	include_directories (BEFORE SYSTEM /usr/include/gdal)
 	include_directories (BEFORE SYSTEM /opt/include)
 endif()
 
@@ -41,7 +42,7 @@ find_package (OpenMP REQUIRED)
 find_package (Boost COMPONENTS system filesystem date_time REQUIRED)
 find_package (GDAL 2.2 REQUIRED)
 
-find_library (GEOS_LIBRARY NAMES geos geos_c PATHS /opt/lib NO_DEFAULT_PATH)
+find_library (GEOS_LIBRARY geos PATHS /opt/lib NO_DEFAULT_PATH)
 find_library (CRYPTO_LIB crypto)
 
 if(OPENMP_FOUND)
@@ -53,7 +54,7 @@ endif()
 project (libgeo)
 
 
-# Configure directories
+# Configure directories###################################################################################
 
 link_directories(. ${Boost_LIBRARY_DIRS} ${LIB_PATH})
 
