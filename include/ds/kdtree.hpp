@@ -28,14 +28,14 @@ template <class T>
 class KDTree {
 private:
 	std::vector<T> m_items;
-	std::vector<ANNpoint> m_pts;
-	Buffer m_buf;
+	ANNpointArray m_pts;
 	ANNkd_tree* m_tree;
 	size_t m_dims;
 
 public:
 
 	KDTree(size_t dims) :
+		m_pts(nullptr),
 		m_tree(nullptr),
 		m_dims(dims) {
 	}
@@ -58,27 +58,23 @@ public:
 		if(m_tree)
 			destroy();
 
-		// Set up a buffer for the point data, and an array of pointers into the buffer.
-		m_buf.resize(m_items.size() * sizeof(double) * m_dims);
-		m_pts.resize(m_items.size());
+		// Set up the points buffer.
+		m_pts = annAllocPts(m_items.size(), m_dims);
 
 		// Write points into the buffer and save pointers.
-		double* data = static_cast<double*>(m_buf.buf);
 		for(size_t i = 0; i < m_items.size(); ++i) {
 			for(size_t j = 0; j < m_dims; ++j)
-				data[i + j] = m_items[i][j];
-			m_pts[i] = data + i;
+				m_pts[i][j] = m_items[i][j];
 		}
 		// Set up the tree.
-		m_tree = new ANNkd_tree(static_cast<ANNpointArray>(m_pts.data()), m_items.size(), m_dims);
+		m_tree = new ANNkd_tree(m_pts, m_items.size(), m_dims);
 	}
 
 	void destroy() {
 		delete m_tree;
 		m_tree = nullptr;
-		m_buf.resize(0);
 		m_items.clear();
-		m_pts.clear();
+		annDeallocPts(m_pts);
 	}
 
 	template <class TIter, class DIter>
@@ -92,7 +88,7 @@ public:
 			g_runerr("Count too small: " << count);
 
 		// Turn the search item into an array of doubles castable to ANNpoint.
-		std::vector<double> pt(m_dims);
+		std::vector<ANNcoord> pt(m_dims);
 		for(size_t i = 0; i < m_dims; ++i)
 			pt[i] = item[i];
 

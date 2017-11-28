@@ -45,7 +45,7 @@ int main(int argc, char** argv) {
 	kt.build();
 	kt.knn(pt, 4, std::back_inserter(output), std::back_inserter(distances));
 
-	std::cerr << "Found items:\n";
+	std::cerr << "Found items: " << pt[0] << "," << pt[1] << "," << pt[2] << "\n";
 	for(size_t i = 0; i < output.size(); ++i)
 		std::cerr << output[i][0] << "," << output[i][1] << "," << output[i][2] << "; " << distances[i] << "\n";
 
