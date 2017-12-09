@@ -23,6 +23,29 @@ using namespace geo::util;
 namespace geo {
 namespace ds {
 
+class KDPoint {
+private:
+	double m_x, m_y, m_z;
+public:
+	KDPoint(double x, double y, double z = 0) :
+		m_x(x), m_y(y), m_z(z) {}
+	double x() const {
+		return m_x;
+	}
+	double y() const {
+		return m_y;
+	}
+	double z() const {
+		return m_y;
+	}
+	double operator[](int idx) const {
+		switch(idx % 3) {
+		case 0: return x();
+		case 1: return y();
+		default: return z(); // Who cares.
+		}
+	}
+};
 
 template <class T>
 class KDTree {
