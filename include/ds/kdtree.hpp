@@ -36,7 +36,7 @@ public:
 		return m_y;
 	}
 	double z() const {
-		return m_y;
+		return m_z;
 	}
 	double operator[](int idx) const {
 		switch(idx % 3) {
