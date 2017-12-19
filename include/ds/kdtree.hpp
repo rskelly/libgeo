@@ -93,6 +93,14 @@ public:
 		m_tree = new ANNkd_tree(m_pts, m_items.size(), m_dims);
 	}
 
+	int size() const {
+		return m_items.size();
+	}
+
+	const std::vector<T>& items() const {
+		return m_items;
+	}
+
 	void destroy() {
 		delete m_tree;
 		m_tree = nullptr;
