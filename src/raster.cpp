@@ -955,6 +955,10 @@ Grid::~Grid() {
 
 // Implementations for MemRaster
 
+bool MemRaster::mmapped() const {
+	return m_mmapped;
+}
+
 void MemRaster::checkInit() const {
 	if (m_grid == nullptr)
 		g_runerr("This instance has not been initialized.");
