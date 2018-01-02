@@ -26,6 +26,10 @@
 
 #include <gdal_priv.h>
 #include <ogr_spatialref.h>
+#include <ogr_geometry.h>
+
+#include <geos/geom/Geometry.h>
+#include <geos/geom/GeometryFactory.h>
 
 #include <Eigen/Core>
 
@@ -653,6 +657,24 @@ namespace geo {
             double getFloat(uint64_t idx, int band = 1);
             double getFloat(int col, int row, int band = 1);
 
+            /**
+             * Copies the image data from an entire row into the buffer
+             * which must be pre-allocated.
+             * @param row The row index.
+             * @param band The band number.
+             * @param buf A pre-allocated buffer to store the data.
+             */
+            int getIntRow(int row, int band, int* buf);
+
+            /**
+             * Copies the image data from an entire row into the buffer
+             * which must be pre-allocated.
+             * @param row The row index.
+             * @param band The band number.
+             * @param buf A pre-allocated buffer to store the data.
+             */
+            int getFloatRow(int row, int band, float* buf);
+
             // Set the value held at  the given index in the grid.
             void setInt(uint64_t idx, int value, int band = 1);
             void setInt(int col, int row, int value, int band = 1);
@@ -683,6 +705,117 @@ namespace geo {
 
         };
 
+        /**
+         * Class used in polygonization
+         * implementation.
+         */
+		class Poly {
+		private:
+
+			// The final geometry.
+			geos::geom::Geometry* m_final;
+			// Unique geometry ID.
+			uint64_t m_id;
+			// The minimum and maximum row
+			// index from the source raster.
+			int m_minRow, m_maxRow;
+			// The list of constituent geometries.
+			std::vector<geos::geom::Polygon*> m_geoms;
+
+			/**
+			 * Add the list of polygons to this instance with the rows
+			 * covered by them.
+			 * @param u The vector of Polygons.
+			 * @param minRow The lowest row index occupied by this geometry.
+			 * @param maxRow The highest row index occupied by this geometry.
+			 */
+			void update(std::vector<geos::geom::Polygon*>& u, int minRow, int maxRow);
+
+			/**
+			 * Updates the row indices covered by this polygon.
+			 * @param minRow The lowest row index occupied by this geometry.
+			 * @param maxRow The highest row index occupied by this geometry.
+			 */
+			void update(int minRow, int maxRow);
+
+		public:
+
+			/**
+			 * Create a polygon with the given ID and initial geometry,
+			 * for the given rows. The factory is shared by all
+			 * instances.
+			 *
+			 * @param id A unique ID.
+			 */
+			Poly(uint64_t id);
+
+			/**
+			 * Add the contents of the Poly to this instance.
+			 * @param p The Poly to add.
+			 */
+			void update(Poly& p);
+
+			/**
+			 * Add the polygon to this instance with the
+			 * rows covered by it.
+			 * @param u The Polygon to add.
+			 * @param minRow The lowest row index occupied by this geometry.
+			 * @param maxRow The highest row index occupied by this geometry.
+			 */
+			void update(geos::geom::Polygon* u, int minRow, int maxRow);
+
+			/**
+			 * Returns true if the range of rows given by start and end was finalized
+			 * within the given thread, or by a thread whose block is completed.
+			 * The checked range includes one row above and one below,
+			 * which is required to guarantee that a polygon is completed.
+			 * @param finalRows The vector containing true when a row is not finalized and true when it is.
+			 */
+			bool isRangeFinalized(const std::vector<bool> &finalRows) const;
+
+			/**
+			 * Return the pointer to the unioned polygon.
+			 */
+			geos::geom::Geometry* getPoly() const;
+
+			/**
+			 * Generate the unioned polygon from its parts. Remove dangles and holes if required.
+			 * @param fact The GeometryFactory.
+			 * @param removeHoles True, if it is desired that holes in polygons be removed.
+			 * @param removeDangles True, if it is desired that single-pixel artifacts, attached at the corners, be removed.
+			 */
+			void generate(const geos::geom::GeometryFactory::unique_ptr& fact, bool removeHoles, bool removeDangles);
+
+			/**
+			 * Return the final Geometry.
+			 */
+			geos::geom::Geometry* final() const;
+
+			/**
+			 * Return the unique ID.
+			 */
+			uint64_t id() const;
+
+			/**
+			 * Return the minimum row index covered by the geometry.
+			 */
+			int minRow() const;
+
+			/**
+			 * Return the maximum row index covered by the geometry.
+			 */
+			int maxRow() const;
+
+			/**
+			 * Return a copy of the geoms list.
+			 */
+			std::vector<geos::geom::Polygon*> geoms() const;
+
+
+			~Poly();
+
+		};
+
         class G_DLL_EXPORT Raster : public Grid {
         	friend class MemRaster;
         private:
@@ -703,8 +836,53 @@ namespace geo {
         protected:
             GDALDataset* ds() const;
 
-        public:
+            /**
+             * Performs the work of reading from the raster and generating polygons.
+             *
+             * @param running An atomic count of the number of running threads.
+             * @param cancel A bool which is true when the operation should be cancelled.
+             * @param gf The GeometryFactory.
+             * @param finished A vector with each element corresponding to a row; true if row is completed.
+             * @param polyQ Queue containing Polys for processing.
+             * @param bmtx A mutex for block.
+             * @param pmtx A mutex for polyQ.
+             * @param fmtx A mutex for finished.
+             * @param bufSize The size of the buffer for each row.
+             * @param block The current processing block.
+             * @param band The raster band to process.
+             * @param nd The nodata value.
+			 * @param removeHoles True, if it is desired that holes in polygons be removed.
+			 * @param removeDangles True, if it is desired that single-pixel artifacts, attached at the corners, be removed.
+             * @param status The status indicator object. May be null.
+             */
+            void polygonizeBlock(int* block, bool* cancel, geos::geom::GeometryFactory::unique_ptr* gf,
+            		std::vector<bool>* finished,
+					std::unordered_map<uint64_t, std::unique_ptr<Poly> >* polys,
+					std::queue<std::unique_ptr<Poly> >* polyQ,
+            		std::mutex* bmtx, std::mutex* pmtx, std::mutex* fmtx,
+            		int bufSize, int band, bool removeHoles, bool removeDangles,
+					Status* status = nullptr);
 
+
+            /**
+             * Performs the work of moving completed polygonized geometries into
+             * the OGR layer from the queue produced by polygonizeBlock threads.
+             *
+             * @param polys The queue containing Poly instances.
+             * @param gctx The GEOS context for creating geometries.
+             * @param layer The OGR layer to which new geometries are added.
+             * @param pmtx The mutex for the polys queue.
+             * @param fmtx The mutex for the feature ID (fid).
+             * @param omtx The mutex for the OGRLayer instance (layer).
+             * @param running The number of currently running processing threads.
+             * @param fid The feature ID.
+             */
+            void transferPolys(std::queue<std::unique_ptr<Poly> >* polys,
+            		GEOSContextHandle_t* gctx, OGRLayer* layer,
+            		std::mutex* pmtx, std::mutex* fmtx, std::mutex* omtx,
+            		std::atomic<bool>* running, uint64_t* fid);
+
+        public:
             // Create a new raster for writing with a template.
             Raster(const std::string &filename, const GridProps &props);
 
@@ -763,9 +941,27 @@ namespace geo {
             int getInt(int col, int row, int band = 1);
             int getInt(uint64_t idx, int band = 1);
 
+            /**
+             * Copies the image data from an entire row into the buffer
+             * which must be pre-allocated.
+             * @param row The row index.
+             * @param band The band number.
+             * @param buf A pre-allocated buffer to store the data.
+             */
+            int getIntRow(int row, int band, int* buf);
+
             double getFloat(double x, double y, int band = 1);
             double getFloat(int col, int row, int band = 1);
             double getFloat(uint64_t idx, int band = 1);
+
+            /**
+             * Copies the image data from an entire row into the buffer
+             * which must be pre-allocated.
+             * @param row The row index.
+             * @param band The band number.
+             * @param buf A pre-allocated buffer to store the data.
+             */
+            int getFloatRow(int row, int band, double* buf);
 
             // Set an pixel value.
             void setInt(double x, double y, int v, int band = 1);
@@ -787,7 +983,7 @@ namespace geo {
 
             // Vectorize the raster.
             void polygonize(const std::string &filename, const std::string &layerName, 
-                const std::string &driver, uint16_t srid = 0, uint16_t band = 1,
+                const std::string &driver, uint16_t srid = 0, uint16_t band = 1, uint16_t threads = 1,
 				bool removeHoles = false, bool removeDangles = false,
 				geo::util::Status *status = nullptr, bool *cancel = nullptr);
 
