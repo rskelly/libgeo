@@ -33,3 +33,4 @@ makefiles
 /.project
 .settings
 /build/
+build

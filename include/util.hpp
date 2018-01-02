@@ -1,21 +1,6 @@
 #ifndef __UTIL_HPP__
 #define __UTIL_HPP__
 
-/*
-#include <set>
-#include <list>
-#include <fstream>
-#include <vector>
-#include <condition_variable>
-#include <mutex>
-#include <queue>
-#include <cmath>
-#include <sstream>
-#include <string>
-#include <vector>
-#include <tuple>
-*/
-
 #include <chrono>
 #include <unordered_map>
 #include <map>
@@ -34,7 +19,7 @@ namespace std {
 #endif
 
 #include <boost/interprocess/mapped_region.hpp>
-#include <boost/interprocess/file_mapping.hpp>
+#include <boost/interprocess/shared_memory_object.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/algorithm/string/join.hpp>
 #include <boost/algorithm/string/case_conv.hpp>
@@ -76,15 +61,27 @@ namespace geo {
         public:
             void *buf;
 
-            Buffer(uint64_t size) {
-                buf = std::malloc(size);
-				if (!buf) {
-					g_runerr("Failed to allocate buffer.");
-				}
+            Buffer() : buf(nullptr) {}
+
+            Buffer(size_t size) :
+            	buf(nullptr) {
+            	resize(size);
+            }
+
+            void resize(size_t size) {
+            	if(buf) {
+            		std::free(buf);
+            		buf = nullptr;
+            	}
+            	if(size > 0) {
+					buf = std::malloc(size);
+					if (!buf)
+						g_runerr("Failed to allocate buffer.");
+            	}
             }
 
             ~Buffer() {
-                std::free(buf);
+            	resize(0);
             }
         };
 
@@ -231,20 +228,17 @@ namespace geo {
         // Maintains a memory-mapped file, and gives access to the mapped data.
         class MappedFile {
         private:
-			bool m_mapped;
             uint64_t m_size;
 			std::string m_name;
-			std::string m_shmemName;
 			std::unique_ptr<Buffer> m_data;
             boost::interprocess::mapped_region* m_region;
-			boost::interprocess::file_mapping* m_file;
+			boost::interprocess::shared_memory_object* m_shm;
 
         public:
 
             // Create a mapped file with the given size.
-			MappedFile(const std::string& root, uint64_t size, bool mapped = true);
-            MappedFile(uint64_t size, bool mapped = true);
-            MappedFile(bool mapped = true);
+			MappedFile(const std::string& name, uint64_t size);
+			MappedFile(uint64_t size);
 
             const std::string& name() const;
 
@@ -287,7 +281,9 @@ namespace geo {
 
         };
 
-        // Provides utility methods for working with LiDAR data.
+        /**
+         * Provides utility methods.
+         */
         class Util {
         public:
 
@@ -453,11 +449,17 @@ namespace geo {
 			// Generate an MD5 hash of the string.
 			static std::string md5(const std::string& input);
 			
+			static std::string sha256(const std::string& input);
+
+			static std::string sha256File(const std::string& file);
+
             // Move the file.
             static void copyfile(const std::string& srcfile, const std::string& dstfile);
 
             // Return the basename of the file.
             static std::string basename(const std::string& filename);
+
+            static std::string filename(const std::string& filename);
 
             // Create a temporary file at the given root folder. If no root is given,
             // a relative path is created.
@@ -490,6 +492,10 @@ namespace geo {
             // Make a directory.
             static bool mkdir(const std::string& dir);
 
+            static bool isFile(const std::string& path);
+
+            static bool isDir(const std::string& path);
+
             // Get the parent directory
             static std::string parent(const std::string& filename);
 
@@ -503,14 +509,16 @@ namespace geo {
             static size_t dirlist(T iter, const std::string& dir, const std::string& ext = std::string()) {
                 using namespace boost::filesystem;
                 using namespace boost::algorithm;
+                using namespace boost::system;
                 int i = 0;
                 if (is_regular_file(dir)) {
                     *iter = dir;
                     ++iter;
                     ++i;
                 } else {
+                    error_code ec;
                     directory_iterator end;
-                    directory_iterator di(dir);
+                    directory_iterator di(dir, ec);
                     for (; di != end; ++di) {
                         if (!ext.empty()) {
                             std::string p(di->path().string());

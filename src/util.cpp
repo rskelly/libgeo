@@ -7,6 +7,7 @@
 #include <boost/filesystem.hpp>
 
 #include "crypto/md5.hpp"
+#include "crypto/uuid.hpp"
 #include "util.hpp"
 
 using namespace geo::util;
@@ -481,6 +482,11 @@ std::string Util::basename(const std::string &filename) {
 	return boost::filesystem::basename(filename);
 }
 
+std::string Util::filename(const std::string &filename) {
+	boost::filesystem::path p(filename);
+	return p.filename().string();
+}
+
 std::string Util::pathJoin(const std::string& a, const std::string& b) {
 	boost::filesystem::path pa(a);
 	boost::filesystem::path pb(b);
@@ -510,6 +516,18 @@ bool Util::mkdir(const std::string &dir) {
 	if (!boost::filesystem::exists(bdir))
 		return create_directories(bdir);
 	return true;
+}
+
+bool Util::isDir(const std::string& path) {
+	boost::filesystem::path p(path);
+	return boost::filesystem::is_directory(p);
+
+}
+
+bool Util::isFile(const std::string& path) {
+	boost::filesystem::path p(path);
+	return boost::filesystem::is_regular(p);
+
 }
 
 std::string Util::parent(const std::string& file) {
@@ -573,34 +591,64 @@ std::string Util::md5(const std::string& input) {
 	return m.hexdigest();
 }
 
-MappedFile::MappedFile(const std::string& name, uint64_t size, bool mapped) :
-	m_mapped(mapped),
+#include "openssl/sha.h"
+
+std::string Util::sha256(const std::string& input) {
+	const char* str = input.c_str();
+	char outputBuffer[65];
+	unsigned char hash[SHA256_DIGEST_LENGTH];
+	SHA256_CTX sha256;
+	SHA256_Init(&sha256);
+	SHA256_Update(&sha256, str, strlen(str));
+	SHA256_Final(hash, &sha256);
+	for(int i = 0; i < SHA256_DIGEST_LENGTH; i++)
+		sprintf(outputBuffer + (i * 2), "%02x", hash[i]);
+	outputBuffer[64] = 0;
+	return std::string(outputBuffer);
+}
+
+std::string Util::sha256File(const std::string& file) {
+	const char *path = file.c_str();
+	char outputBuffer[65];
+	std::FILE *f = std::fopen(path, "rb");
+	if(!f)
+		throw std::runtime_error("Failed to open file for hashing.");
+	unsigned char hash[SHA256_DIGEST_LENGTH];
+	SHA256_CTX sha256;
+	SHA256_Init(&sha256);
+	const int bufSize = 32768;
+	char *buffer = (char*) malloc(bufSize);
+	if(!buffer)
+		throw std::runtime_error("Failed to allocate buffer for hashing.");
+	int bytesRead = 0;
+	while((bytesRead = std::fread(buffer, 1, bufSize, f)))
+		SHA256_Update(&sha256, buffer, bytesRead);
+	std::fclose(f);
+	SHA256_Final(hash, &sha256);
+	for(int i = 0; i < SHA256_DIGEST_LENGTH; i++)
+		sprintf(outputBuffer + (i * 2), "%02x", hash[i]);
+	free(buffer);
+	return std::string(outputBuffer);
+}
+
+MappedFile::MappedFile(const std::string& name, uint64_t size) :
 	m_size(0),
-	m_name("dijital"),
+	m_name(name),
 	m_region(nullptr),
-	m_file(nullptr) {
+	m_shm(nullptr) {
 
 	if (size > 0)
 		reset(size);
 }
 
-MappedFile::MappedFile(uint64_t size, bool mapped) :
-	m_mapped(mapped),
+MappedFile::MappedFile(uint64_t size) :
 	m_size(0),
-	m_name("dijital"),
+	m_name(geo::crypto::UUID::uuid()),
 	m_region(nullptr),
-	m_file(nullptr) {
+	m_shm(nullptr) {
 
 	if (size > 0)
 		reset(size);
-}
-
-MappedFile::MappedFile(bool mapped) :
-	m_mapped(mapped),
-	m_size(0),
-	m_name("dijital"),
-	m_region(nullptr),
-	m_file(nullptr) {
 }
 
 const std::string& MappedFile::name() const {
@@ -630,69 +678,28 @@ bool MappedFile::read(void* output, uint64_t position, uint64_t length) {
     return true;
 }
 
-static uint64_t s_mappedIdx = 0;
-
 void MappedFile::reset(uint64_t size) {
 	using namespace boost::interprocess;
 	#pragma omp critical(__mapped_file_reset__)
 	{
 		size = fixSize(size);
-		if(m_size > 0 && size > m_size) {
-			uint64_t oldSize = m_size;
+		if(size != 0 && size != m_size) {
 			m_size = size;
-			if(m_mapped) {
-				if (m_region) {
-					m_region->flush();
-					delete m_region;
-				}
-				if (m_file)
-					delete m_file;
-
-				std::FILE* f = std::fopen(m_shmemName.c_str(), "w+");
-				if(f) {
-					char buf = 0;
-					std::fseek(f, m_size, SEEK_SET);
-					std::fwrite(&buf, m_size, 1, f);
-					std::fclose(f);
-					m_file = new file_mapping(m_shmemName.c_str(), read_write);
-					m_region = new mapped_region(*m_file, read_write);
-				}
-			} else {
-				std::unique_ptr<Buffer> buf(new Buffer(m_size));
-				if(m_data.get())
-					std::memcpy(buf->buf, m_data->buf, oldSize);
-				m_data.reset(buf.release());
+			if (m_region) {
+				m_region->flush();
+				delete m_region;
 			}
-		} else {
-			m_size = size;
-			if(m_mapped) {
-				if (m_region) {
-					m_region->flush();
-					delete m_region;
-				}
-				if (m_file)
-					delete m_file;
-
-				std::stringstream ss;
-				ss << m_name << "_" << s_mappedIdx++;
-				m_shmemName = Util::pathJoin(Util::tmpDir(), ss.str().c_str());
-				{
-					 file_mapping::remove(m_shmemName.c_str());
-					 std::filebuf fbuf;
-					 fbuf.open(m_shmemName.c_str(), std::ios_base::in | std::ios_base::out | std::ios_base::trunc | std::ios_base::binary);
-					 fbuf.pubseekoff(m_size - 1, std::ios_base::beg);
-					 fbuf.sputc(0);
-				}
-				m_file = new file_mapping(m_shmemName.c_str(), read_write);
-				m_region = new mapped_region(*m_file, read_write);
-			} else {
-				m_data.reset(new Buffer(m_size));
-			}
+			if (m_shm)
+				delete m_shm;
+			m_shm = new shared_memory_object(open_or_create, m_name.c_str(), read_write);
+			m_shm->truncate(m_size);
+			m_region = new mapped_region(*m_shm, read_write);
 		}
 	}
 }
+
 void* MappedFile::data() {
-	return m_mapped ? (m_region ? m_region->get_address() : nullptr) : m_data->buf;
+	return m_region ? m_region->get_address() : nullptr;
 }
 
 
@@ -705,11 +712,10 @@ size_t MappedFile::pageSize() {
 }
 
 MappedFile::~MappedFile() {
-	if(m_mapped && m_region) {
+	if(m_region) {
 		m_region->flush();
-		boost::interprocess::file_mapping::remove(m_shmemName.c_str());
 		delete m_region;
-		delete m_file;
+		delete m_shm;
 	}
 }
 

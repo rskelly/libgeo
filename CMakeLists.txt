@@ -7,12 +7,12 @@ set (CMAKE_CXX_STANDARD_REQUIRED ON)
 set (CMAKE_CXX_EXTENSIONS OFF)
 set (CMAKE_POSITION_INDEPENDENT_CODE ON)
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -D_GLIBCXX_PARALLEL")
+	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-pragmas")
 
 if (${APPLE})
 	set (CMAKE_C_COMPILER /usr/local/bin/clang-omp CACHE STRING "C compiler" FORCE)
 	set (CMAKE_CXX_COMPILER /usr/local/bin/clang-omp++ CACHE STRING "C++ compiler" FORCE)
 	set (CMAKE_SHARED_LIBRARY_CREATE_CXX_FLAGS "${CMAKE_SHARED_LIBRARY_CREATE_CXX_FLAGS} -undefined dynamic_lookup")
-	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-pragmas")
 elseif(${WIN32})
 	set (Boost_COMPILER -vc140)
 	set (Boost_NO_SYSTEM_PATHS ON)
@@ -27,10 +27,11 @@ elseif(${WIN32})
 	set (libLAS_INCLUDE_DIR "C:\\dev\\gisinternals\\include")
 	set (libLAS_LIBRARY_DIRS "C:\\dev\\gisinternals\\lib")
 else()
-	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-pragmas")
+	include_directories (BEFORE SYSTEM include)
+	include_directories (BEFORE SYSTEM ann/include)
 	include_directories (BEFORE SYSTEM /usr/include/eigen3)
+	include_directories (BEFORE SYSTEM /usr/include/gdal)
 	include_directories (BEFORE SYSTEM /opt/include)
-	link_directories (BEFORE SYSTEM /opt/lib)
 endif()
 
 set (Boost_DEBUG OFF)
@@ -39,10 +40,10 @@ set (Boost_USE_STATIC_RUNTIME OFF)
 
 find_package (OpenMP REQUIRED)
 find_package (Boost COMPONENTS system filesystem date_time REQUIRED)
-find_package (GDAL 2.1 REQUIRED)
+find_package (GDAL 2.2 REQUIRED)
 
-find_library (GEOS_LIBRARY geos)
-message (STATUS "GEOS: ${GEOS_LIBRARY}")
+find_library (GEOS_LIBRARY geos PATHS /opt/lib NO_DEFAULT_PATH)
+find_library (CRYPTO_LIB crypto)
 
 if(OPENMP_FOUND)
 	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_C_FLAGS} -fopenmp")
@@ -53,47 +54,30 @@ endif()
 project (libgeo)
 
 
-# Configure directories
+# Configure directories###################################################################################
 
 link_directories(. ${Boost_LIBRARY_DIRS} ${LIB_PATH})
 
 # Build support libraries ################################################################################
 
-add_library (geo STATIC src/geo.cpp)
-target_include_directories(geo PUBLIC include)
+add_library (geo SHARED src/geo.cpp)
 
+add_library (geoutil SHARED src/util.cpp src/md5.cpp)
+target_link_libraries (geoutil geo rt ${Boost_LIBRARIES} ${GDAL_LIBRARY} ${CRYPTO_LIB})
 
-add_library (util STATIC src/util.cpp src/md5.cpp)
-target_include_directories(util PUBLIC include ${INC_PATH} ${Boost_INCLUDE_DIRS} ${GDAL_INCLUDE_DIR})
-if (UNIX AND NOT APPLE)
-	target_link_libraries (util ${Boost_LIBRARIES} ${GDAL_LIBRARY} geo rt)
-else ()
-	target_link_libraries (util ${Boost_LIBRARIES} ${GDAL_LIBRARY} geo)
-endif ()
+add_library (geodb SHARED src/db.cpp)
+target_link_libraries (geodb geo geoutil ${GDAL_LIBRARY})
 
-add_library (db STATIC src/db.cpp)
-target_include_directories(db PUBLIC include ${INC_PATH} ${Boost_INCLUDE_DIRS} ${GDAL_INCLUDE_DIR})
-target_link_libraries (db ${GDAL_LIBRARY} util geo)
+add_library (georaster SHARED src/raster.cpp)
+target_link_libraries (georaster geo geoutil geodb ${GEOS_LIBRARY} ${GDAL_LIBRARY})
 
-add_library (raster STATIC src/raster.cpp)
-#target_include_directories(raster PUBLIC include ${INC_PATH} ${Boost_INCLUDE_DIRS} ${GDAL_INCLUDE_DIR})
-target_link_libraries (raster ${GDAL_LIBRARY} ${GEOS_LIBRARY} util geo db)
+add_library (geoann SHARED ann/src/ANN.cpp ann/src/brute.cpp ann/src/kd_tree.cpp ann/src/kd_util.cpp 
+	ann/src/kd_split.cpp ann/src/kd_dump.cpp ann/src/kd_search.cpp ann/src/kd_pr_search.cpp 
+	ann/src/kd_fix_rad_search.cpp ann/src/bd_tree.cpp ann/src/bd_search.cpp ann/src/bd_pr_search.cpp 
+	ann/src/bd_fix_rad_search.cpp ann/src/perf.cpp)
 
-# Build tests ############################################################################################
+# Tests ##################################################################################################
 
-add_executable (polygonize src/apps/polygonize.cpp)
-target_include_directories(polygonize PUBLIC include)
-target_link_libraries (polygonize PUBLIC raster)
-
-#add_executable (smooth_test src/tests/smooth.cpp)
-#target_include_directories(smooth_test PUBLIC include)
-#target_link_libraries (smooth_test PUBLIC raster)
-
-add_executable (fqtree_test src/tests/fqtree.cpp)
-target_include_directories(fqtree_test PUBLIC include)# ${STXXL_INCLUDE_DIRS})
-target_link_libraries (fqtree_test PUBLIC util)# ${STXXL_LIBRARIES})
-
-add_executable (mqtree_test src/tests/mqtree.cpp)
-target_include_directories(mqtree_test PUBLIC include)# ${STXXL_INCLUDE_DIRS})
-target_link_libraries (mqtree_test PUBLIC util)# ${STXXL_LIBRARIES})
+add_executable (kdtree_test src/tests/kdtree_test.cpp)
+target_link_libraries (kdtree_test geoann ${Boost_LIBRARIES})
 

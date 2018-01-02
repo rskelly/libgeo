@@ -8,163 +8,140 @@
 #ifndef INCLUDE_DS_KDTREE_HPP_
 #define INCLUDE_DS_KDTREE_HPP_
 
-namespace rs {
+#include <vector>
+#include <set>
+#include <algorithm>
+#include <iterator>
+
+#include "ANN/ANN.h"
+
+#include "geo.hpp"
+#include "util.hpp"
+
+using namespace geo::util;
+
+namespace geo {
 namespace ds {
 
-template <class T>
-class KDTreeSorter {
+class KDPoint {
 private:
-	int m_idx;
+	double m_x, m_y, m_z;
 public:
-	KDTreeSorter(int idx) :
-		m_idx(idx) {
+	KDPoint(double x, double y, double z = 0) :
+		m_x(x), m_y(y), m_z(z) {}
+	double x() const {
+		return m_x;
 	}
-
-	bool operator()(T* a, T* b) {
-		return (*a)[m_idx] < (*b)[m_idx];
+	double y() const {
+		return m_y;
 	}
-};
-
-template <class T>
-class KDTreeNDSorter {
-private:
-	int m_dims;
-	T* m_item;
-
-public:
-	KDTreeNDSorter(T* item, int dims) :
-		m_item(item),
-		m_dims(dims) {
+	double z() const {
+		return m_z;
 	}
-
-	bool operator()(T* a, T* b) {
-		double dista = 0;
-		double distb = 0;
-		for(int i = 0; i < m_dims; ++i) {
-			dista += g_sq((*a)[i] - (*m_item)[i]);
-			distb += g_sq((*b)[i] - (*m_item)[i]);
+	double operator[](int idx) const {
+		switch(idx % 3) {
+		case 0: return x();
+		case 1: return y();
+		default: return z(); // Who cares.
 		}
-		return dista < distb;
 	}
 };
 
 template <class T>
 class KDTree {
 private:
-	KDTree* m_left;
-	KDTree* m_right;
-	KDTree* m_parent;
-	int m_dims;
-	int m_depth;
-	T* m_item;
-
-	KDTree(int dims, int depth, KDTree* parent) :
-		m_left(nullptr), m_right(nullptr),
-		m_parent(parent),
-		m_dims(dims),
-		m_depth(depth),
-		m_item(nullptr) {
-	}
-
-	double dist(T* a,  T* b) {
-		double dist = 0;
-		for(int i = 0; i < m_dims; ++i)
-			dist += g_sq((*a)[i] - (*b)[i]);
-		return dist;
-	}
-
-	double dist(T* a,  T* b, int dim) {
-		return g_sq((*a)[dim] - (*b)[dim]);
-	}
+	std::vector<T> m_items;
+	ANNpointArray m_pts;
+	ANNkd_tree* m_tree;
+	size_t m_dims;
 
 public:
 
-	KDTree(int dims) :
-		KDTree(dims, 0, nullptr) {
+	KDTree(size_t dims) :
+		m_pts(nullptr),
+		m_tree(nullptr),
+		m_dims(dims) {
 	}
 
-	template <class U>
-	void add(U begin, U end) {
-		std::vector<T*> items(begin, end);
-		add(items);
+	void add(T& item) {
+		m_items.push_back(item);
 	}
 
-	void add(std::vector<T*>& items) {
-		KDTreeSorter sorter(m_depth % m_dims);
-		std::sort(items.begin(), items.end(), sorter);
-		int size = items.size();
-		m_item = items[size / 2];
-		if(size > 1) {
-			m_left = new KDTree(m_dims, m_depth + 1);
-			m_right = new KDTree(m_dims, m_depth + 1);
-			m_left->add(items.begin(), items.begin() + size / 2);
-			m_right->add(items.begin + size / 2 + 1, items.end());
-		}
+	template <class Iter>
+	void add(Iter begin, Iter end) {
+		m_items.insert(m_items.begin(), begin, end);
 	}
 
-	template <class U>
-	void knn(const T& item, int count, U iter) {
+	void build() {
 
-		std::vector<T*> items;
+		if(m_items.size() < 1)
+			g_runerr("Not enough items.");
 
-		// Crawl down the tree looking for the closest leaf.
-		KDTree* n = this;
-		while(n) {
-			int idx = n->m_depth % m_dims;
-			if(item[idx] < m_item[idx]) {
-				if(!n->m_left)
-					break;
-				n = n->m_left;
-			} else {
-				if(!n->m_right)
-					break;
-				n = n->m_right;
-			}
+		// Clean up existing tree, etc.
+		if(m_tree)
+			destroy();
+
+		// Set up the points buffer.
+		m_pts = annAllocPts(m_items.size(), m_dims);
+
+		// Write points into the buffer and save pointers.
+		for(size_t i = 0; i < m_items.size(); ++i) {
+			for(size_t j = 0; j < m_dims; ++j)
+				m_pts[i][j] = m_items[i][j];
 		}
+		// Set up the tree.
+		m_tree = new ANNkd_tree(m_pts, m_items.size(), m_dims);
+	}
 
-		T* best = n->m_item;
-		items.push_front(best);
+	int size() const {
+		return m_items.size();
+	}
 
-		// Get the distance to the leaf item.
-		double d = dist(&item, items.front());
+	const std::vector<T>& items() const {
+		return m_items;
+	}
 
-		// Crawl back up the tree looking for closer items.
-		n = n->m_parent;
-		while(n) {
-			// If the current point is closer to the hyperplane than the
-			// current distance, search the other side of the tree.
-			if(dist(&item, n->m_item, n->m_depth % m_dims) < d) {
-				n->knn(item, count, std::back_inserter(items));
-			}
-			// Trim the array if it's too large.
-			if(items.size() > count) {
-				KDTreeNDSorter sorter(&item, m_dims);
-				std::sort(items.begin(), items.end(), sorter);
-				items.resize(count);
-			}
+	void destroy() {
+		delete m_tree;
+		m_tree = nullptr;
+		m_items.clear();
+		annDeallocPts(m_pts);
+	}
 
-			n = n->m_parent;
-		}
+	template <class TIter, class DIter>
+	void knn(const T& item, size_t count, TIter titer, DIter diter, double eps = 0.0) {
 
-		// Trim the array if it's too large.
-		if(items.size() > count) {
-			KDTreeNDSorter sorter(&item, m_dims);
-			std::sort(items.begin(), items.end(), sorter);
-			items.resize(count);
-		}
+		if(!m_tree)
+			g_runerr("Tree not build. Forget to call build?");
+		if(count > m_items.size())
+			count = m_items.size();
+		if(count < 1)
+			g_runerr("Count too small: " << count);
 
-		// Copy to output iterator.
-		for(T* i : items) {
-			*iter = i;
-			++iter;
+		// Turn the search item into an array of doubles castable to ANNpoint.
+		std::vector<ANNcoord> pt(m_dims);
+		for(size_t i = 0; i < m_dims; ++i)
+			pt[i] = item[i];
+
+		// Create arrays for indices and distances.
+		std::vector<ANNidx> idx(count);
+		std::vector<ANNdist> dist(count);
+
+		// Perform search.
+		m_tree->annkSearch(static_cast<ANNpoint>(pt.data()), count, static_cast<ANNidxArray>(idx.data()),
+				static_cast<ANNdistArray>(dist.data()), eps);
+
+		// Populate output iterators.
+		for(size_t i = 0; i < count; ++i) {
+			*titer = m_items[idx[i]];
+			++titer;
+			*diter = std::sqrt(dist[i]);
+			++diter;
 		}
 	}
 
 	~KDTree() {
-		if(m_left)
-			delete m_left;
-		if(m_right)
-			delete m_right;
+		destroy();
 	}
 };
 

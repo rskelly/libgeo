@@ -643,6 +643,8 @@ namespace geo {
 
             const GridProps& props() const;
 
+            bool mmapped() const;
+
             // Initialize with the given number of cols and rows.
             // (Re)allocates memory for the internal grid.
             void init(const GridProps &props, bool mapped = false);
