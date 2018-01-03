@@ -81,3 +81,5 @@ add_library (geoann SHARED ann/src/ANN.cpp ann/src/brute.cpp ann/src/kd_tree.cpp
 add_executable (kdtree_test src/tests/kdtree_test.cpp)
 target_link_libraries (kdtree_test geoann ${Boost_LIBRARIES})
 
+add_executable (polygonize src/apps/polygonize.cpp)
+target_link_libraries (polygonize geo geoutil georaster ${Boost_LIBRARIES})

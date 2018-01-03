@@ -9,7 +9,7 @@
 
 void usage() {
 	std::cerr << "Usage: polygonize <input raster> <output vector> [field name (dn)]\n"
-			<< " -f <format>     The output format. Any of the available "
+			<< " -f <format>     The output format. Any of the available\n"
 			<< "                 OGR drivers. Default SQLite.\n"
 			<< " -s <srid>       The spatial reference ID. Default 0.\n"
 			<< " -b <band>       The band. Default 1.\n"
