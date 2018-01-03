@@ -1904,7 +1904,6 @@ void Raster::polygonizeBlock(int* block, bool* cancel,
 			{
 				std::lock_guard<std::mutex> lk(*fmtx);
 				(*finished)[r] = true;
-				std::cerr << "row " << r << "\n";
 			}
 
 		}
