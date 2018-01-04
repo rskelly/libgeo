@@ -1976,43 +1976,6 @@ public:
 		m_polyQueueCond.notify_all();
 	}
 
-	void polyQueueTransfer() {
-
-		while(true) {
-
-			if(*m_cancel || !m_running)
-				break;
-
-			std::list<std::unique_ptr<Poly> > geoms0;
-			{
-				std::unique_lock<std::mutex> lk(m_polyMapMtx);
-				while(m_polyMap.empty())
-					m_polyMapCond.wait(lk);
-
-				for(auto it = m_polyMap.begin(); it != m_polyMap.end(); ) {
-					if(it->second->isRangeFinalized(m_finished)) {
-						geoms0.push_back(std::unique_ptr<Poly>(it->second.release()));
-						it = m_polyMap.erase(it);
-					} else {
-						++it;
-					}
-				}
-			}
-
-			for(std::unique_ptr<Poly>& p : geoms0) {
-				//p->generate(m_geomFactory, m_removeHoles, m_removeDangles);
-				{
-					std::lock_guard<std::mutex> lk(m_polyQueueMtx);
-					m_polyQueue.push(std::move(p));
-				}
-			}
-
-			m_polyQueueCond.notify_one();
-		}
-
-		std::cerr << "poly transfer queue finished\n";
-	}
-
 	void polyReadBlocks() {
 
 		// Get cols, rows an nodata.
@@ -2136,6 +2099,42 @@ public:
 
 	}
 
+	void polyQueueTransfer() {
+
+		while(true) {
+
+			if(*m_cancel || !m_running)
+				break;
+
+			std::list<std::unique_ptr<Poly> > geoms0;
+			{
+				std::unique_lock<std::mutex> lk(m_polyMapMtx);
+				while(m_polyMap.empty())
+					m_polyMapCond.wait(lk);
+				for(auto it = m_polyMap.begin(); it != m_polyMap.end(); ) {
+					if(it->second->isRangeFinalized(m_finished)) {
+						geoms0.push_back(std::move(it->second));
+						it = m_polyMap.erase(it);
+					} else {
+						++it;
+					}
+				}
+			}
+
+			for(std::unique_ptr<Poly>& p : geoms0) {
+				p->generate(m_geomFactory, m_removeHoles, m_removeDangles);
+				{
+					std::lock_guard<std::mutex> lk(m_polyQueueMtx);
+					m_polyQueue.push(std::move(p));
+				}
+			}
+
+			m_polyQueueCond.notify_one();
+		}
+
+		std::cerr << "poly transfer queue finished\n";
+	}
+
 	void polyWriteQueue() {
 
 		// Use the first thread in the group for writing polys to the DB.
@@ -2205,14 +2204,15 @@ void Raster::polygonize(const std::string& filename, const std::string& layerNam
 	int block = 0;
 	int bufSize = 128;
 
-	// Set up the shared context.
-	PolyContext ctx(this, status, &block, cancel, bufSize, band, removeHoles, removeDangles);
-
-	ctx.initOutput(driver, filename, layerName, srid);
-
 	// Remove the original file; some can't be overwritten directly.
 	// This will not take care of any auxillary files (e.g. shapefiles)
 	Util::rm(filename);
+
+	// Set up the shared context.
+	PolyContext ctx(this, status, &block, cancel, bufSize, band, removeHoles, removeDangles);
+
+	// Initialize database.
+	ctx.initOutput(driver, filename, layerName, srid);
 
 	// Start the processing threads.
 	std::vector<std::thread> pts;
@@ -2225,7 +2225,7 @@ void Raster::polygonize(const std::string& filename, const std::string& layerNam
 	// Start the write thread.
 	std::thread transferT2(&PolyContext::polyWriteQueue, &ctx);
 
-	for(uint16_t i = 0; i < threads - 1; ++i)
+	for(uint16_t i = 0; i < threads - 2; ++i)
 		pts[i].join();
 
 	ctx.running(false);
