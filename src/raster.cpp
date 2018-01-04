@@ -2089,11 +2089,13 @@ public:
 				}
 
 				// Notify the transfer threads of an update.
-				m_polyMapCond.notify_all();
+				notifyTransfer();
 
 			}
 
 		} // while
+
+		notifyTransfer();
 
 		std::cerr << "read block finished\n";
 
@@ -2103,14 +2105,15 @@ public:
 
 		while(true) {
 
-			if(*m_cancel || !m_running)
+			if(*m_cancel || (!m_running && m_polyMap.empty()))
 				break;
 
 			std::list<std::unique_ptr<Poly> > geoms0;
 			{
 				std::unique_lock<std::mutex> lk(m_polyMapMtx);
-				while(m_polyMap.empty())
+				while(!*m_cancel && m_running && m_polyMap.empty())
 					m_polyMapCond.wait(lk);
+
 				for(auto it = m_polyMap.begin(); it != m_polyMap.end(); ) {
 					if(it->second->isRangeFinalized(m_finished)) {
 						geoms0.push_back(std::move(it->second));
@@ -2129,7 +2132,8 @@ public:
 				}
 			}
 
-			m_polyQueueCond.notify_one();
+			if(!m_polyQueue.empty())
+				notifyWrite();
 		}
 
 		std::cerr << "poly transfer queue finished\n";
@@ -2141,18 +2145,20 @@ public:
 		// The loop runs as long as the queue isn't "finalized" and is not empty.
 		while(true) {
 
+			if(*m_cancel || (!m_running && m_polyQueue.empty()))
+				break;
+
+			std::unique_ptr<Poly> p;
 			// Wait for a wake-up.
 			{
 				std::unique_lock<std::mutex> lk(m_polyQueueMtx);
-				while(*m_cancel || (m_running && m_polyQueue.empty()))
+				while(!*m_cancel && m_running && m_polyQueue.empty())
 					m_polyQueueCond.wait(lk);
-			}
-
-			// Grab the element from the queue, if there is one.
-			std::unique_ptr<Poly> p;
-			if(!m_polyQueue.empty()) {
-				p.swap(m_polyQueue.front());
-				m_polyQueue.pop();
+				// Grab the element from the queue, if there is one.
+				if(!m_polyQueue.empty()) {
+					p.swap(m_polyQueue.front());
+					m_polyQueue.pop();
+				}
 			}
 
 			// If not element, decide whether to quit or loop.
@@ -2197,7 +2203,6 @@ void Raster::polygonize(const std::string& filename, const std::string& layerNam
 
 	if(threads < 3)
 		threads = 3;
-
 	if(cancel == nullptr)
 		cancel = &s_cancel;
 
@@ -2215,9 +2220,9 @@ void Raster::polygonize(const std::string& filename, const std::string& layerNam
 	ctx.initOutput(driver, filename, layerName, srid);
 
 	// Start the processing threads.
-	std::vector<std::thread> pts;
-	for(uint16_t i = 0; i < threads - 2; ++i)
-		pts.push_back(std::thread(&PolyContext::polyReadBlocks, &ctx));
+	std::list<std::thread> readTs;
+	for(int i = 0; i < threads - 2; ++i)
+		readTs.push_back(std::thread(&PolyContext::polyReadBlocks, &ctx));
 
 	// Start the transfer thread.
 	std::thread transferT1(&PolyContext::polyQueueTransfer, &ctx);
@@ -2225,8 +2230,8 @@ void Raster::polygonize(const std::string& filename, const std::string& layerNam
 	// Start the write thread.
 	std::thread transferT2(&PolyContext::polyWriteQueue, &ctx);
 
-	for(uint16_t i = 0; i < threads - 2; ++i)
-		pts[i].join();
+	for(std::thread& t : readTs)
+		t.join();
 
 	ctx.running(false);
 
