@@ -1762,32 +1762,43 @@ Poly::~Poly() {
 
 void polygonizeQueueTransfer(std::unordered_map<uint64_t, std::unique_ptr<Poly> >* polys,
 		std::queue<std::unique_ptr<Poly> >* polyQ,
-		std::vector<bool>* finished,
-		std::mutex* pmtx, std::mutex* fmtx,
+		std::vector<bool>* finished, std::atomic<bool>* running, bool* cancel,
+		std::mutex* pmtx,
+		std::condition_variable<std::mutex>* pcond,
+		std::condition_variable<std::mutex>* tcond,
 		GeometryFactory::unique_ptr* gf,
 		bool removeHoles, bool removeDangles) {
 
-	// Find polys that are ready to write and move them to the queue.
-	std::list<std::unique_ptr<Poly> > geoms0;
-	{
-		std::lock_guard<std::mutex> lk(*pmtx);
-		for(auto it = polys->begin(); it != polys->end(); ) {
-			std::lock_guard<std::mutex> lk(*fmtx);
-			if(it->second->isRangeFinalized(*finished)) {
-				geoms0.push_back(std::move(it->second));
-				it = polys->erase(it);
-			} else {
-				++it;
-			}
-		}
-	}
+	while(true) {
 
-	for(std::unique_ptr<Poly>& p : geoms0) {
-		p->generate(*gf, removeHoles, removeDangles);
+		std::unique_lock<std::mutex> lk(*pmtx);
+		tcond->wait(lk);
+
+		if(*cancel || (!*running && polys->empty()))
+			break;
+
+		// Find polys that are ready to write and move them to the queue.
+		std::list<std::unique_ptr<Poly> > geoms0;
 		{
 			std::lock_guard<std::mutex> lk(*pmtx);
-			polyQ->push(std::move(p));
+			for(auto it = polys->begin(); it != polys->end(); ) {
+				if(it->second->isRangeFinalized(*finished)) {
+					geoms0.push_back(std::move(it->second));
+					it = polys->erase(it);
+				} else {
+					++it;
+				}
+			}
 		}
+
+		for(std::unique_ptr<Poly>& p : geoms0) {
+			p->generate(*gf, removeHoles, removeDangles);
+			{
+				std::lock_guard<std::mutex> lk(*pmtx);
+				polyQ->push(std::move(p));
+			}
+		}
+
 	}
 }
 
@@ -1797,7 +1808,8 @@ void Raster::polygonizeBlock(int* block, bool* cancel,
 		std::unordered_map<uint64_t, std::unique_ptr<Poly> >* polys,
 		std::queue<std::unique_ptr<Poly> >* polyQ,
 		std::mutex* bmtx, std::mutex* pmtx, std::mutex* fmtx,
-		int bufSize, int band,  bool removeHoles, bool removeDangles,
+		std::condition_variable<std::mutex>* tcond,
+		int bufSize, int band,
 		Status* status) {
 
 	// Get cols, rows an nodata.
@@ -1893,6 +1905,7 @@ void Raster::polygonizeBlock(int* block, bool* cancel,
 								(*polys)[id0].reset(new Poly(id0));
 							(*polys)[id0]->update(geom, r, r);
 						}
+
 						--c; // Back up the counter by one, to start with the new ID.
 						break;
 					}
@@ -1906,15 +1919,12 @@ void Raster::polygonizeBlock(int* block, bool* cancel,
 				(*finished)[r] = true;
 			}
 
+			// Notify the transfer threads of an update.
+			tcond->notify_all();
+
 		}
 
-		// Send finished polygons to queue.
-		polygonizeQueueTransfer(polys, polyQ, finished, pmtx, fmtx, gf, removeHoles, removeDangles);
-
 	} // while
-
-	// Send the rest of the polygons to the queue.
-	polygonizeQueueTransfer(polys, polyQ, finished, pmtx, fmtx, gf, removeHoles, removeDangles);
 
 	std::cerr << "thread\n";
 
@@ -1923,30 +1933,34 @@ void Raster::polygonizeBlock(int* block, bool* cancel,
 void Raster::transferPolys(std::queue<std::unique_ptr<Poly> >* polyQ,
 		GEOSContextHandle_t* gctx, OGRLayer* layer,
 		std::mutex* pmtx, std::mutex* fmtx, std::mutex* omtx,
-		std::atomic<bool>* running, uint64_t* fid) {
+		std::condition_variable<std::mutex>* pcond,
+		uint64_t* fid, bool* running, bool* cancel) {
 
 	// Use the first thread in the group for writing polys to the DB.
 	// The loop runs as long as the queue isn't "finalized" and is not empty.
 	uint64_t fid0;
 	std::unique_ptr<Poly> p;
 	while(true) {
-		{
-			std::lock_guard<std::mutex> lk(*pmtx);
-			if(!polyQ->empty()) {
-				p.swap(polyQ->front());
-				polyQ->pop();
-			} else {
-				std::this_thread::sleep_for(std::chrono::milliseconds(1));
-			}
+
+		// Wait for a wake-up.
+		std::unique_lock<std::mutex> lk(*pmtx);
+		pcond->wait(lk);
+
+		// Grab the element from the queue, if there is one.
+		if(!polyQ->empty()) {
+			p.swap(polyQ->front());
+			polyQ->pop();
 		}
 
+		// If not element, decide whether to quit or loop.
 		if(!p.get()) {
-			if(*running)
-				continue;
-			else
+			if(!*running || !*cancel)
 				break;
+			else
+				continue;
 		}
 
+		// Process the element.
 		{
 			std::lock_guard<std::mutex> lk(*fmtx);
 			fid0 = ++(*fid);
@@ -2042,8 +2056,8 @@ void Raster::polygonize(const std::string& filename, const std::string& layerNam
 	// Tracks finished rows.
 	std::vector<bool> finished(props().rows());
 	std::fill(finished.begin(), finished.end(), false);
-	// Keeps a count of the running threads.
-	std::atomic<bool> running(true);
+	// Stays true while the worker threads are active.
+	bool running = true;
 
 	//
 	int bufSize = 256;
@@ -2056,18 +2070,22 @@ void Raster::polygonize(const std::string& filename, const std::string& layerNam
 
 	// Start the processing threads.
 	std::vector<std::thread> pts;
-	for(uint16_t i = 0; i < threads; ++i)
-		pts.push_back(std::thread(&Raster::polygonizeBlock, this, &block, cancel, &gf, &finished, &polys, &polyQ, &bmtx, &pmtx, &fmtx, bufSize, band, removeHoles, removeDangles, status));
+	for(uint16_t i = 0; i < threads - 1; ++i)
+		pts.push_back(std::thread(&Raster::polygonizeBlock, this, &block, cancel, &gf, &finished, &polys, &polyQ, &bmtx, &pmtx, &fmtx, bufSize, band, status));
 
 	// Start the transfer thread.
-	std::thread transferT(&Raster::transferPolys, this, &polyQ, &gctx, layer, &pmtx, &fmtx, &omtx, &running, &fid);
+	std::thread transferT1(polygonizeQueueTransfer, &polys, &polyQ, &finished, &running, &pmtx, &gf, removeHoles, removeDangles);
 
-	for(uint16_t i = 0; i < threads; ++i)
+	// Start the transfer thread.
+	std::thread transferT2(&Raster::transferPolys, this, &polyQ, &gctx, layer, &pmtx, &fmtx, &omtx, &running, &fid);
+
+	for(uint16_t i = 0; i < threads - 1; ++i)
 		pts[i].join();
 
 	running = false;
 
-	transferT.join();
+	transferT1.join();
+	transferT2.join();
 
 	if(status)
 		status->update(0.99f, "Writing polygons...");
