@@ -1857,6 +1857,7 @@ private:
 	OGRLayer *m_layer;
 	GeometryFactory::unique_ptr m_geomFactory;
 	GEOSContextHandle_t m_gctx;
+	OGRSpatialReference m_sr;
 	PolyMap m_polyMap;
 	PolyQueue m_polyQueue;
 	std::vector<bool> m_finished;
@@ -1934,12 +1935,11 @@ public:
 			g_runerr("Failed to create dataset " << filename << ".");
 
 		// Create the layer.
-		OGRSpatialReference sr;
-		sr.importFromEPSG(srid);
+		m_sr.importFromEPSG(srid);
 		char **lopts = NULL;
 		if(Util::lower(driver) == "sqlite")
 			lopts = CSLSetNameValue(lopts, "FORMAT", "SPATIALITE");
-		m_layer = m_ds->CreateLayer(layerName.c_str(), &sr, wkbMultiPolygon, lopts);
+		m_layer = m_ds->CreateLayer(layerName.c_str(), &m_sr, wkbMultiPolygon, lopts);
 		CPLFree(lopts);
 		if(!m_layer) {
 			g_runerr("Failed to create layer " << layerName << ".");
