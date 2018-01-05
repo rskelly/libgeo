@@ -1743,20 +1743,37 @@ public:
 	 * @param removeHoles True, if it is desired that holes in polygons be removed.
 	 * @param removeDangles True, if it is desired that single-pixel artifacts, attached at the corners, be removed.
 	 */
-	void generate(const GeometryFactory::unique_ptr& fact, bool removeHoles, bool removeDangles) {
+	void generate(const GeometryFactory::unique_ptr& fact) {
 
 		// Calculate the union of geometries. This could result in a single poly or a multi.
 		Geometry* geom = geos::operation::geounion::CascadedPolygonUnion::Union(&m_geoms);
+
+		for(Geometry* g : m_geoms)
+			delete g;
+		m_geoms.clear();
+
 		if (!geom)
 			g_runerr("Failed to compute geometry.");
 
-		int typeId = geom->getGeometryTypeId();
+		if(m_final) {
+			Geometry* geom0 = geom;
+			geom = geom0->Union(m_final);
+			delete geom0;
+		}
+
+		m_final = geom;
+
+	}
+
+	void finalize(const GeometryFactory::unique_ptr& fact, bool removeHoles, bool removeDangles) {
+
+		int typeId = m_final->getGeometryTypeId();
 
 		// If the result is a single polygon, turn it into a multi.
 		if(typeId == GEOS_POLYGON) {
 			std::vector<Geometry*>* geoms0 = new std::vector<Geometry*>();
-			geoms0->push_back(geom);
-			geom = fact->createMultiPolygon(geoms0); // Do not copy -- take ownership.
+			geoms0->push_back(m_final);
+			m_final = fact->createMultiPolygon(geoms0); // Do not copy -- take ownership.
 		}
 
 		// If we're removing dangles, throw away all but the
@@ -1765,17 +1782,17 @@ public:
 		if(removeDangles && typeId != GEOS_POLYGON) {
 			size_t idx = 0;
 			double area = 0;
-			for(size_t i = 0; i < geom->getNumGeometries(); ++i) {
-				const Geometry* p = geom->getGeometryN(i);
+			for(size_t i = 0; i < m_final->getNumGeometries(); ++i) {
+				const Geometry* p = m_final->getGeometryN(i);
 				double a = p->getArea();
 				if(a > area) {
 					area = a;
 					idx = i;
 				}
 			}
-			Geometry* g = geom->getGeometryN(idx)->clone(); // Force copy.
-			delete geom;
-			geom = g;
+			Geometry* g = m_final->getGeometryN(idx)->clone(); // Force copy.
+			delete m_final;
+			m_final = g;
 		}
 
 
@@ -1783,22 +1800,17 @@ public:
 		// of all constituent polygons.
 		if(removeHoles) {
 			std::vector<Geometry*>* geoms0 = new std::vector<Geometry*>();
-			for(size_t i = 0; i < geom->getNumGeometries(); ++i) {
-				const Polygon* p = dynamic_cast<const Polygon*>(geom->getGeometryN(i));
+			for(size_t i = 0; i < m_final->getNumGeometries(); ++i) {
+				const Polygon* p = dynamic_cast<const Polygon*>(m_final->getGeometryN(i));
 				const LineString* l = p->getExteriorRing();
 				LinearRing* r = fact->createLinearRing(l->getCoordinates());
 				geoms0->push_back(fact->createPolygon(r, nullptr));
 			}
 			Geometry* g = fact->createMultiPolygon(geoms0); // Do not copy -- take ownership.
-			delete geom;
-			geom = g;
+			delete m_final;
+			m_final = g;
 		}
 
-		for(Geometry* g : m_geoms)
-			delete g;
-		m_geoms.clear();
-
-		m_final = geom;
 	}
 
 	/**
@@ -1872,9 +1884,10 @@ private:
 	uint64_t m_featureId;
 	int m_bufSize;
 	int m_band;
-	bool m_running;
 	bool m_removeHoles;
 	bool m_removeDangles;
+	bool m_mapUpdate;
+	bool m_queueUpdate;
 
 public:
 	PolyContext(Raster* raster, Status* status, int* block, bool* cancel,
@@ -1890,9 +1903,10 @@ public:
 		m_featureId(0),
 		m_bufSize(bufSize),
 		m_band(band),
-		m_running(true),
 		m_removeHoles(removeHoles),
-		m_removeDangles(removeDangles) {
+		m_removeDangles(removeDangles),
+		m_mapUpdate(false),
+		m_queueUpdate(false) {
 
 		// Tracks fill the finished vector with false.
 		m_finished.resize(raster->props().rows());
@@ -1902,14 +1916,6 @@ public:
 	~PolyContext() {
 		if(m_ds)
 			GDALClose(m_ds);
-	}
-
-	void running(bool running) {
-		m_running = running;
-	}
-
-	bool running() const {
-		return m_running;
 	}
 
 	void initOutput(const std::string& driver, const std::string& filename, const std::string& layerName, int srid) {
@@ -2072,6 +2078,8 @@ public:
 								if(!m_polyMap.count(id0))
 									m_polyMap[id0].reset(new Poly(id0));
 								m_polyMap[id0]->update(geom, r, r);
+								m_polyMap[id0]->generate(m_geomFactory);
+								m_mapUpdate = true;
 							}
 
 							--c; // Back up the counter by one, to start with the new ID.
@@ -2089,7 +2097,8 @@ public:
 				}
 
 				// Notify the transfer threads of an update.
-				notifyTransfer();
+				if(m_mapUpdate)
+					notifyTransfer();
 
 			}
 
@@ -2105,14 +2114,18 @@ public:
 
 		while(true) {
 
-			if(*m_cancel || (!m_running && m_polyMap.empty()))
+			if(*m_cancel)
 				break;
 
 			std::list<std::unique_ptr<Poly> > geoms0;
 			{
 				std::unique_lock<std::mutex> lk(m_polyMapMtx);
-				while(!*m_cancel && m_running && m_polyMap.empty())
+				while(!*m_cancel && !m_mapUpdate)
 					m_polyMapCond.wait(lk);
+
+				m_mapUpdate = false;
+
+				std::cerr << "transfer\n";
 
 				for(auto it = m_polyMap.begin(); it != m_polyMap.end(); ) {
 					if(it->second->isRangeFinalized(m_finished)) {
@@ -2125,18 +2138,22 @@ public:
 			}
 
 			for(std::unique_ptr<Poly>& p : geoms0) {
-				p->generate(m_geomFactory, m_removeHoles, m_removeDangles);
+				p->finalize(m_geomFactory, m_removeHoles, m_removeDangles);
 				{
 					std::lock_guard<std::mutex> lk(m_polyQueueMtx);
 					m_polyQueue.push(std::move(p));
+					m_queueUpdate = true;
 				}
 			}
 
-			if(!m_polyQueue.empty())
+			if(m_queueUpdate)
 				notifyWrite();
 		}
 
 		std::cerr << "poly transfer queue finished\n";
+
+		notifyWrite();
+
 	}
 
 	void polyWriteQueue() {
@@ -2145,14 +2162,14 @@ public:
 		// The loop runs as long as the queue isn't "finalized" and is not empty.
 		while(true) {
 
-			if(*m_cancel || (!m_running && m_polyQueue.empty()))
+			if(*m_cancel)
 				break;
 
 			std::unique_ptr<Poly> p;
 			// Wait for a wake-up.
 			{
 				std::unique_lock<std::mutex> lk(m_polyQueueMtx);
-				while(!*m_cancel && m_running && m_polyQueue.empty())
+				while(!*m_cancel && !m_queueUpdate)
 					m_polyQueueCond.wait(lk);
 				// Grab the element from the queue, if there is one.
 				if(!m_polyQueue.empty()) {
@@ -2161,13 +2178,11 @@ public:
 				}
 			}
 
-			// If not element, decide whether to quit or loop.
-			if(!p.get()) {
-				if(!m_running || *m_cancel)
-					break;
-				else
-					continue;
-			}
+			// If no element loop.
+			if(!p.get())
+				continue;
+
+			std::cerr << "write\n";
 
 			// Retrieve the unioned geometry and write it.
 			Geometry* g = p->getPoly();
@@ -2233,8 +2248,6 @@ void Raster::polygonize(const std::string& filename, const std::string& layerNam
 	for(std::thread& t : readTs)
 		t.join();
 
-	ctx.running(false);
-
 	ctx.notifyTransfer();
 
 	transferT1.join();
@@ -2243,11 +2256,13 @@ void Raster::polygonize(const std::string& filename, const std::string& layerNam
 
 	transferT2.join();
 
+	g_debug("Writing...");
 	if(status)
 		status->update(0.99f, "Writing polygons...");
 
 	ctx.commitOutput();
 
+	g_debug("Done");
 	if(status)
 		status->update(1.0f, "Done.");
 }
