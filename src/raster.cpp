@@ -1888,6 +1888,7 @@ private:
 	bool m_removeDangles;
 	bool m_mapUpdate;
 	bool m_queueUpdate;
+	bool m_finish;
 
 public:
 	PolyContext(Raster* raster, Status* status, int* block, bool* cancel,
@@ -1906,7 +1907,8 @@ public:
 		m_removeHoles(removeHoles),
 		m_removeDangles(removeDangles),
 		m_mapUpdate(false),
-		m_queueUpdate(false) {
+		m_queueUpdate(false),
+		m_finish(false) {
 
 		// Tracks fill the finished vector with false.
 		m_finished.resize(raster->props().rows());
@@ -1916,6 +1918,10 @@ public:
 	~PolyContext() {
 		if(m_ds)
 			GDALClose(m_ds);
+	}
+
+	void finish() {
+		m_finish = true;
 	}
 
 	void initOutput(const std::string& driver, const std::string& filename, const std::string& layerName, int srid) {
@@ -2093,7 +2099,7 @@ public:
 				{
 					std::lock_guard<std::mutex> lk(m_finMtx);
 					m_finished[r] = true;
-					std::cerr << "row " << r << "\n";
+					//std::cerr << "row " << r << "\n";
 				}
 
 				// Notify the transfer threads of an update.
@@ -2112,20 +2118,17 @@ public:
 
 	void polyQueueTransfer() {
 
-		while(true) {
-
-			if(*m_cancel)
-				break;
+		while(!*m_cancel && !(m_finish && m_polyMap.empty())) {
 
 			std::list<std::unique_ptr<Poly> > geoms0;
 			{
 				std::unique_lock<std::mutex> lk(m_polyMapMtx);
-				while(!*m_cancel && !m_mapUpdate)
+				while(!*m_cancel && !m_mapUpdate && !m_finish)
 					m_polyMapCond.wait(lk);
 
 				m_mapUpdate = false;
 
-				std::cerr << "transfer\n";
+				//std::cerr << "transfer\n";
 
 				for(auto it = m_polyMap.begin(); it != m_polyMap.end(); ) {
 					if(it->second->isRangeFinalized(m_finished)) {
@@ -2160,7 +2163,7 @@ public:
 
 		// Use the first thread in the group for writing polys to the DB.
 		// The loop runs as long as the queue isn't "finalized" and is not empty.
-		while(true) {
+		while(!*m_cancel && !(m_finish && m_polyQueue.empty())) {
 
 			if(*m_cancel)
 				break;
@@ -2169,7 +2172,7 @@ public:
 			// Wait for a wake-up.
 			{
 				std::unique_lock<std::mutex> lk(m_polyQueueMtx);
-				while(!*m_cancel && !m_queueUpdate)
+				while(!*m_cancel && !m_queueUpdate && !m_finish)
 					m_polyQueueCond.wait(lk);
 				// Grab the element from the queue, if there is one.
 				if(!m_polyQueue.empty()) {
@@ -2211,7 +2214,7 @@ public:
 
 void Raster::polygonize(const std::string& filename, const std::string& layerName,
 		const std::string& driver, uint16_t srid, uint16_t band, uint16_t threads,
-		bool removeHoles, bool removeDangles, Status *status, bool *cancel) {
+		int bufSize, bool removeHoles, bool removeDangles, Status *status, bool *cancel) {
 
 	if(!m_props.isInt())
 		g_runerr("Only integer rasters can be polygonized.");
@@ -2222,7 +2225,18 @@ void Raster::polygonize(const std::string& filename, const std::string& layerNam
 		cancel = &s_cancel;
 
 	int block = 0;
-	int bufSize = 128;
+
+	// If the bufsize given is invalid, use the entire raster height.
+	// This can use a lot of memory!
+	if(bufSize <= 0) {
+		g_warn("Invalid buffer size; using raster height.");
+		bufSize = props().rows();
+	}
+
+	if(bufSize > props().rows() / (threads - 2)) {
+		g_warn("The buffer size is larger than (rows/read threads). Optimizing.");
+		bufSize = props().rows() / (threads - 2);
+	}
 
 	// Remove the original file; some can't be overwritten directly.
 	// This will not take care of any auxillary files (e.g. shapefiles)
@@ -2248,6 +2262,7 @@ void Raster::polygonize(const std::string& filename, const std::string& layerNam
 	for(std::thread& t : readTs)
 		t.join();
 
+	ctx.finish();
 	ctx.notifyTransfer();
 
 	transferT1.join();

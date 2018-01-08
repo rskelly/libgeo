@@ -15,7 +15,8 @@ void usage() {
 			<< " -b <band>       The band. Default 1.\n"
 			<< " -d              Remove dangles.\n"
 			<< " -h              Remove holes.\n"
-			<< " -t <t>          The number of threads. Default 1.\n";
+			<< " -t <t>          The number of threads. Default 1.\n"
+			<< " -u <buf size>   The buffer size. Set to zero to use the whole raster in memory.\n";
 }
 
 int main(int argc, char** argv) {
@@ -31,6 +32,7 @@ int main(int argc, char** argv) {
 	uint16_t srid = 0;
 	uint16_t band = 1;
 	uint16_t threads = 1;
+	int bufSize = 0;
 	bool holes = false;
 	bool dangles = false;
 	std::vector<std::string> args;
@@ -39,6 +41,8 @@ int main(int argc, char** argv) {
 		std::string v = argv[i];
 		if(v == "-f") {
 			driver = argv[++i];
+		} else if(v == "-u") {
+			bufSize = atoi(argv[++i]);
 		} else if(v == "-s") {
 			srid = atoi(argv[++i]);
 		} else if(v == "-b") {
@@ -69,7 +73,7 @@ int main(int argc, char** argv) {
 	}
 
 	Raster test(args[0]);
-	test.polygonize(args[1], args[2], driver, srid, band, threads, holes, dangles, nullptr, nullptr);
+	test.polygonize(args[1], args[2], driver, srid, band, threads, bufSize, holes, dangles, nullptr, nullptr);
 
 	return 0;
 }
