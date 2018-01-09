@@ -7,7 +7,7 @@
 
 #include <fstream>
 #include <vector>
-#include <unordered_map>
+#include <unordered_set>
 
 #include <liblas/liblas.hpp>
 
@@ -133,7 +133,11 @@ public:
 						}
 					}
 				}
-				tree->build();
+				try {
+					tree->build();
+				} catch(const std::exception& ex) {
+					g_warn("Failed to build tree.");
+				}
 			}
 		}
 	}
@@ -141,7 +145,9 @@ public:
 	int getPoints(double x, double y, double radius, int count, std::list<LASPoint>& pts, std::list<double>& dists) {
 		updateTree(x, y, radius);
 		LASPoint pt(x, y, 0);
-		int ret = tree->radSearch(pt, radius, count, std::back_inserter(pts), std::back_inserter(dists));
+		int ret = 0;
+		if(tree)
+			ret = tree->radSearch(pt, radius, count, std::back_inserter(pts), std::back_inserter(dists));
 		return ret;
 	}
 
@@ -168,9 +174,9 @@ public:
 		}
 
 		if(easting <= 0)
-			easting = ((int) (bounds[0] * res)) / res;
+			easting = ((int) (bounds[0] / res)) * res;
 		if(northing <= 0)
-			northing = ((int) (bounds[3] * res)) / res;
+			northing = ((int) (bounds[3] / res)) * res;
 
 		int cols = (int) ((bounds[2] - bounds[0]) / res) + 1;
 		int rows = (int) ((bounds[3] - bounds[1]) / res) + 1;
@@ -217,9 +223,9 @@ void usage() {
 	std::cerr << "Usage: las2grid <output raster> <input las [*]>\n"
 			<< " -r <resolution> The output resolution in map units.\n"
 			<< " -e <easting>    The top left corner horizontal alignment\n"
-			<< "                 (defaults to nearest whole number).\n"
+			<< "                 (defaults to nearest multiple of resolution).\n"
 			<< " -n <northing>   The top left corner vertical alignment\n"
-			<< "                 (defaults to nearest whole number).\n"
+			<< "                 (defaults to nearest whole multiple of resolution).\n"
 			<< " -d <radius>     The search radius for finding points.\n"
 			<< " -s <srid>       The spatial reference ID. Default 0.\n"
 			<< " -p <type>       The type of raster: mean (default), median, min, max, \n"
