@@ -79,14 +79,14 @@ public:
 		m_items.insert(m_items.begin(), begin, end);
 	}
 
-	void build() {
-
-		if(m_items.size() < 1)
-			g_runerr("Not enough items.");
+	bool build() {
 
 		// Clean up existing tree, etc.
 		if(m_tree)
 			destroy();
+
+		if(m_items.size() < 1) 
+			g_runerr("Not enough items.");
 
 		// Set up the points buffer.
 		m_pts = annAllocPts(m_items.size(), m_dims);
@@ -109,17 +109,25 @@ public:
 	}
 
 	void destroy() {
-		delete m_tree;
-		m_tree = nullptr;
+		if(m_tree) {
+			delete m_tree;
+			m_tree = nullptr;
+		}
 		m_items.clear();
-		annDeallocPts(m_pts);
+		if(m_pts) {
+			annDeallocPts(m_pts);
+			m_pts = nullptr;
+		}
 	}
 
 	template <class TIter, class DIter>
-	void knn(const T& item, size_t count, TIter titer, DIter diter, double eps = 0.0) {
+	int knn(const T& item, size_t count, TIter titer, DIter diter, double eps = 0.0) {
 
-		if(!m_tree)
-			g_runerr("Tree not built. Forget to call build?");
+		if(!m_tree) {
+			g_warn("Tree not built. Forget to call build?");
+			return 0;
+		}
+
 		if(count > m_items.size())
 			count = m_items.size();
 		if(count < 1)
@@ -140,11 +148,14 @@ public:
 
 		// Populate output iterators.
 		for(size_t i = 0; i < count; ++i) {
+			if(idx[i] == -1)
+				return i;
 			*titer = m_items[idx[i]];
 			++titer;
 			*diter = std::sqrt(dist[i]);
 			++diter;
 		}
+		return count;
 	}
 
 	/**
@@ -161,8 +172,11 @@ public:
 	template <class TIter, class DIter>
 	int radSearch(const T& item, double radius, int maxCount, TIter titer, DIter diter, double eps = 0.0) {
 
-		if(!m_tree)
-			g_runerr("Tree not built. Forget to call build?");
+		if(!m_tree) {
+			g_warn("Tree not built. Forget to call build?");
+			return 0;
+		}
+
 		if(radius < 0)
 			g_runerr("Radius too small: " << radius);
 		if(maxCount < 0)

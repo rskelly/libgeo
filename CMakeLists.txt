@@ -78,6 +78,7 @@ add_library (geoann SHARED ann/src/ANN.cpp ann/src/brute.cpp ann/src/kd_tree.cpp
 	ann/src/kd_split.cpp ann/src/kd_dump.cpp ann/src/kd_search.cpp ann/src/kd_pr_search.cpp 
 	ann/src/kd_fix_rad_search.cpp ann/src/bd_tree.cpp ann/src/bd_search.cpp ann/src/bd_pr_search.cpp 
 	ann/src/bd_fix_rad_search.cpp ann/src/perf.cpp)
+target_link_libraries (geoann geo geoutil)
 
 # Tests ##################################################################################################
 
@@ -89,3 +90,6 @@ target_link_libraries (polygonize geo geoutil georaster ${Boost_LIBRARIES})
 
 add_executable (las2grid src/apps/las2grid.cpp)
 target_link_libraries (las2grid geo geoann geoutil georaster ${Boost_LIBRARIES} ${LIBLAS_LIBRARY})
+
+add_executable (las2tile src/apps/las2tile.cpp)
+target_link_libraries (las2tile geo geoutil ${Boost_LIBRARIES} ${LIBLAS_LIBRARY})
