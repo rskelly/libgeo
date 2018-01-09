@@ -1718,16 +1718,10 @@ public:
 	 * within the given thread, or by a thread whose block is completed.
 	 * The checked range includes one row above and one below,
 	 * which is required to guarantee that a polygon is completed.
-	 * @param finalRows The vector containing true when a row is not finalized and true when it is.
+	 * @param rowFinished The last row read.
 	 */
-	bool isRangeFinalized(const std::vector<bool> &finalRows) const {
-		int start = g_max(m_minRow - 1, 0);
-		int end = g_min(m_maxRow + 2, (int) finalRows.size());
-		for (int i = start; i < end; ++i) {
-			if (!finalRows[i])
-				return false;
-		}
-		return true;
+	bool isRangeFinalized(int rowFinished) const {
+		return m_maxRow < rowFinished;
 	}
 
 	/**
@@ -1743,7 +1737,7 @@ public:
 	 * @param removeHoles True, if it is desired that holes in polygons be removed.
 	 * @param removeDangles True, if it is desired that single-pixel artifacts, attached at the corners, be removed.
 	 */
-	void generate(const GeometryFactory::unique_ptr& fact) {
+	void finalize(const GeometryFactory::unique_ptr& fact, bool removeHoles, bool removeDangles) {
 
 		// Calculate the union of geometries. This could result in a single poly or a multi.
 		Geometry* geom = geos::operation::geounion::CascadedPolygonUnion::Union(&m_geoms);
@@ -1755,25 +1749,13 @@ public:
 		if (!geom)
 			g_runerr("Failed to compute geometry.");
 
-		if(m_final) {
-			Geometry* geom0 = geom;
-			geom = geom0->Union(m_final);
-			delete geom0;
-		}
-
-		m_final = geom;
-
-	}
-
-	void finalize(const GeometryFactory::unique_ptr& fact, bool removeHoles, bool removeDangles) {
-
-		int typeId = m_final->getGeometryTypeId();
+		int typeId = geom->getGeometryTypeId();
 
 		// If the result is a single polygon, turn it into a multi.
 		if(typeId == GEOS_POLYGON) {
 			std::vector<Geometry*>* geoms0 = new std::vector<Geometry*>();
-			geoms0->push_back(m_final);
-			m_final = fact->createMultiPolygon(geoms0); // Do not copy -- take ownership.
+			geoms0->push_back(geom);
+			geom = fact->createMultiPolygon(geoms0); // Do not copy -- take ownership.
 		}
 
 		// If we're removing dangles, throw away all but the
@@ -1782,35 +1764,35 @@ public:
 		if(removeDangles && typeId != GEOS_POLYGON) {
 			size_t idx = 0;
 			double area = 0;
-			for(size_t i = 0; i < m_final->getNumGeometries(); ++i) {
-				const Geometry* p = m_final->getGeometryN(i);
+			for(size_t i = 0; i < geom->getNumGeometries(); ++i) {
+				const Geometry* p = geom->getGeometryN(i);
 				double a = p->getArea();
 				if(a > area) {
 					area = a;
 					idx = i;
 				}
 			}
-			Geometry* g = m_final->getGeometryN(idx)->clone(); // Force copy.
-			delete m_final;
-			m_final = g;
+			Geometry *g = geom->getGeometryN(idx)->clone(); // Force copy.
+			delete geom;
+			geom = g;
 		}
-
 
 		// If we're removing holes, extract the exterior rings
 		// of all constituent polygons.
 		if(removeHoles) {
 			std::vector<Geometry*>* geoms0 = new std::vector<Geometry*>();
-			for(size_t i = 0; i < m_final->getNumGeometries(); ++i) {
-				const Polygon* p = dynamic_cast<const Polygon*>(m_final->getGeometryN(i));
+			for(size_t i = 0; i < geom->getNumGeometries(); ++i) {
+				const Polygon* p = dynamic_cast<const Polygon*>(geom->getGeometryN(i));
 				const LineString* l = p->getExteriorRing();
 				LinearRing* r = fact->createLinearRing(l->getCoordinates());
 				geoms0->push_back(fact->createPolygon(r, nullptr));
 			}
 			Geometry* g = fact->createMultiPolygon(geoms0); // Do not copy -- take ownership.
-			delete m_final;
-			m_final = g;
+			delete geom;
+			geom = g;
 		}
 
+		m_final = geom;
 	}
 
 	/**
@@ -1872,7 +1854,6 @@ private:
 	OGRSpatialReference m_sr;
 	PolyMap m_polyMap;
 	PolyQueue m_polyQueue;
-	std::vector<bool> m_finished;
 	std::condition_variable m_polyMapCond;
 	std::condition_variable m_polyQueueCond;
 	std::mutex m_polyMapMtx;    // For the PolyMap.
@@ -1884,11 +1865,12 @@ private:
 	uint64_t m_featureId;
 	int m_bufSize;
 	int m_band;
+	int m_rowFinished;
 	bool m_removeHoles;
 	bool m_removeDangles;
-	bool m_mapUpdate;
 	bool m_queueUpdate;
-	bool m_finish;
+	bool m_readFinish;
+	bool m_transferFinish;
 
 public:
 	PolyContext(Raster* raster, Status* status, int* block, bool* cancel,
@@ -1904,15 +1886,12 @@ public:
 		m_featureId(0),
 		m_bufSize(bufSize),
 		m_band(band),
+		m_rowFinished(0),
 		m_removeHoles(removeHoles),
 		m_removeDangles(removeDangles),
-		m_mapUpdate(false),
 		m_queueUpdate(false),
-		m_finish(false) {
-
-		// Tracks fill the finished vector with false.
-		m_finished.resize(raster->props().rows());
-		std::fill(m_finished.begin(), m_finished.end(), false);
+		m_readFinish(false),
+		m_transferFinish(false) {
 	}
 
 	~PolyContext() {
@@ -1920,8 +1899,12 @@ public:
 			GDALClose(m_ds);
 	}
 
-	void finish() {
-		m_finish = true;
+	void readFinish() {
+		m_readFinish = true;
+	}
+
+	void transferFinish() {
+		m_transferFinish = true;
 	}
 
 	void initOutput(const std::string& driver, const std::string& filename, const std::string& layerName, int srid) {
@@ -2084,8 +2067,6 @@ public:
 								if(!m_polyMap.count(id0))
 									m_polyMap[id0].reset(new Poly(id0));
 								m_polyMap[id0]->update(geom, r, r);
-								m_polyMap[id0]->generate(m_geomFactory);
-								m_mapUpdate = true;
 							}
 
 							--c; // Back up the counter by one, to start with the new ID.
@@ -2095,85 +2076,75 @@ public:
 					}
 				}
 
-				// Update the list of finished rows.
-				{
-					std::lock_guard<std::mutex> lk(m_finMtx);
-					m_finished[r] = true;
-					//std::cerr << "row " << r << "\n";
-				}
+				// Update the finished rows.
+				m_rowFinished = r;
 
 				// Notify the transfer threads of an update.
-				if(m_mapUpdate)
-					notifyTransfer();
-
+				notifyTransfer();
 			}
 
 		} // while
 
-		notifyTransfer();
-
 		std::cerr << "read block finished\n";
 
+		m_rowFinished++;
+
+		notifyTransfer();
 	}
 
 	void polyQueueTransfer() {
 
-		while(!*m_cancel && !(m_finish && m_polyMap.empty())) {
+		while(!*m_cancel && !(m_readFinish && m_polyMap.empty())) {
 
-			std::list<std::unique_ptr<Poly> > geoms0;
+			std::unique_ptr<Poly> geom;
 			{
+				// Wait for a wake-up.
 				std::unique_lock<std::mutex> lk(m_polyMapMtx);
-				while(!*m_cancel && !m_mapUpdate && !m_finish)
+				while(!*m_cancel && !m_readFinish && m_polyMap.empty())
 					m_polyMapCond.wait(lk);
 
-				m_mapUpdate = false;
-
-				//std::cerr << "transfer\n";
-
+				// Process the finished items if there are any.
 				for(auto it = m_polyMap.begin(); it != m_polyMap.end(); ) {
-					if(it->second->isRangeFinalized(m_finished)) {
-						geoms0.push_back(std::move(it->second));
+					if(it->second->isRangeFinalized(m_rowFinished)) {
+						geom.swap(it->second);
 						it = m_polyMap.erase(it);
 					} else {
 						++it;
 					}
+					break;
 				}
 			}
 
-			for(std::unique_ptr<Poly>& p : geoms0) {
-				p->finalize(m_geomFactory, m_removeHoles, m_removeDangles);
+			if(geom.get()) {
+				// Union and trim polygons (TODO: Should be a single method.)
+				geom->finalize(m_geomFactory, m_removeHoles, m_removeDangles);
 				{
 					std::lock_guard<std::mutex> lk(m_polyQueueMtx);
-					m_polyQueue.push(std::move(p));
-					m_queueUpdate = true;
+					m_polyQueue.push(std::move(geom));
 				}
 			}
 
-			if(m_queueUpdate)
-				notifyWrite();
+			notifyWrite();
 		}
 
 		std::cerr << "poly transfer queue finished\n";
 
 		notifyWrite();
-
 	}
 
 	void polyWriteQueue() {
 
 		// Use the first thread in the group for writing polys to the DB.
 		// The loop runs as long as the queue isn't "finalized" and is not empty.
-		while(!*m_cancel && !(m_finish && m_polyQueue.empty())) {
-
-			if(*m_cancel)
-				break;
+		while(!*m_cancel && !(m_transferFinish && m_polyQueue.empty())) {
 
 			std::unique_ptr<Poly> p;
-			// Wait for a wake-up.
 			{
+				// Wait for a wake-up.
 				std::unique_lock<std::mutex> lk(m_polyQueueMtx);
-				while(!*m_cancel && !m_queueUpdate && !m_finish)
+				while(!*m_cancel && !m_transferFinish && m_polyQueue.empty())
 					m_polyQueueCond.wait(lk);
+
 				// Grab the element from the queue, if there is one.
 				if(!m_polyQueue.empty()) {
 					p.swap(m_polyQueue.front());
@@ -2181,7 +2152,7 @@ public:
 				}
 			}
 
-			// If no element loop.
+			// If no element, loop.
 			if(!p.get())
 				continue;
 
@@ -2219,23 +2190,23 @@ void Raster::polygonize(const std::string& filename, const std::string& layerNam
 	if(!m_props.isInt())
 		g_runerr("Only integer rasters can be polygonized.");
 
+	// There need to be at least three threads for readin from the raster(1), 
+	// writing output (1), and unioning and transferring to the write queue (n - 2).
 	if(threads < 3)
 		threads = 3;
+
+	// If no cancel pointer is given, use a dummy.
 	if(cancel == nullptr)
 		cancel = &s_cancel;
 
+	// Counter for the current block.
 	int block = 0;
 
 	// If the bufsize given is invalid, use the entire raster height.
 	// This can use a lot of memory!
-	if(bufSize <= 0) {
+	if(bufSize <= 0 || bufSize > props().rows()) {
 		g_warn("Invalid buffer size; using raster height.");
 		bufSize = props().rows();
-	}
-
-	if(bufSize > props().rows() / (threads - 2)) {
-		g_warn("The buffer size is larger than (rows/read threads). Optimizing.");
-		bufSize = props().rows() / (threads - 2);
 	}
 
 	// Remove the original file; some can't be overwritten directly.
@@ -2248,28 +2219,29 @@ void Raster::polygonize(const std::string& filename, const std::string& layerNam
 	// Initialize database.
 	ctx.initOutput(driver, filename, layerName, srid);
 
-	// Start the processing threads.
-	std::list<std::thread> readTs;
-	for(int i = 0; i < threads - 2; ++i)
-		readTs.push_back(std::thread(&PolyContext::polyReadBlocks, &ctx));
+	// Start the read thread.
+	std::thread readT(&PolyContext::polyReadBlocks, &ctx);
 
-	// Start the transfer thread.
-	std::thread transferT1(&PolyContext::polyQueueTransfer, &ctx);
+	// Start the transfer threads.
+	std::list<std::thread> transferTs;
+	for(int i = 0; i < threads - 2; ++i)
+		transferTs.push_back(std::thread(&PolyContext::polyQueueTransfer, &ctx));
 
 	// Start the write thread.
-	std::thread transferT2(&PolyContext::polyWriteQueue, &ctx);
+	std::thread writeT(&PolyContext::polyWriteQueue, &ctx);
 
-	for(std::thread& t : readTs)
-		t.join();
+	readT.join();
 
-	ctx.finish();
+	ctx.readFinish();
 	ctx.notifyTransfer();
 
-	transferT1.join();
+	for(std::thread& t : transferTs)
+		t.join();
 
+	ctx.transferFinish();
 	ctx.notifyWrite();
 
-	transferT2.join();
+	writeT.join();
 
 	g_debug("Writing...");
 	if(status)
