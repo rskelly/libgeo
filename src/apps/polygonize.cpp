@@ -15,7 +15,8 @@ void usage() {
 			<< " -b <band>       The band. Default 1.\n"
 			<< " -d              Remove dangles.\n"
 			<< " -h              Remove holes.\n"
-			<< " -t <t>          The number of threads. Default 1.\n"
+			<< " -t <t>          The number of threads. Default 3. There are 2 threads for\n"
+			<< "                 reading and writing and n threads for processing polygons.\n"
 			<< " -u <buf size>   The buffer size. Set to zero to use the whole raster in memory.\n";
 }
 

@@ -26,18 +26,25 @@ namespace ds {
 class KDPoint {
 private:
 	double m_x, m_y, m_z;
+
 public:
+
 	KDPoint(double x, double y, double z = 0) :
-		m_x(x), m_y(y), m_z(z) {}
+		m_x(x), m_y(y), m_z(z) {
+	}
+
 	double x() const {
 		return m_x;
 	}
+
 	double y() const {
 		return m_y;
 	}
+
 	double z() const {
 		return m_z;
 	}
+
 	double operator[](int idx) const {
 		switch(idx % 3) {
 		case 0: return x();
@@ -112,7 +119,7 @@ public:
 	void knn(const T& item, size_t count, TIter titer, DIter diter, double eps = 0.0) {
 
 		if(!m_tree)
-			g_runerr("Tree not build. Forget to call build?");
+			g_runerr("Tree not built. Forget to call build?");
 		if(count > m_items.size())
 			count = m_items.size();
 		if(count < 1)
@@ -138,6 +145,53 @@ public:
 			*diter = std::sqrt(dist[i]);
 			++diter;
 		}
+	}
+
+	/**
+	 * Search the tree by radius with an upper bound on the number of elements returned. If
+	 * The number of returned elements is equal to the bound, then there are probably
+	 * more points than were returned.
+	 * @param item The search point.
+	 * @param radius The search radius.
+	 * @param maxCount The maximum number of items to return.
+	 * @param titer The output point iterator.
+	 * @param diter The distance iterator.
+	 * @param eps The error bound.
+	 */
+	template <class TIter, class DIter>
+	int radSearch(const T& item, double radius, int maxCount, TIter titer, DIter diter, double eps = 0.0) {
+
+		if(!m_tree)
+			g_runerr("Tree not built. Forget to call build?");
+		if(radius < 0)
+			g_runerr("Radius too small: " << radius);
+		if(maxCount < 0)
+			g_runerr("Max count too small: " << maxCount);
+
+		// Turn the search item into an array of doubles castable to ANNpoint.
+		std::vector<ANNcoord> pt(m_dims);
+		for(size_t i = 0; i < m_dims; ++i)
+			pt[i] = item[i];
+
+		// Create arrays for indices and distances.
+		std::vector<ANNidx> idx(maxCount);
+		std::vector<ANNdist> dist(maxCount);
+
+		// Perform search.
+		m_tree->annkFRSearch(static_cast<ANNpoint>(pt.data()), radius, maxCount,
+				static_cast<ANNidxArray>(idx.data()), static_cast<ANNdistArray>(dist.data()), eps);
+
+		// Populate output iterators.
+		for(size_t i = 0; i < maxCount; ++i) {
+			if(idx[i] == -1)
+				return i;
+			*titer = m_items[idx[i]];
+			++titer;
+			*diter = std::sqrt(dist[i]);
+			++diter;
+		}
+
+		return maxCount;
 	}
 
 	~KDTree() {
