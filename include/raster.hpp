@@ -41,10 +41,16 @@ namespace geo {
 
     namespace raster {
 
+    	/**
+    	 * The allowable types for a raster.
+    	 */
 		enum DataType {
 			Float64 = 7, Float32 = 6, UInt32 = 5, UInt16 = 4, Byte = 3, Int32 = 2, Int16 = 1, None = 0
 		};
 
+		/**
+		 * A class containing the properties of a raster.
+		 */
     	class G_DLL_EXPORT GridProps {
     	private:
     		double m_trans[6];			// The geotransform properties.
@@ -54,118 +60,257 @@ namespace geo {
             bool m_writable;            // True if the raster is writable
             double m_nodata;			// The nodata value.
             bool m_nodataSet;			// True if nodata is set.
-    		DataType m_type;
+    		DataType m_type;			// The data type.
     		std::string m_projection;	// The WKT representation of the projection
-    		std::string m_driver;
+    		std::string m_driver;		// The name of the GDAL driver.
 
 		public:
 
+    		/**
+    		 * Construct an empty GridProps.
+    		 */
     		GridProps();
 
+    		/**
+    		 * Return the geographic bounds of the raster.
+    		 */
     		Bounds bounds() const;
 
+    		/**
+    		 * Return the name of the GDAL driver used by the raster.
+    		 * Only relevant for file-based rasters.
+    		 */
     		std::string driver() const;
+
+    		/**
+    		 * Set the name of the GDAL driver used by the raster.
+    		 * Only relevant for file-based rasters.
+    		 * @param name The name of the driver.
+    		 */
     		void setDriver(const std::string &name);
 
+    		/**
+    		 * Returns true if the raster contains integer values.
+    		 */
     		bool isInt() const;
+
+    		/**
+    		 * Returns true if the raster contains double values.
+    		 */
     		bool isFloat() const;
 
+    		/**
+    		 * Returns the no data value.
+    		 */
     		double nodata() const;
+
+    		/**
+    		 * Set the no data value.
+    		 * @param nodata The no data value.
+    		 */
     		void setNoData(double nodata);
+
+    		/**
+    		 * Returns true if the no data value has been set.
+    		 */
     		bool nodataSet() const;
+
+    		/**
+    		 * Remove the no data value.
+    		 */
     		void unsetNodata();
 
-    		// Return the number of columns.
+    		/**
+    		 * Return the number of columns.
+    		 */
             int cols() const;
 
-            // Return the number of rows.
+            /*
+             * Return the number of rows.
+             */
             int rows() const;
 
-            // Returns true if the cell is in the raster.
+            /**
+             * Returns true if the cell is in the raster.
+             * @param col The column.
+             * @param row The row.
+             */
             bool hasCell(int col, int row) const;
+
+            /**
+             * Returns true if the cell is in the raster.
+             * @param x The geographic x or longitude coordinate.
+             * @param y The geographic y or latitude coordinate.
+             */
             bool hasCell(double x, double y) const;
 
-            // Returns the row for a given y-coordinate.
+            /**
+             * Returns the row for a given y-coordinate.
+             * @param y The geographic y or latitude coordinate.
+             */
             int toRow(double y) const;
 
-            // Returns the column for a given x-coordinate.
+            /**
+             * Returns the column for a given x-coordinate.
+             * @param x The geographic x or longitude coordinate.
+             */
             int toCol(double x) const;
 
-            // Returns the x-coordinate for a given column.
+            /**
+             * Returns the x-coordinate for a given column.
+             * @param col The column.
+             */
             double toX(int col) const;
 
-            // Returns the y-coordinate for a given row.
+            /**
+             * Returns the y-coordinate for a given row.
+             * @param row The row.
+             */
             double toY(int row) const;
 
-            // Returns the x-coordinate for the cell centroid of a given column.
+            /**
+             * Returns the x-coordinate for the cell centroid of a given column.
+             * @param col The column.
+             */
             double toCentroidX(int col) const;
 
-            // Returns the y-coordinate for the cell centorid of a given row.
+            /**
+             * Returns the y-coordinate for the cell centorid of a given row.
+             * @param row The row.
+             */
             double toCentroidY(int row) const;
 
-            // Returns the number of pixels.
+            /**
+             * Returns the number of pixels.
+             */
             uint64_t size() const;
 
-            // Set the data type of the raster.
+            /**
+             * Set the data type of the raster.
+             * @param type The data type.
+             */
     		void setDataType(DataType type);
 
-    		// Get the data type of the raster.
+    		/**
+    		 * Get the data type of the raster.
+    		 */
     		DataType dataType() const;
 
-    		// Set the size of the raster in columns, rows.
+    		/**
+    		 * Set the size of the raster in columns, rows.
+             * @param col The column.
+             * @param row The row.
+    		 */
     		void setSize(int cols, int rows);
 
-    		// Set the horizontal and vertical (optional) SRID.
+    		/**
+    		 * Set the horizontal and vertical (optional) SRID.
+    		 * @param hsrid The horizontal SRID.
+    		 * @param vsrid The vertical SRID.
+    		 */
     		void setSrid(int hsrid, int vsrid = 0);
 
-    		// Get the vertical SRID.
+    		/**
+    		 * Get the vertical SRID.
+    		 */
     		int vsrid() const;
 
-    		// Get the horizontal SRID.
+    		/**
+    		 * Get the horizontal SRID.
+    		 */
     		int hsrid() const;
 
-    		// Set the WKT projection.
+    		/**
+    		 * Set the WKT projection.
+    		 * @param The projection string (proj or WKT format).
+    		 */
     		void setProjection(const std::string &proj);
 
-    		// Get the WKT projection.
+    		/**
+    		 * Get the WKT projection (proj or WKT format).
+    		 */
     		std::string projection() const;
 
-    		// Set the geo transform properties.
-    		void setTrans(double m_trans[6]);
+    		/**
+    		 * Set the geo transform properties.
+    		 * @param trans The six-element transformation matrix.
+    		 */
+    		void setTrans(double trans[6]);
 
+    		/**
+    		 * Set the geo transform properties. The third and fourth
+    		 * elements are set to zero.
+    		 * @param tlx The top left x-coordinate.
+    		 * @param resX The horizontal resolution.
+    		 * @param tly The top left y-coordinate.
+    		 * @param resY The vertical resolution (negative for UTM (etc.) projections).
+    		 */
     		void setTrans(double tlx, double resX, double tly, double resY);
 
-    		// Get the geo transform properties.
-    		void trans(double m_trans[6]) const;
+    		/**
+    		 * Gets the geo transform properties by setting them
+    		 * in the given array.
+    		 * @param trans The six-element transformation matrix.
+    		 */
+    		void trans(double trans[6]) const;
 
-    		// Set the vertical and horizontal resolution.
+    		/**
+    		 * Set the vertical and horizontal resolution.
+    		 * @param resolutionX The horizontal resolution.
+    		 * @param resolutionY The vertical resolution (negative for UTM (etc.) projections).
+    		 */
     		void setResolution(double resolutionX, double resolutionY);
 
-    		// Get the horizontal resolution.
+    		/**
+    		 * Get the horizontal resolution.
+    		 */
     		double resolutionX() const;
 
-    		// Get the vertical resolution.
+    		/**
+    		 * Get the vertical resolution.
+    		 */
     		double resolutionY() const;
 
+    		/**
+    		 * Return the top-left horizontal coordinate of the raster.
+    		 */
     		double tlx() const;
 
+    		/**
+    		 * Return the top-left vertical coordinate of the raster.
+    		 */
     		double tly() const;
 
-    		// Set the number of bands.
+    		/**
+    		 * Set the number of bands.
+    		 * @param bands The number of bands.
+    		 */
     		void setBands(int bands);
 
-    		// Get the number of bands.
+    		/**
+    		 * Get the number of bands.
+    		 */
     		int bands() const;
 
-    		// Set the writable state of the raster.
+    		/**
+    		 * Set the writable state of the raster.
+    		 * If the raster is not writable, attempting to write
+    		 * to it will throw an exception.
+    		 * @param writable True, if the raster should be writable.
+    		 */
     		void setWritable(bool writable);
 
-    		// Get the writable state of the raster.
+    		/**
+    		 * Get the writable state of the raster.
+    		 */
     		bool writable() const;
 
 
     	};
 
+    	/**
+    	 * A class to contain statistics of the raster.
+    	 */
     	class G_DLL_EXPORT GridStats {
     	public:
             double min;
@@ -177,7 +322,9 @@ namespace geo {
             uint64_t count;
     	};
 
-        // Simple class to represent a single grid cell.
+        /**
+         * A simple class to represent a single grid cell.
+         */
         class G_DLL_EXPORT Cell {
         public:
             int col;
@@ -185,41 +332,84 @@ namespace geo {
             Cell(int col, int row);
         };
 
-        // Used by Grid::floodFill to determine whether
-        // a pixel should be filled.
+        /**
+         * Used by Grid::floodFill to determine whether a pixel should be filled.
+         * Subclasses will implement clever ways to detect fillable
+         * pixels.
+         */
         template <class T, class U>
         class G_DLL_EXPORT FillOperator {
         public:
+
+        	/**
+        	 * Return the properties of the source raster.
+        	 */
             virtual const GridProps& srcProps() const = 0;
+
+            /**
+             * Return the properties of the destination raster.
+             */
             virtual const GridProps& dstProps() const = 0;
+
+            /**
+             * Return true if if the current pixel should be filled.
+             * @param col The column.
+             * @param row The row.
+             */
             virtual bool shouldFill(int col, int row) const = 0;
+
+            /**
+             * Fill the current column.
+             * @param col The column.
+             * @param row The row.
+             */
             virtual void fill(int col, int row) const = 0;
+
             virtual ~FillOperator() {};
         };
 
+        // Forward declarations; see below.
         class Grid;
         class TileIterator;
 
+        /**
+         * A tile represents a discrete region of a raster.
+         */
         class G_DLL_EXPORT Tile {
         	friend class TileIterator;
         private:
-        	Grid* m_tile;
-        	Grid* m_source;
-        	int m_cols;
-        	int m_rows;
-        	int m_col; 		// The position of the ROI in the source.
+        	Grid* m_tile;			// Contains the tile grid.
+        	Grid* m_source;			// Contains the source grid.
+        	int m_cols;				// The number of columns in the tile.
+        	int m_rows;				// The number of rows in the tile.
+        	int m_col; 				// The position of the ROI in the source.
         	int m_row;
-        	int m_buffer;
-        	int m_srcCol;	// The buffered position in the source.
+        	int m_buffer;			// The number of buffer pixels.
+        	int m_srcCol;			// The buffered position in the source.
         	int m_srcRow;
-        	int m_dstCol;	// The position written to in the tile.
+        	int m_dstCol;			// The position written to in the tile.
         	int m_dstRow;
-        	int m_band;
-        	bool m_writeOnFlush;
+        	int m_band;				// The raster band in the source raster.
+        	bool m_writeOnFlush;	// If true, writes back to the raster on destruction.
 
         protected:
 
-        	// Create the tile.
+        	/**
+        	 * Create the tile.
+        	 * @param tile The tile data.
+        	 * @param source The source data.
+        	 * @param cols The number of columns in the tile.
+        	 * @param rows The number of rows in the tile.
+        	 * @param col The source column.
+        	 * @param row The row column.
+        	 * @param buffer The size of the buffer in pixels.
+        	 * @param srcCol The position of the tile in the source, including buffer.
+        	 * @param srcRow The position of the tile in the source, including buffer.
+        	 * @param dstCol The position of the grid information with respect to the tile.
+        	 * @param dstRow The position of the grid information with respect to the tile.
+        	 * @param band The raster band in the source.
+        	 * @param writeOnFlush If true, writes the tile data to the source on destruction.
+        	 */
         	Tile(Grid* tile, Grid* source, int cols, int rows,
         			int col, int row, int buffer,
         			int srcCol, int srcRow,
@@ -227,29 +417,71 @@ namespace geo {
 
         public:
 
+        	/**
+        	 * Return the source column.
+        	 */
         	int srcCol() const;
+
+        	/**
+        	 * Return the destination column.
+        	 */
         	int dstCol() const;
+
+        	/**
+        	 * Return the source row.
+        	 */
         	int srcRow() const;
+
+        	/**
+        	 * Return the destination row.
+        	 */
         	int dstRow() const;
+
+        	/**
+        	 * Return the number of columns.
+        	 */
         	int cols() const;
+
+        	/**
+        	 * Return the number of rows.
+        	 */
         	int rows() const;
+
+        	/**
+        	 * Return the position of the tile in the source raster.
+        	 */
         	int col() const;
+
+        	/**
+        	 * Return the position of the tile in the source raster.
+        	 */
         	int row() const;
 
-        	// Return the grid containing tile data.
+        	/**
+        	 * Return the grid containing tile data.
+        	 */
         	Grid& grid();
 
-        	// Write the tile's data to the destination grid.
+        	/**
+        	 * Write the tile's data to the destination grid.
+        	 * @param dest The destination grid.
+        	 */
         	void writeTo(Grid& dest);
 
-        	// Flush tile contents to the source. Called implicitly
-        	// on destruction.
+        	/**
+        	 * Flush tile contents to the source. Called implicitly on destruction.
+        	 */
         	void flush();
 
-        	// Destroy the Tile. Implicitly flushes any changes.
+        	/**
+        	 * Destroy the Tile. Implicitly flushes any changes.
+        	 */
         	~Tile();
         };
 
+        /**
+         * Provides a way of iterating over a raster tile by tile.
+         */
         class G_DLL_EXPORT TileIterator {
         	friend class Grid;
         private:
@@ -264,97 +496,234 @@ namespace geo {
 
         protected:
 
-        	// Create a TileIterator of the given size. If a buffer is given,
-        	// The tile size in increased, and pixels are read from the source
-        	// to fill the buffer, however only pixels within the unbuffered
-        	// window are written back.
-        	TileIterator(Grid& source, int cols, int rows, int buffer = 0, int band = 1);
+        	/**
+        	 * Create a TileIterator of the given size. If a buffer is given,
+        	 * The tile size in increased, and pixels are read from the source
+        	 * to fill the buffer, however only pixels within the unbuffered
+        	 * window are written back.
+        	 * @param source The source raster.
+        	 * @param cols The number of columns in each tile.
+        	 * @param rows The number of rows in each tile.
+        	 * @param buffer The size of the buffer around the tile.
+        	 * @param band The band in the source raster.
+        	 */
+        	TileIterator(Grid& source, int cols, int rows, int buffer, int band);
+
+        	/**
+        	 * Copy constructor.
+        	 */
+        	TileIterator(const TileIterator& iter);
+
+        	/**
+        	 * Construct a TileIterator.
+        	 */
+        	TileIterator();
 
         public:
 
-        	// Returns true if there's another tile to be
-        	// retrieved
+        	/**
+        	 * Returns true if there's another tile to be retrieved.
+        	 */
         	bool hasNext();
 
-        	// Returns the number of tiles.
+        	/**
+        	 * Returns the number of tiles.
+        	 */
         	int count() const;
 
-        	// Returns the next tile. Writes the previous tile to
-        	// source (if there is one) and reads the next one.
+        	/**
+        	 * Returns the next tile. Writes the previous tile to source
+        	 * (if there is one) and reads the next one.
+        	 */
         	Tile next();
 
-        	// Create a Tile using the given tile as a Template.
-        	// Does not interfere with the iterator.
+        	/**
+        	 * Create a Tile using the given tile as a Template. Does not
+        	 * interfere with the iterator.
+        	 * @param tpl A tile template.
+        	 */
         	Tile create(Tile &tpl);
 
-        	// Destroy the TileIterator.
+        	/**
+        	 * Destroy the TileIterator.
+        	 */
         	~TileIterator();
         };
 
-        // Abstract class for grids (rasters).
+        /**
+         * Abstract class for grids (rasters).
+         */
         class G_DLL_EXPORT Grid {
         public:
+
+        	/**
+        	 * Construct the grid.
+        	 */
             Grid();
 
+            /**
+             * Destroy the grid.
+             */
             virtual ~Grid() = 0;
             
-            // Return a tile iterator;
-            std::unique_ptr<TileIterator> iterator(int cols, int rows, int buffer = 0, int band = 1);
+            /**
+             * Return a tile iterator.
+             * @param cols The number of columns in each tile.
+             * @param rows The number of rows in each tile.
+             * @param buffer The buffer around the tile.
+             * @param band The band in the source raster.
+             */
+            TileIterator iterator(int cols, int rows, int buffer = 0, int band = 1);
 
-            // Compute the table of Gaussian weights given the size of the table
-            // and the std. deviation.
+            /**
+             * Compute the table of Gaussian weights given the size of
+             * the table and the standard deviation.
+             * @param weights The list of weights.
+             * @param size The size of the weights list.
+             * @param sigma The standard deviation.
+             */
             static void gaussianWeights(double *weights, int size, double sigma);
 
+            /**
+             * Compute and return the statistics for the band.
+             * @param band The raster band.
+             */
             GridStats stats(int band);
 
-            // Returns the grid properties
+            /**
+             * Returns the grid properties.
+             */
             virtual const GridProps &props() const = 0;
 
-            // Fill the entire dataset with the given value.
+            /**
+             * Fill the entire dataset with the given value.
+             * @param value The value to fill the raster with.
+             * @param band The band to fill.
+             */
             virtual void fillFloat(double value, int band = 1) = 0;
+
+            /**
+             * Fill the entire dataset with the given value.
+             * @param value The value to fill the raster with.
+             * @param band The band to fill.
+             */
             virtual void fillInt(int value, int band = 1) = 0;
 
-            // Return a the value held at the given index in the grid.
+            /**
+             * Return a the value held at the given index in the grid.
+             * @param idx The index in the raster; left to right, top to bottom.
+             * @param band The band.
+             */
             virtual int getInt(uint64_t idx, int band = 1) = 0;
+
+            /**
+             * Return a the value held at the given position in the grid.
+             * @param col The column.
+             * @param row The row.
+             * @param band The band.
+             */
             virtual int getInt(int col, int row, int band = 1) = 0;
+
+            /**
+             * Return a the value held at the given index in the grid.
+             * @param idx The index in the raster; left to right, top to bottom.
+             * @param band The band.
+             */
             virtual double getFloat(uint64_t idx, int band = 1) = 0;
+
+            /**
+             * Return a the value held at the given position in the grid.
+             * @param col The column.
+             * @param row The row.
+             * @param band The band.
+             */
             virtual double getFloat(int col, int row, int band = 1) = 0;
 
-            // Set the value held at  the given index in the grid.
+            /**
+             * Set the value held at  the given index in the grid.
+             * @param idx The index in the raster; left to right, top to bottom.
+             * @param value The value to set.
+             * @param band The band.
+             */
             virtual void setInt(uint64_t idx, int value, int band = 1) = 0;
+
+            /**
+             * Set the value held at  the given index in the grid.
+             * @param col The column.
+             * @param row The row.
+             * @param value The value to set.
+             * @param band The band.
+             */
             virtual void setInt(int col, int row, int value, int band = 1) = 0;
+
+            /**
+             * Set the value held at  the given index in the grid.
+             * @param idx The index in the raster; left to right, top to bottom.
+             * @param value The value to set.
+             * @param band The band.
+             */
             virtual void setFloat(uint64_t idx, double value, int band = 1) = 0;
+
+            /**
+             * Set the value held at  the given index in the grid.
+             * @param col The column.
+             * @param row The row.
+             * @param value The value to set.
+             * @param band The band.
+             */
             virtual void setFloat(int col, int row, double value, int band = 1) = 0;
 
-            // Write data from the current Grid instance to the given grid.
+            /**
+             * Write data from the current Grid instance to the given grid.
+             * @param grd The target grid.
+             * @param cols The number of columns to write.
+             * @param rows The number of rows to write.
+             * @param srcCol The source column to read from.
+             * @param srcRow The source row to read from.
+             * @param dstCol The destination column to write to.
+             * @param dstRow The destination row to write to.
+             * @param srcBand The source band.
+             * @param dstBand The destination band.
+             */
             virtual void writeTo(Grid &grd,
             		int cols = 0, int rows = 0,
             		int srcCol = 0, int srcRow = 0,
 					int dstCol = 0, int dstRow = 0,
 					int srcBand = 1, int dstBand = 1) = 0;
 
-            // Normalize the grid so that one standard deviation is +-1.
+            /**
+             * Normalize the grid so that one standard deviation is +-1.
+             * @param band The target band.
+             */
             void normalize(int band = 1);
 
-            // Normalize the grid so that the max value is equal to 1, and
-            // the minimum is zero.
+            /**
+             * Normalize the grid so that the max value is equal to 1, and the
+             * minimum is zero.
+             * @param band The target band.
+             */
             void logNormalize(int band = 1);
 
-            // Convert a Grid to some other type.
+            /**
+             * Convert a Grid to some other type.
+             */
             void convert(Grid &g, int srcBand = 1, int dstBand = 1);
 
-            // Fill the grid, beginning with the target cell, where any contiguous cell
-            // satisfies the given FillOperator. The other grid is actually filled,
-            // and the present grid is unchanged *unless* the present grid is passed
-            // as other.
-            // col, row -- The column and row to start on.
-            // op       -- A FillOperator instance which will determine
-            //             whether a pixel should be filled.
-            // other    -- The grid whose cells will actually be filled.
-            // fill     -- The value to fill cells with.
-            // d8       -- Whether to enable diagonal fills.
-            // out*     -- Pointer to variables that hold min and max rows and columns
-            //             plus the area of the fill's bounding box.
+            /**
+             * Fill the grid, beginning with the target cell, where any contiguous cell
+             * satisfies the given FillOperator. The other grid is actually filled,
+             * and the present grid is unchanged *unless* the present grid is passed
+             * as other.
+             * @param col   The column to start on.
+             * @param row   The row to start on.
+             * @param op    A FillOperator instance which will determine
+             *              whether a pixel should be filled.
+             * @param other The grid whose cells will actually be filled.
+             * @param fill  The value to fill cells with.
+             * @param d8    Whether to enable diagonal fills.
+             * @param out*  Pointer to variables that hold min and max rows and columns
+             *              plus the area of the fill's bounding box.
+             */
             template <class T, class U>
             static void floodFill(int col, int row,
                 FillOperator<T, U> &op,  bool d8 = false,
@@ -459,19 +828,37 @@ namespace geo {
                     *outarea = area;
             }
 
-            // Smooth the raster and write the smoothed version to the output raster.
-            // Callback is an optional function reference with a single float
-            // between 0 and 1, for status tracking.
+            /**
+             * Smooth the raster and write the smoothed version to the output raster.
+             * Callback is an optional function reference with a single float
+             * between 0 and 1, for status tracking.
+             * @param smoothed The smoothed grid.
+             * @param sigma    The standard deviation.
+             * @param size     The window size.
+             * @param band     The target band.
+             * @param status   A pointer to a Status object which will be updated with
+             *                 the current status of the process.
+             * @param cancel   A pointer to a variable that will be true if the
+             *                 process should be cancelled.
+			 */
             void smooth(Grid &smoothed, double sigma = 0.84089642, int size = 3, int band = 1,
                 Status* status = nullptr,
                 bool *cancel = nullptr);
 
-            // The radius is given with cells as the unit, but
-            // can be rational. When determining which cells to
-            // include in the calculation, any cell which partially
-            // falls in the radius will be included.
+            /**
+             * The radius is given with cells as the unit, but
+             * can be rational. When determining which cells to
+             * include in the calculation, any cell which partially
+             * falls in the radius will be included.
+             * @param radius The search radius.
+             * @param count  The number of pixels to use for calculations.
+             * @param exp    The exponent.
+             * @param band   The target band.
+			 */
             void voidFillIDW(double radius, int count = 4, double exp = 2.0, int band = 1);
 
+
+            // TODO: Document me.
         	template <class V>
         	void writeAStarPath(uint64_t start, std::unordered_map<uint64_t, uint64_t>& parents, V inserter) {
         		*inserter = start;
