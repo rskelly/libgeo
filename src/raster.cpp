@@ -523,6 +523,10 @@ TileIterator::TileIterator(Grid& source, int cols, int rows, int buffer, int ban
 		g_runerr("The column and row size must be larger than the buffer.");
 }
 
+TileIterator::TileIterator(const TileIterator& iter) :
+		TileIterator(iter.m_source, iter.m_cols, iter.m_rows, iter.m_buffer, iter.m_band) {
+}
+
 bool TileIterator::hasNext() {
 	std::lock_guard<std::mutex> lk(m_mtx);
 	const GridProps& p = m_source.props();
@@ -588,9 +592,8 @@ TileIterator::~TileIterator() {
 Grid::Grid() {
 }
 
-std::unique_ptr<TileIterator> Grid::iterator(int cols, int rows, int buffer, int band) {
-	std::unique_ptr<TileIterator> t(new TileIterator(*this, cols, rows, buffer, band));
-	return std::move(t);
+TileIterator Grid::iterator(int cols, int rows, int buffer, int band) {
+	return TileIterator(*this, cols, rows, buffer, band);
 }
 
 void Grid::gaussianWeights(double *weights, int size, double sigma) {
@@ -764,14 +767,14 @@ void Grid::smooth(Grid &smoothed, double sigma, int size, int band,
 	if (status)
 		status->update(0.02f);
 
-	std::unique_ptr<TileIterator> iter = iterator(512, 512, size, band);
-	int tiles = iter->count();
+	TileIterator iter = iterator(512, 512, size, band);
+	int tiles = iter.count();
 
 	#pragma omp parallel for
 	for (int i = 0; i < tiles; ++i) {
 		if (*cancel) continue;
 
-		Tile tile = iter->next();
+		Tile tile = iter.next();
 
 		Grid& grid = tile.grid();
 		const GridProps& props = grid.props();
