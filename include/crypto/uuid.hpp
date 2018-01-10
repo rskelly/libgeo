@@ -1,5 +1,7 @@
 /*
- * uuid.hpp
+ * Adapted from https://gist.github.com/ne-sachirou/882192
+ * std::rand() can be replaced with other algorithms as Xorshift for better perfomance
+ * Random seed must be initialized by user
  *
  *  Created on: Nov 22, 2017
  *      Author: rob
@@ -11,17 +13,20 @@
 #include <string>
 #include <cstdlib>
 
-//*Adapted from https://gist.github.com/ne-sachirou/882192
-//*std::rand() can be replaced with other algorithms as Xorshift for better perfomance
-//*Random seed must be initialized by user
-
 namespace geo {
 namespace crypto {
 
 const std::string CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
+/**
+ * Provides UUID strings.
+ */
 class UUID {
 public:
+
+	/**
+	 * Return a unique identifier string.
+	 */
 	static std::string uuid(){
 	  std::string uuid = std::string(36,' ');
 	  int rnd = 0;
