@@ -85,7 +85,7 @@ DB::DB(const std::string &file, const std::string &layer, const std::string &dri
 	// If the driver was not given, try to discover it from an existing file,
 	// otherwise fail.
 	if (m_driver.empty()) {
-		GDALDataset* ds = (GDALDataset *)GDALOpenEx(m_file.c_str(), GDAL_OF_VECTOR | GDAL_OF_READONLY, NULL, NULL, NULL);
+		GDALDataset* ds = static_cast<GDALDataset*>(GDALOpenEx(m_file.c_str(), GDAL_OF_VECTOR | GDAL_OF_READONLY, NULL, NULL, NULL));
 		if (!ds)
 			g_runerr("Driver not given and no existing file to read from.");
 		const char* drv = ds->GetDriverName();
@@ -156,7 +156,7 @@ DB::DB(const std::string &file, const std::string &layer) :
 
     GDALAllRegister();
 
-    m_ds = (GDALDataset *) GDALOpenEx(m_file.c_str(), GDAL_OF_VECTOR|GDAL_OF_UPDATE, NULL, NULL, NULL);
+    m_ds = static_cast<GDALDataset*>(GDALOpenEx(m_file.c_str(), GDAL_OF_VECTOR|GDAL_OF_UPDATE, NULL, NULL, NULL));
     if(!m_ds)
         g_runerr("Failed to open data set for " << m_file);
 
@@ -274,7 +274,7 @@ void DB::createGeomIndex(const std::string& table, const std::string& column) {
 }
 
 uint64_t DB::getGeomCount() const {
-	return (uint64_t) m_layer->GetFeatureCount(1);
+	return static_cast<uint64_t>(m_layer->GetFeatureCount(1));
 }
 
 void DB::execute(std::string &sql) {
