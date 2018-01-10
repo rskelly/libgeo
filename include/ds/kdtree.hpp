@@ -1,5 +1,5 @@
 /*
- * kdtree.hpp
+ * This is wrapper around the ANN KDTree.
  *
  *  Created on: Nov 17, 2017
  *      Author: rob
@@ -23,6 +23,9 @@ using namespace geo::util;
 namespace geo {
 namespace ds {
 
+/**
+ * A 3D point class that can be used in the KDTree.
+ */
 class KDPoint {
 private:
 	double m_x, m_y, m_z;
@@ -54,6 +57,13 @@ public:
 	}
 };
 
+/**
+ * A KDTree.
+ *
+ * It is assumed that the template is a class with a [] operator
+ * which will return a value corresponding to the dimension,
+ * which is the modulus of the given index.
+ */
 template <class T>
 class KDTree {
 private:
@@ -62,52 +72,9 @@ private:
 	ANNkd_tree* m_tree;
 	size_t m_dims;
 
-public:
-
-	KDTree(size_t dims) :
-		m_pts(nullptr),
-		m_tree(nullptr),
-		m_dims(dims) {
-	}
-
-	void add(T& item) {
-		m_items.push_back(item);
-	}
-
-	template <class Iter>
-	void add(Iter begin, Iter end) {
-		m_items.insert(m_items.begin(), begin, end);
-	}
-
-	bool build() {
-
-		// Clean up existing tree, etc.
-		if(m_tree)
-			destroy();
-
-		if(m_items.size() < 1) 
-			g_runerr("Not enough items.");
-
-		// Set up the points buffer.
-		m_pts = annAllocPts(m_items.size(), m_dims);
-
-		// Write points into the buffer and save pointers.
-		for(size_t i = 0; i < m_items.size(); ++i) {
-			for(size_t j = 0; j < m_dims; ++j)
-				m_pts[i][j] = m_items[i][j];
-		}
-		// Set up the tree.
-		m_tree = new ANNkd_tree(m_pts, m_items.size(), m_dims);
-	}
-
-	int size() const {
-		return m_items.size();
-	}
-
-	const std::vector<T>& items() const {
-		return m_items;
-	}
-
+	/**
+	 * Destroy the tree.
+	 */
 	void destroy() {
 		if(m_tree) {
 			delete m_tree;
@@ -120,6 +87,88 @@ public:
 		}
 	}
 
+public:
+
+	/**
+	 * Construct the KDTree with the given number of dimensions.
+	 */
+	KDTree(size_t dims) :
+		m_pts(nullptr),
+		m_tree(nullptr),
+		m_dims(dims) {
+	}
+
+	/**
+	 * Add an item to the tree.
+	 * @param item An item.
+	 */
+	void add(T& item) {
+		m_items.push_back(item);
+	}
+
+	/**
+	 * Add the items to the tree.
+	 * @param begin The start iterator.
+	 * @param end The end iterator.
+	 */
+	template <class Iter>
+	void add(Iter begin, Iter end) {
+		m_items.insert(m_items.begin(), begin, end);
+	}
+
+	/**
+	 * Build the tree. This destroys the existing tree and
+	 * attempts to rebuild it using the existing list of items.
+	 * If there are no items, just destroys the existing tree
+	 * and does nothing.
+	 */
+	void build() {
+
+		// Clean up existing tree, etc.
+		if(m_tree)
+			destroy();
+
+		if(m_items.empty())
+			g_runerr("Not enough items.");
+
+		// Set up the points buffer.
+		m_pts = annAllocPts(m_items.size(), m_dims);
+
+		// Write points into the buffer and save pointers.
+		for(size_t i = 0; i < m_items.size(); ++i) {
+			for(size_t j = 0; j < m_dims; ++j)
+				m_pts[i][j] = m_items[i][j];
+		}
+
+		// Set up the tree.
+		m_tree = new ANNkd_tree(m_pts, m_items.size(), m_dims);
+	}
+
+	/**
+	 * Returns the number of items in the tree.
+	 */
+	int size() const {
+		return m_items.size();
+	}
+
+	/**
+	 * Returns a reference to the vector containing all
+	 * items added to the tree.
+	 */
+	const std::vector<T>& items() const {
+		return m_items;
+	}
+
+	/**
+	 * Perform a k-nearest neighbour search on the items. Returns
+	 * the number of items that were found and appends the found items
+	 * and distances to the given iterators.
+	 * @param item The search item; of the same type as the tree items.
+	 * @param count The number of items to return.
+	 * @param titer A back_inserter for the found items.
+	 * @param diter A back_inserter for the item distances.
+	 * @param eps The allowable error bound.
+	 */
 	template <class TIter, class DIter>
 	int knn(const T& item, size_t count, TIter titer, DIter diter, double eps = 0.0) {
 
@@ -128,10 +177,12 @@ public:
 			return 0;
 		}
 
+		if(m_items.empty())
+			g_runerr("Count too small: " << count);
+
+		// If the count is higher than the number of items, shrink it.
 		if(count > m_items.size())
 			count = m_items.size();
-		if(count < 1)
-			g_runerr("Count too small: " << count);
 
 		// Turn the search item into an array of doubles castable to ANNpoint.
 		std::vector<ANNcoord> pt(m_dims);
