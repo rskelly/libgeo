@@ -127,10 +127,10 @@ public:
 					liblas::Reader rdr = fact.CreateWithStream(str);
 					while(rdr.ReadNextPoint()) {
 						const liblas::Point& pt = rdr.GetPoint();
-						if(pt.GetClassification().GetClass() == 2) {
+						//if(pt.GetClassification().GetClass() == 2) {
 							LASPoint lpt(pt);
 							tree->add(lpt);
-						}
+						//}
 					}
 				}
 				try {
@@ -220,7 +220,7 @@ public:
 };
 
 void usage() {
-	std::cerr << "Usage: las2grid <output raster> <input las [*]>\n"
+	std::cerr << "Usage: las2grid [options] <output raster> <input las [*]>\n"
 			<< " -r <resolution> The output resolution in map units.\n"
 			<< " -e <easting>    The top left corner horizontal alignment\n"
 			<< "                 (defaults to nearest multiple of resolution).\n"

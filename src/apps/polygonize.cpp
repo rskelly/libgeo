@@ -75,6 +75,7 @@ int main(int argc, char** argv) {
 
 	Raster test(args[0]);
 	test.polygonize(args[1], args[2], driver, srid, band, threads, bufSize, holes, dangles, nullptr, nullptr);
+	//test.potrace(args[1], args[2], driver, srid, band, threads, holes, dangles, nullptr, nullptr);
 
 	return 0;
 }

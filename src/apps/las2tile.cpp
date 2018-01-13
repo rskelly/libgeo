@@ -76,111 +76,91 @@ public:
 		int cols = (int) ((allBounds[2] - allBounds[0]) / size) + 1;
 		int rows = (int) ((allBounds[3] - allBounds[1]) / size) + 1;
 
-		std::unordered_map<int, double*> bounds;
-		std::unordered_map<int, std::ofstream> streams;
-		std::unordered_map<int, std::unique_ptr<liblas::Writer> > writers;
-		std::unordered_map<int, std::string> outfiles;
-		std::unordered_map<int, int> pos;
-		int currentOpen = -1;
+		std::cerr << "cols " << cols << "; rows " << rows << "\n";
 
 		liblas::ReaderFactory rfact;
 
-		{
-			// Get the header from the first file to use as a template.
-			std::ifstream str(files[0].filename, std::ios::in | std::ios::binary);
-			liblas::Reader rdr = rfact.CreateWithStream(str);
-			const liblas::Header& hdr = rdr.GetHeader();
+		for(int r = 0; r < rows; ++r) {
+			for(int c = 0; c < cols; ++c) {
+	
+				std::stringstream ss;
+				ss << "tile_" << (int) (c * size + allBounds[0]) << "_" << (int) (r * size + allBounds[1] + size) << ".las";
+				std::string outfile = Util::pathJoin(outdir, ss.str());
 
-			for(int r = 0; r < rows; ++r) {
-				for(int c = 0; c < cols; ++c) {
-					
-					int idx = (r << 16) | c;
-					
-					std::stringstream ss;
-					ss << "tile_" << (int) (c * size + allBounds[0]) << "_" << (int) (r * size + allBounds[3]) << ".las";
-					
-					double bnds[6] = {9999999999, 9999999999, -9999999999, -9999999999, 999999999, -999999999};
+				std::cout << outfile << "\n";
 
-					liblas::Header whdr(hdr);
-					std::ofstream of;
+				std::ofstream ostr(outfile, std::ios::out | std::ios::binary);
+				std::unique_ptr<liblas::Writer> owtr;
 
-					// Set the bounds.
-					bounds.insert(std::make_pair(idx, bnds));
-					// Set the filename.
-					outfiles[idx] = Util::pathJoin(outdir, ss.str());
-					// Open the stream for Writer creation.
-					streams[idx].open(outfiles[idx]);
-					// Create the Writer.
-					writers[idx].reset(new liblas::Writer(streams[idx], whdr));
-					// Get the stream position and close it.
-					pos[idx] = streams[idx].tellp();
-					streams[idx].close();
-				}
-			}
-		}
+				double bnds[6] = {9999999999, 9999999999, -9999999999, -9999999999, 999999999, -999999999};
+				int returns = 0;
+				int retNum[5] = {0, 0, 0, 0, 0};
 
-		for(const LASFile& f : files) {
+				double minx = (c * size) + easting;
+				double maxx = minx + size;
+				double maxy = northing - (r * size);
+				double miny = maxy - size;
 
-			std::ifstream str(f.filename, std::ios::in | std::ios::binary);
-			liblas::Reader rdr = rfact.CreateWithStream(str);
+				for(LASFile& file : files) {
 
-			while(rdr.ReadNextPoint()) {
-				
-				liblas::Point pt(rdr.GetPoint());
-				
-				double x = pt.GetX();
-				double y = pt.GetY();
-				double z = pt.GetZ();
-				
-				int col = (int) ((x - easting) / size);
-				int row = (int) ((northing - y) / size);
-				int idx = (row << 16) | col;
-				
-				if(idx != currentOpen) {
-					if(currentOpen > -1 && streams[currentOpen].is_open()) {
-						// If the currentOpen index is valid, get the 
-						// open stream's position and close it.
-						std::ofstream& of = streams[currentOpen]; 
-						pos[currentOpen] = of.tellp();
-						of.close();
+					if(file.bounds[0] > maxx || file.bounds[2] < minx || file.bounds[1] > maxy || file.bounds[3] < miny)
+						continue;
+
+					// Get the header from the first file to use as a template.
+					std::ifstream istr(file.filename, std::ios::in | std::ios::binary);
+					liblas::Reader irdr = rfact.CreateWithStream(istr);
+					const liblas::Header& ihdr = irdr.GetHeader();
+
+					if(!owtr.get()) {
+						liblas::Header ohdr(ihdr);
+						owtr.reset(new liblas::Writer(ostr, ohdr));
 					}
-					// Open and seek the new stream, record active
-					// index.
-					std::ofstream& of = streams[idx];
-					of.open(outfiles[idx]);
-					of.seekp(pos[idx]);
-					currentOpen = idx;
+
+					const liblas::Header& ohdr = owtr->GetHeader();
+
+					while(irdr.ReadNextPoint()) {
+						
+						liblas::Point pt(irdr.GetPoint());
+						
+						double x = pt.GetX();
+						double y = pt.GetY();
+
+						if(x < minx || x >= maxx || y < miny || y >= maxy)
+							continue;
+
+						double z = pt.GetZ();
+						
+						pt.SetHeader(&ohdr);
+						owtr->WritePoint(pt);
+						
+						++returns;
+						retNum[pt.GetReturnNumber() - 1]++;
+
+						if(x < bnds[0]) bnds[0] = x;
+						if(x > bnds[2]) bnds[2] = x;
+						if(y < bnds[1]) bnds[1] = y;
+						if(y > bnds[3]) bnds[3] = y;
+						if(z < bnds[4]) bnds[4] = z;
+						if(z > bnds[5]) bnds[5] = z;
+					}
 				}
 
-				liblas::Writer* wtr = writers[idx].get();
-				if(!wtr)
-					continue;
-				const liblas::Header& hdr = wtr->GetHeader();
-				
-				pt.SetHeader(&hdr);
-				wtr->WritePoint(pt);
-				
-				double* bnds = bounds[idx];
-				if(x < bnds[0]) bnds[0] = x;
-				if(x > bnds[2]) bnds[2] = x;
-				if(y < bnds[1]) bnds[1] = y;
-				if(y > bnds[3]) bnds[3] = y;
-				if(z < bnds[4]) bnds[4] = z;
-				if(z > bnds[5]) bnds[5] = z;
+				if(returns == 0) {
+					owtr.reset();
+					ostr.close();
+					Util::rm(outfile);
+				} else {
+					liblas::Header ohdr(owtr->GetHeader());
+					ohdr.SetMin(bnds[0], bnds[2], bnds[4]);
+					ohdr.SetMax(bnds[1], bnds[3], bnds[5]);
+					for(int i = 0; i < 5; ++i)
+						ohdr.SetPointRecordsByReturnCount(i, retNum[i]);
+					ohdr.SetPointRecordsCount(returns);
+					owtr->SetHeader(ohdr);
+				}
 			}
 		}
 
-		for(auto& p : writers) {
-			double* bnds = bounds[p.first];
-			liblas::Writer* wtr = writers[p.first].get();
-			if(!wtr)
-				continue;
-			liblas::Header nhdr(wtr->GetHeader());
-			nhdr.SetMax(bnds[2], bnds[3], bnds[5]);
-			nhdr.SetMin(bnds[0], bnds[1], bnds[4]);
-			wtr->SetHeader(nhdr);
-			streams[p.first].close();
-		}
 	}
 
 	~Tiler() {

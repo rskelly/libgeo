@@ -34,3 +34,4 @@ makefiles
 .settings
 /build/
 build
+/data/

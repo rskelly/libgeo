@@ -26,6 +26,7 @@
 #include <geos/geom/CoordinateArraySequence.h>
 #include <geos/geom/Geometry.h>
 #include <geos/geom/Polygon.h>
+#include <geos/geom/Point.h>
 #include <geos/geom/LinearRing.h>
 #include <geos/geom/CoordinateSequence.h>
 #include <geos/operation/union/CascadedPolygonUnion.h>
@@ -1642,14 +1643,16 @@ class Poly {
 private:
 
 	// The final geometry.
-	geos::geom::Geometry* m_final;
+	geos::geom::Geometry* m_geom;
+	// The list of consitiuent geometries.
+	std::vector<geos::geom::Geometry*> m_geoms;
 	// Unique geometry ID.
 	uint64_t m_id;
 	// The minimum and maximum row
 	// index from the source raster.
 	int m_minRow, m_maxRow;
-	// The list of constituent geometries.
-	std::vector<geos::geom::Polygon*> m_geoms;
+	// True if this poly has already been finalized.
+	bool m_finalized;
 
 	/**
 	 * Add the list of polygons to this instance with the rows
@@ -1660,7 +1663,7 @@ private:
 	 */
 	void update(std::vector<Polygon*>& u, int minRow, int maxRow) {
 		for (Polygon* p : u)
-			m_geoms.push_back(p);
+			m_geoms.push_back(static_cast<Geometry*>(p));
 		update(minRow, maxRow);
 	}
 
@@ -1686,10 +1689,11 @@ public:
 	 * @param id A unique ID.
 	 */
 	Poly(uint64_t id) :
-		m_final(nullptr),
+		m_geom(nullptr),
 		m_id(id),
 		m_minRow(std::numeric_limits<int>::max()),
-		m_maxRow(std::numeric_limits<int>::min()) {
+		m_maxRow(std::numeric_limits<int>::min()),
+		m_finalized(false) {
 	}
 
 	/**
@@ -1697,8 +1701,8 @@ public:
 	 * @param p The Poly to add.
 	 */
 	void update(Poly& p) {
-		std::vector<Polygon*> geoms = p.geoms();
-		update(geoms, p.minRow(), p.maxRow());
+		p.collapse();
+		update(p.geom(), p.minRow(), p.maxRow());
 	}
 
 	/**
@@ -1708,7 +1712,7 @@ public:
 	 * @param minRow The lowest row index occupied by this geometry.
 	 * @param maxRow The highest row index occupied by this geometry.
 	 */
-	void update(Polygon* u, int minRow, int maxRow) {
+	void update(Geometry* u, int minRow, int maxRow) {
 		m_geoms.push_back(u);
 		update(minRow, maxRow);
 	}
@@ -1727,8 +1731,37 @@ public:
 	/**
 	 * Return the pointer to the unioned polygon.
 	 */
-	Geometry* getPoly() const {
-		return m_final;
+	Geometry* geom() const {
+		return m_geom;
+	}
+
+	const std::vector<Geometry*>& geoms() const {
+		return m_geoms;
+	}
+
+	void collapse() {
+		if(!m_geoms.empty()) {
+			std::vector<Polygon*> polys;
+			for(Geometry* g : m_geoms) {
+				switch(g->getGeometryTypeId()){
+				case GEOS_MULTIPOLYGON:
+					for(size_t i = 0; i < g->getNumGeometries(); ++i)
+						polys.push_back(dynamic_cast<Polygon*>(g->getGeometryN(i)->clone()));
+					break;
+				case GEOS_POLYGON:
+					polys.push_back(dynamic_cast<Polygon*>(g->clone()));
+					break;
+				default:
+					g_runerr("Illegal geometry type: " << g->getGeometryTypeId());
+					break;
+				}
+				delete g;
+			}
+			Geometry* p = geos::operation::geounion::CascadedPolygonUnion::CascadedPolygonUnion::Union(&polys);
+			m_geoms.clear();
+			m_geoms.push_back(p);
+			std::cerr << "collapse\n";
+		}
 	}
 
 	/**
@@ -1739,29 +1772,18 @@ public:
 	 */
 	void finalize(const GeometryFactory::unique_ptr& fact, bool removeHoles, bool removeDangles) {
 
-		// Calculate the union of geometries. This could result in a single poly or a multi.
-		Geometry* geom = geos::operation::geounion::CascadedPolygonUnion::Union(&m_geoms);
+		if(m_finalized)
+			return;
+		m_finalized = true;
 
-		for(Geometry* g : m_geoms)
-			delete g;
-		m_geoms.clear();
+		collapse();
 
-		if (!geom)
-			g_runerr("Failed to compute geometry.");
-
-		int typeId = geom->getGeometryTypeId();
-
-		// If the result is a single polygon, turn it into a multi.
-		if(typeId == GEOS_POLYGON) {
-			std::vector<Geometry*>* geoms0 = new std::vector<Geometry*>();
-			geoms0->push_back(geom);
-			geom = fact->createMultiPolygon(geoms0); // Do not copy -- take ownership.
-		}
+		Geometry* geom = fact->createMultiPolygon(m_geoms);
 
 		// If we're removing dangles, throw away all but the
 		// largest single polygon. If it was originally a polygon,
 		// there are no dangles.
-		if(removeDangles && typeId != GEOS_POLYGON) {
+		if(removeDangles) {
 			size_t idx = 0;
 			double area = 0;
 			for(size_t i = 0; i < geom->getNumGeometries(); ++i) {
@@ -1792,14 +1814,7 @@ public:
 			geom = g;
 		}
 
-		m_final = geom;
-	}
-
-	/**
-	 * Return the final Geometry.
-	 */
-	Geometry* final() const {
-		return m_final;
+		m_geom = geom;
 	}
 
 	/**
@@ -1823,18 +1838,9 @@ public:
 		return m_maxRow;
 	}
 
-	/**
-	 * Return a copy of the geoms list.
-	 */
-	std::vector<Polygon*> geoms() const {
-		return std::vector<Polygon*>(m_geoms.begin(), m_geoms.end());
-	}
-
 	~Poly() {
-		for(Geometry* g : m_geoms)
-			delete g;
-		if(m_final)
-			delete m_final;
+		if(m_geom)
+			delete m_geom;
 	}
 };
 
@@ -1897,6 +1903,10 @@ public:
 	~PolyContext() {
 		if(m_ds)
 			GDALClose(m_ds);
+	}
+
+	const GeometryFactory::unique_ptr* geomFactory() const {
+		return &m_geomFactory;
 	}
 
 	void readFinish() {
@@ -1987,7 +1997,7 @@ public:
 		// Buffer for reading raster.
 		GridProps gp(props);
 		gp.setSize(cols, m_bufSize);
-		MemRaster blockBuf(gp);
+		MemRaster blockBuf(gp, false);
 
 		// Buffer to hold individual row data.
 		std::vector<int> rowBuf(cols);
@@ -2116,7 +2126,6 @@ public:
 			}
 
 			if(geom.get()) {
-				// Union and trim polygons (TODO: Should be a single method.)
 				geom->finalize(m_geomFactory, m_removeHoles, m_removeDangles);
 				{
 					std::lock_guard<std::mutex> lk(m_polyQueueMtx);
@@ -2129,6 +2138,30 @@ public:
 
 		std::cerr << "poly transfer queue finished\n";
 
+		notifyWrite();
+	}
+
+	std::unique_ptr<Poly> polyFromPath(int id, const std::vector<double>& path) {
+		// Build the geometry.
+		CoordinateSequence* seq = m_geomFactory->getCoordinateSequenceFactory()->create(path.size(), 2);
+		// Add the coords.
+		for(size_t i = 0; i < path.size(); i += 2)
+			seq->add(Coordinate(path[i], path[i+1]));
+		// Get the ring and make a polygon.
+		LinearRing* ring = m_geomFactory->createLinearRing(seq);
+		Polygon* geom = m_geomFactory->createPolygon(ring, NULL);
+		// Create and return the poly.
+		std::unique_ptr<Poly> p(new Poly(id));
+		p->update(geom, 0, 0);
+		return std::move(p);
+	}
+
+	void enqueuePoly(std::unique_ptr<Poly>& poly) {
+		poly->finalize(m_geomFactory, m_removeHoles, m_removeDangles);
+		{
+			std::lock_guard<std::mutex> lk(m_polyQueueMtx);
+			m_polyQueue.push(std::move(poly));
+		}
 		notifyWrite();
 	}
 
@@ -2159,7 +2192,7 @@ public:
 			std::cerr << "write\n";
 
 			// Retrieve the unioned geometry and write it.
-			Geometry* g = p->getPoly();
+			Geometry* g = p->geom();
 			OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(m_gctx, (GEOSGeom) g);
 			OGRFeature feat(m_layer->GetLayerDefn());
 			feat.SetGeometry(geom);
@@ -2182,6 +2215,163 @@ public:
 	}
 
 };
+
+/*
+void Raster::voidfill(const std::string& filename, int band, const std::string& method, const std::string mask) {
+
+	bool hasMask = !mask.empty();
+
+	MemRaster rast(props(), false);
+	writeTo(rast);
+
+	std::unique_ptr<MemRaster> mask;
+	if(hasMask) {
+		Raster rmask(mask);
+		mask.reset(new MemRaster(rmask.props(), false));
+		rmask.writeTo(*mask);
+	}
+
+	if(type == "idw") {
+		fillIdw(rast, mask)	
+	} else if(type == "nearest") {
+		fillNearest(rast, mask);
+	}
+
+	GridProps props(props);
+	props.setWritable(true);
+	Raster output(filename, props());
+	rast.writeTo(output);
+}
+*/
+
+void computeDirection(int tl, int tr, int bl, int br, int target, int& c, int& r) {
+	int q = (tl == target && tr == target ? 1 : 0) | (bl == target && br == target ? 2 : 0)
+			| (tl == target && bl == target ? 4 : 0) | (tr == target && br == target ? 8 : 0);
+
+	int p = (tl == target ? 1 : 0) | (tr == target ? 2 : 0) | (bl == target ? 4 : 0) | (br == target ? 8 : 0);
+
+	//std::cerr << q << ", " << p << "\n";
+
+	switch(q) {
+	case 1:
+	case 9: --c; return;
+	case 2:
+	case 6: ++c; return;
+	case 4:
+	case 5: ++r; return;
+	case 8:
+	case 10: --r; return;
+	case 0:
+		switch(p) {
+		case 1: --c; return;
+		case 2: --r; return;
+		case 4: ++r; return;
+		case 8: ++c; return;
+		case 6:
+		case 9: ++c; return; // Default to right when crossed.
+		}
+	}
+
+	std::cerr << "tl: " << tl << ", tr: " << tr << "\n;";
+	std::cerr << "bl: " << bl << ", br: " << br << "\n;";
+	std::cerr << "target: " << target << "\n";
+	std::cerr << "c : " << c << ", r: " << r << "\n";
+	g_runerr("Failed to determine a direction.");
+}
+
+void Raster::potrace(const std::string& filename, const std::string& layerName,
+		const std::string& driver, uint16_t srid, uint16_t band, uint16_t threads,
+		bool removeHoles, bool removeDangles, Status *status, bool *cancel) {
+
+	std::cerr << "starting potrace\n";
+
+	std::cerr << "copying raster\n";
+	MemRaster rast(props(), true);
+	writeTo(rast);
+
+	int cols = props().cols();
+	int rows = props().rows();
+	int nodata = (int) props().nodata();
+
+	std::cerr << "getting ids\n";
+
+	// The first pixel coordinate for each unique polygon ID.
+	std::unordered_map<int, std::pair<int, int> > ids;
+	for(int r = 0; r < rows; ++r) {
+		for(int c = 0; c < cols; ++c) {
+			int v = rast.getInt(c, r);
+			if(v != nodata && ids.find(v) == ids.end())
+				ids[v] = std::make_pair(c, r);
+		}
+	}
+
+	std::cerr << "initializing writer\n";
+
+	if(!cancel)
+		cancel = &s_cancel;
+
+	const GridProps& gp = props();
+
+	PolyContext ctx(this, status, 0, cancel, 0, band, removeHoles, removeDangles);
+	ctx.initOutput(driver, filename, layerName, srid);
+
+	std::thread transT(&PolyContext::polyQueueTransfer, &ctx);
+	std::thread writeT(&PolyContext::polyWriteQueue, &ctx);
+
+	// For each seed, build a path.
+	for(const std::pair<int, std::pair<int, int> >& poly : ids) {
+
+		std::vector<double> path;
+
+		int c = poly.second.first;
+		int r = poly.second.second;
+		int id = poly.first;
+
+		std::cerr << "building path for " << id << "\n";
+
+		// Add the first vertex to the path.
+		path.push_back(gp.toX(c));
+		path.push_back(gp.toY(r));
+
+		std::cerr << "first: " << c << ", " << r << "; " << props().toX(c) << ", " << props().toY(r) << "\n";
+
+		int c0 = c, r0 = r;
+		size_t count = 0;
+
+		do {
+			// Get the neighbouring values. If the coord is off-raster, the value will be nodata.
+			int tl = rast.getInt(c0 - 1, r0 - 1); // Top left.
+			int tr = rast.getInt(c0, r0 - 1);     // Top right.
+			int bl = rast.getInt(c0 - 1, r0);     // Bottom left.
+			int br = rast.getInt(c0, r0);
+
+			computeDirection(tl, tr, bl, br, id, c0, r0);
+
+			path.push_back(gp.toX(c0));
+			path.push_back(gp.toY(r0));
+
+			if(++count % 10000 == 0)
+				std::cerr << count << "\n";
+
+		} while(!(c0 == c && r0 == r));
+
+		std::cerr << "last: " << c0 << ", " << r0 << "; " << props().toX(c0) << ", " << props().toY(r0) << "\n";
+		std::cerr << " -- " << path[0] << ", " << path[1] << "; " << path[path.size() - 2] << ", " << path[path.size() - 1] << "\n";
+
+		std::unique_ptr<Poly> p = ctx.polyFromPath(id, path);
+		ctx.enqueuePoly(p);
+	}
+
+	ctx.readFinish();
+	ctx.notifyTransfer();
+	transT.join();
+
+	ctx.transferFinish();
+	ctx.notifyWrite();
+	writeT.join();
+
+	ctx.commitOutput();
+}
 
 void Raster::polygonize(const std::string& filename, const std::string& layerName,
 		const std::string& driver, uint16_t srid, uint16_t band, uint16_t threads,
