@@ -1656,6 +1656,9 @@ private:
 	int m_minRow, m_maxRow;
 	// True if this poly has already been finalized.
 	bool m_finalized;
+	// True if the geometries have been collapsed after
+	// the most recent update.
+	bool m_collapsed;
 
 	/**
 	 * Add the list of polygons to this instance with the rows
@@ -1668,6 +1671,7 @@ private:
 		for (Polygon* p : u)
 			m_geoms.push_back(static_cast<Geometry*>(p));
 		update(minRow, maxRow);
+		m_collapsed = false;
 	}
 
 
@@ -1696,7 +1700,8 @@ public:
 		m_id(id),
 		m_minRow(std::numeric_limits<int>::max()),
 		m_maxRow(std::numeric_limits<int>::min()),
-		m_finalized(false) {
+		m_finalized(false),
+		m_collapsed(false) {
 	}
 
 	/**
@@ -1718,6 +1723,7 @@ public:
 	void update(Geometry* u, int minRow, int maxRow) {
 		m_geoms.push_back(u);
 		update(minRow, maxRow);
+		m_collapsed = false;
 	}
 
 	/**
@@ -1742,8 +1748,17 @@ public:
 		return m_geoms;
 	}
 
+	void _collapse(std::vector<Polygon*>* group, std::vector<Geometry*>* geoms) {
+		Geometry* p = geos::operation::geounion::CascadedPolygonUnion::CascadedPolygonUnion::Union(group);
+		geoms->push_back(p);
+	}
+
 	void collapse() {
-		if(!m_geoms.empty()) {
+		if(m_collapsed || m_geoms.empty())
+			return;
+		size_t geomCount = m_geoms.size();
+		int change = 1;
+		while(change) {
 			std::vector<Polygon*> polys;
 			for(Geometry* g : m_geoms) {
 				switch(g->getGeometryTypeId()){
@@ -1760,11 +1775,49 @@ public:
 				}
 				delete g;
 			}
-			Geometry* p = geos::operation::geounion::CascadedPolygonUnion::CascadedPolygonUnion::Union(&polys);
 			m_geoms.clear();
-			m_geoms.push_back(p);
-			std::cerr << "collapse\n";
+
+
+			std::cerr << "collapsing " << polys.size() << " polys\n";
+			// The max group size is 1024; min 2.
+			int groupSize = g_max(2, g_min(1024, polys.size() / 16));
+			// If the group size is 2, just use one group.
+			if(groupSize == 2)
+				groupSize = polys.size();
+
+			// The number of items in one group.
+			size_t groupCount = (int) std::ceil((float) polys.size() / groupSize);
+			// Container for thread instances.
+			std::vector<std::thread> threads;
+			// The output geometry groups.
+			std::vector<std::vector<Geometry*> > output(groupCount);
+			// The input polygon groups.
+			std::vector<std::vector<Polygon*> > groups(groupCount);
+
+			size_t i = 0;
+			for(size_t g = 0; g < groupCount; ++g) {
+				for( ; i < g_min((g + 1) * groupSize, polys.size()); ++i)
+					groups[g].push_back(polys[i]);
+				if(!groups[g].empty()) {
+					std::cerr << "starting thread for " << groups[g].size() << " polys\n";
+					threads.push_back(std::thread(&Poly::_collapse, this, &groups[g], &output[g]));
+				}
+			}
+			for(size_t g = 0; g < groupCount; ++g) {
+				if(!groups[g].empty()) {
+					threads[g].join();
+					std::cerr << "inserting " << output[g].size() << " polys\n";
+					m_geoms.insert(m_geoms.end(), output[g].begin(), output[g].end());
+				}
+			}
+
+			change = geomCount - m_geoms.size();
+			geomCount = m_geoms.size();
+
+			std::cerr << "collapse " << change << ", " << geomCount << "\n";
 		}
+
+		m_collapsed = true;
 	}
 
 	/**
@@ -1780,6 +1833,8 @@ public:
 		m_finalized = true;
 
 		collapse();
+
+		std::cerr << "finalize\n";
 
 		Geometry* geom = fact->createMultiPolygon(m_geoms);
 
@@ -1818,6 +1873,7 @@ public:
 		}
 
 		m_geom = geom;
+		std::cerr << "geom " << m_geom << "\n";
 	}
 
 	/**
@@ -1924,9 +1980,8 @@ public:
 		GDALAllRegister();
 
 		// Create the GEOS context and factory.
-		m_gctx = OGRGeometry::createGEOSContext();
-		PrecisionModel pm(100.0);
-		m_geomFactory = GeometryFactory::create(&pm);
+		m_gctx = OGRGeometry::createGEOSContext();	
+		m_geomFactory = GeometryFactory::create(new PrecisionModel(1000.0));
 
 		// Get the vector driver.
 		GDALDriver *drv = GetGDALDriverManager()->GetDriverByName(driver.c_str());
@@ -2146,10 +2201,12 @@ public:
 
 	std::unique_ptr<Poly> polyFromPath(int id, const std::vector<double>& path) {
 		// Build the geometry.
-		CoordinateSequence* seq = m_geomFactory->getCoordinateSequenceFactory()->create(path.size(), 2);
-		// Add the coords.
+		CoordinateSequence* seq = m_geomFactory->getCoordinateSequenceFactory()->create((size_t) 0, 2);
+		std::vector<Coordinate> coords;
 		for(size_t i = 0; i < path.size(); i += 2)
-			seq->add(Coordinate(path[i], path[i+1]));
+			coords.push_back(Coordinate(path[i], path[i+1]));
+		seq->add(&coords, false);
+
 		// Get the ring and make a polygon.
 		LinearRing* ring = m_geomFactory->createLinearRing(seq);
 		Polygon* geom = m_geomFactory->createPolygon(ring, NULL);
@@ -2247,39 +2304,64 @@ void Raster::voidfill(const std::string& filename, int band, const std::string& 
 }
 */
 
-void computeDirection(int tl, int tr, int bl, int br, int target, int& c, int& r) {
+bool computeDirection(int tl, int tr, int bl, int br, int target, int& c, int& r, int& dir) {
 	int q = (tl == target && tr == target ? 1 : 0) | (bl == target && br == target ? 2 : 0)
 			| (tl == target && bl == target ? 4 : 0) | (tr == target && br == target ? 8 : 0);
 
 	int p = (tl == target ? 1 : 0) | (tr == target ? 2 : 0) | (bl == target ? 4 : 0) | (br == target ? 8 : 0);
 
-	//std::cerr << q << ", " << p << "\n";
+	// dir:
+	// 0 - none
+	// 1 - right
+	// 2 - up
+	// 4 - left
+	// 8 - down
 
 	switch(q) {
 	case 1:
-	case 9: --c; return;
-	case 2:
-	case 6: ++c; return;
+	case 9: 
+		switch(dir) {
+		case 2: ++c; dir = 1; return true;
+		case 8: --c; dir = 4; return true;
+		}
+	case 2: 
+	case 6: 
+		switch(dir) {
+		case 1: ++r; dir = 8; return true;
+		case 4: --r; dir = 2; return true;
+		}
 	case 4:
-	case 5: ++r; return;
+	case 5: ++r; dir = 8; return true;
 	case 8:
-	case 10: --r; return;
+	case 10: --r; dir = 2; return true;
 	case 0:
 		switch(p) {
-		case 1: --c; return;
-		case 2: --r; return;
-		case 4: ++r; return;
-		case 8: ++c; return;
+		case 1: --c; dir = 4; return true;
+		case 2: --r; dir = 2; return true;
+		case 4: ++r; dir = 8; return true;
+		case 8: ++c; dir = 1; return true;
 		case 6:
-		case 9: ++c; return; // Default to right when crossed.
+		case 9: ++c; dir = 1; return true; // Default to right when crossed.
 		}
 	}
 
+	/*
 	std::cerr << "tl: " << tl << ", tr: " << tr << "\n;";
 	std::cerr << "bl: " << bl << ", br: " << br << "\n;";
 	std::cerr << "target: " << target << "\n";
 	std::cerr << "c : " << c << ", r: " << r << "\n";
 	g_runerr("Failed to determine a direction.");
+	*/
+	return false;
+}
+
+void rightCoord(int& c, int& r, int dir) {
+	switch(dir) {
+	case 1: break;
+	case 2: --r; break;
+	case 4: --r; --c; break;
+	case 8: --c; break;
+	}
 }
 
 void Raster::potrace(const std::string& filename, const std::string& layerName,
@@ -2294,24 +2376,13 @@ void Raster::potrace(const std::string& filename, const std::string& layerName,
 
 	int cols = props().cols();
 	int rows = props().rows();
-	int nodata = (int) props().nodata();
-
-	std::cerr << "getting ids\n";
-
-	// The first pixel coordinate for each unique polygon ID.
-	std::unordered_map<int, std::pair<int, int> > ids;
-	for(int r = 0; r < rows; ++r) {
-		for(int c = 0; c < cols; ++c) {
-			int v = rast.getInt(c, r);
-			if(v != nodata && ids.find(v) == ids.end())
-				ids[v] = std::make_pair(c, r);
-		}
-	}
-
-	std::cerr << "initializing writer\n";
+	
+	int ignore = 99999;
 
 	if(!cancel)
 		cancel = &s_cancel;
+
+	std::cerr << "initializing writer\n";
 
 	const GridProps& gp = props();
 
@@ -2321,48 +2392,78 @@ void Raster::potrace(const std::string& filename, const std::string& layerName,
 	std::thread transT(&PolyContext::polyQueueTransfer, &ctx);
 	std::thread writeT(&PolyContext::polyWriteQueue, &ctx);
 
+	std::vector<bool> visited(cols * rows);
+	std::fill(visited.begin(), visited.end(), false);
+
+	int lastId = ignore * 2;
+
 	// For each seed, build a path.
-	for(const std::pair<int, std::pair<int, int> >& poly : ids) {
+	for(int r = 0; r < rows; ++r) {
+		for(int c = 0; c < cols; ++c) {
 
-		std::vector<double> path;
+			if(visited[r * cols + c])
+				continue;
 
-		int c = poly.second.first;
-		int r = poly.second.second;
-		int id = poly.first;
+			std::vector<double> path;
 
-		std::cerr << "building path for " << id << "\n";
+			int id = rast.getInt(c, r);
+			if(id == lastId)
+				continue;
+			lastId = id;
 
-		// Add the first vertex to the path.
-		path.push_back(gp.toX(c));
-		path.push_back(gp.toY(r));
+			int c0 = c, r0 = r;
+			size_t count = 0;
 
-		std::cerr << "first: " << c << ", " << r << "; " << props().toX(c) << ", " << props().toY(r) << "\n";
+			std::cerr << "building path for " << id << "\n";
 
-		int c0 = c, r0 = r;
-		size_t count = 0;
+			path.push_back(gp.toX(c));
+			path.push_back(gp.toY(r));
 
-		do {
-			// Get the neighbouring values. If the coord is off-raster, the value will be nodata.
-			int tl = rast.getInt(c0 - 1, r0 - 1); // Top left.
-			int tr = rast.getInt(c0, r0 - 1);     // Top right.
-			int bl = rast.getInt(c0 - 1, r0);     // Bottom left.
-			int br = rast.getInt(c0, r0);
+			do {
+				// Get the neighbouring values. If the coord is off-raster, the value will be nodata.
+				int tl = c0 == 0 || r0 == 0 ? ignore : rast.getInt(c0 - 1, r0 - 1);        // Top left.
+				int tr = c0 == cols - 1 || r0 == 0 ? ignore : rast.getInt(c0, r0 - 1);     // Top right.
+				int bl = c0 == 0 || r0 == rows - 1 ? ignore : rast.getInt(c0 - 1, r0);     // Bottom left.
+				int br = c0 == cols - 1 || r0 == rows - 1 ? ignore : rast.getInt(c0, r0);  // Bottom right.
+				int dir = 0;
 
-			computeDirection(tl, tr, bl, br, id, c0, r0);
+				computeDirection(tl, tr, bl, br, id, c0, r0, dir);
 
-			path.push_back(gp.toX(c0));
-			path.push_back(gp.toY(r0));
+				path.push_back(gp.toX(c0));
+				path.push_back(gp.toY(r0));
 
-			if(++count % 10000 == 0)
-				std::cerr << count << "\n";
+				// Set the pixel to the right of the direction to true,
+				// this will be filled later.
+				int vc = c0, vr = r0;
+				rightCoord(vc, vr, dir);
+				//std::cerr << "vc: " << vc << ", vr: " << vr << "\n";
+				int vidx = vr * cols + vc;
+				if(vidx >= 0 && vidx < visited.size())
+					visited[vidx] = true;
 
-		} while(!(c0 == c && r0 == r));
+				if(++count % 10000 == 0)
+					std::cerr << count << "\n";
 
-		std::cerr << "last: " << c0 << ", " << r0 << "; " << props().toX(c0) << ", " << props().toY(r0) << "\n";
-		std::cerr << " -- " << path[0] << ", " << path[1] << "; " << path[path.size() - 2] << ", " << path[path.size() - 1] << "\n";
+				std::cerr << "c " << c << ", " << r << ", " << c0 << ", " << r0 << "\n";
+			} while(!(c0 == c && r0 == r));
 
-		std::unique_ptr<Poly> p = ctx.polyFromPath(id, path);
-		ctx.enqueuePoly(p);
+			std::cerr << "last: " << c0 << ", " << r0 << "; " << props().toX(c0) << ", " << props().toY(r0) << "\n";
+			std::cerr << " -- " << path[0] << ", " << path[1] << "; " << path[path.size() - 2] << ", " << path[path.size() - 1] << "\n";
+
+			std::unique_ptr<Poly> p = ctx.polyFromPath(id, path);
+			ctx.enqueuePoly(p);
+
+			/*
+			for(size_t i = 0; i < visited.size(); ++i) {
+				if(visited[i]) {
+					int vc = i % cols;
+					int vr = i / cols;
+					if(rast.getInt(vc, vr) == id)
+						rast.setInt(vc, vr, ignore);
+				}
+			}
+			*/
+		}
 	}
 
 	ctx.readFinish();
@@ -2416,9 +2517,7 @@ void Raster::polygonize(const std::string& filename, const std::string& layerNam
 	std::thread readT(&PolyContext::polyReadBlocks, &ctx);
 
 	// Start the transfer threads.
-	std::list<std::thread> transferTs;
-	for(int i = 0; i < threads - 2; ++i)
-		transferTs.push_back(std::thread(&PolyContext::polyQueueTransfer, &ctx));
+	std::thread transferT(&PolyContext::polyQueueTransfer, &ctx);
 
 	// Start the write thread.
 	std::thread writeT(&PolyContext::polyWriteQueue, &ctx);
@@ -2428,8 +2527,7 @@ void Raster::polygonize(const std::string& filename, const std::string& layerNam
 	ctx.readFinish();
 	ctx.notifyTransfer();
 
-	for(std::thread& t : transferTs)
-		t.join();
+	transferT.join();
 
 	ctx.transferFinish();
 	ctx.notifyWrite();
