@@ -1215,9 +1215,14 @@ namespace geo {
             void flushDirty();
 
             void potrace(const std::string& filename, const std::string& layerName,
-            		const std::string& driver, uint16_t srid, uint16_t band = 1, uint16_t threads = 1,
-            		bool removeHoles = false, bool removeDangles = false,
-					geo::util::Status *status = nullptr, bool *cancel = nullptr);
+                    const std::string& driver, uint16_t srid, uint16_t band = 1, uint16_t threads = 1,
+                    bool removeHoles = false, bool removeDangles = false,
+                    geo::util::Status *status = nullptr, bool *cancel = nullptr);
+
+            void polygonize2(const std::string& filename, const std::string& layerName,
+                    const std::string& driver, uint16_t srid, uint16_t band = 1, uint16_t threads = 1,
+                    bool removeHoles = false, bool removeDangles = false,
+                    geo::util::Status *status = nullptr, bool *cancel = nullptr);
 
             // Vectorize the raster.
             void polygonize(const std::string &filename, const std::string &layerName, 
