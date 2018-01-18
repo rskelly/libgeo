@@ -2636,7 +2636,7 @@ void Raster::potrace(const std::string& filename, const std::string& layerName,
 				int vc = c0, vr = r0;
 				rightCoord(vc, vr, dir);
 				//std::cerr << "vc: " << vc << ", vr: " << vr << "\n";
-				int vidx = vr * cols + vc;
+				size_t vidx = vr * cols + vc;
 				if(vidx >= 0 && vidx < visited.size())
 					visited[vidx] = true;
 
