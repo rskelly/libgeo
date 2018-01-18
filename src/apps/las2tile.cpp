@@ -20,9 +20,13 @@ class LASFile {
 public:
 	std::string filename;
 	double bounds[6];
+	double gridBounds[6];
+	double x; // Min corner coords.
+	double y;
 
-	LASFile(const std::string& filename) :
-		filename(filename) {
+	LASFile(const std::string& filename, double x = 0, double y = 0) :
+		filename(filename),
+		x(x), y(y) {
 
 		init();
 	}
@@ -45,6 +49,104 @@ public:
 	}
 };
 
+
+class LASWriter {
+public:
+	std::string filename;
+	std::vector<std::string> filenames;
+	int fileIdx;
+	liblas::Writer* writer;
+	liblas::Header* header;
+	std::ofstream str;
+	int returns;
+	int retNum[5];
+	double outBounds[6];
+	long totalReturns;
+	double x;
+	double y;
+
+	LASWriter(const std::string& filename, const liblas::Header& hdr, double x = 0, double y = 0) :
+		filename(filename),
+		fileIdx(0),
+		writer(nullptr), header(nullptr),
+		returns(0), retNum{0,0,0,0,0},
+		outBounds{99999999.0,99999999.0,-99999999.0,-99999999.0,99999999.0,-99999999.0},
+		totalReturns(0),
+		x(x), y(y) {
+
+		header = new liblas::Header(hdr);
+
+		open();
+	}
+
+	std::string nextFile() {
+		std::stringstream ss;
+		ss << filename << "_" << ++fileIdx << ".las";
+		std::string filename = ss.str();
+		filenames.push_back(filename);
+		return filename;
+	}
+
+	void open() {
+		if(writer)
+			close();
+		std::string filename = nextFile();
+		str.open(filename, std::ios::out | std::ios::binary);
+		writer = new liblas::Writer(str, *header);
+	}
+
+	void close() {
+		header->SetMin(outBounds[0], outBounds[2], outBounds[4]);
+		header->SetMax(outBounds[1], outBounds[3], outBounds[5]);
+		for(int i = 0; i < 5; ++i)
+			header->SetPointRecordsByReturnCount(i, retNum[i]);
+		header->SetPointRecordsCount(returns);
+		writer->SetHeader(*header);
+		str.close();
+		delete writer;
+		writer = nullptr;
+
+		returns = 0;
+		for(int i = 0; i < 5; ++i)
+			retNum[i] = 0;
+	}
+
+	void addPoint(const liblas::Point& pt) {
+		if(returns >= 20000000)
+			close();
+		if(!writer)
+			open();
+		double x = pt.GetX();
+		double y = pt.GetY();
+		double z = pt.GetZ();
+
+		++returns;
+		++totalReturns;
+		retNum[pt.GetReturnNumber() - 1]++;
+
+		if(x < outBounds[0]) outBounds[0] = x;
+		if(x > outBounds[2]) outBounds[2] = x;
+		if(y < outBounds[1]) outBounds[1] = y;
+		if(y > outBounds[3]) outBounds[3] = y;
+		if(z < outBounds[4]) outBounds[4] = z;
+		if(z > outBounds[5]) outBounds[5] = z;
+
+		writer->WritePoint(pt);
+	}
+
+	~LASWriter() {
+		close();
+		delete header;
+	}
+};
+
+
+int even(int num) {
+	if(num % 2 == 1)
+		++num;
+	return num;
+}
+
 class Tiler {
 public:
 	std::vector<LASFile> files;
@@ -55,7 +157,7 @@ public:
 	}
 
 	void tile(const std::string& outdir, double size,
-		double easting, double northing, int srid) {
+		double easting, double northing, int srid, int maxFiles = 32) {
 
 		double allBounds[6] = {9999999999, 9999999999, -9999999999, -9999999999, 999999999, -999999999};
 
@@ -71,95 +173,135 @@ public:
 		if(easting <= 0)
 			easting = ((int) (allBounds[0] / size)) * size;
 		if(northing <= 0)
-			northing = ((int) (allBounds[3] / size)) * size;
+			northing = ((int) (allBounds[1] / size)) * size;
 
-		int cols = (int) ((allBounds[2] - allBounds[0]) / size) + 1;
-		int rows = (int) ((allBounds[3] - allBounds[1]) / size) + 1;
+		allBounds[0] = easting;
+		allBounds[1] = northing;
+		allBounds[2] = easting + (((int) ((allBounds[2] - easting) / size)) + 1) * size;
+		allBounds[3] = northing + (((int) ((allBounds[3] - northing) / size)) + 1) * size;
 
-		std::cerr << "cols " << cols << "; rows " << rows << "\n";
+		int cols = even((int) (allBounds[2] - allBounds[0]) / size);
+		int rows = even((int) (allBounds[3] - allBounds[1]) / size);
+
+
+		// Double the tile size until few enough are used.
+		double size0 = size;
+		int cols0 = cols, rows0 = rows;
+		while(cols0 * rows0 > maxFiles && cols0 > 1 && rows0 > 1) {
+			size0 *= 2.0;
+			cols0 = even(((int) (allBounds[2] - allBounds[0]) / size0) + 1);
+			rows0 = even(((int) (allBounds[3] - allBounds[1]) / size0) + 1);
+		}
 
 		liblas::ReaderFactory rfact;
+		std::unordered_map<uint64_t, std::unique_ptr<LASWriter> > writers;
 
-		for(int r = 0; r < rows; ++r) {
-			for(int c = 0; c < cols; ++c) {
-	
-				std::stringstream ss;
-				ss << "tile_" << (int) (c * size + allBounds[0]) << "_" << (int) (r * size + allBounds[1] + size) << ".las";
-				std::string outfile = Util::pathJoin(outdir, ss.str());
+		do {
 
-				std::cout << outfile << "\n";
+			std::cerr << "cols " << cols0 << "; rows " << rows0 << "\n";
 
-				std::ofstream ostr(outfile, std::ios::out | std::ios::binary);
-				std::unique_ptr<liblas::Writer> owtr;
+			if(!writers.empty()) {
+				// This is run n>0, so we delete the original las files and now read from the
+				// intermediate tiles.
 
-				double bnds[6] = {9999999999, 9999999999, -9999999999, -9999999999, 999999999, -999999999};
-				int returns = 0;
-				int retNum[5] = {0, 0, 0, 0, 0};
+				files.clear();
+				for(auto& w: writers) {
+					for(const std::string& filename : w.second->filenames)
+						files.emplace_back(filename, w.second->x, w.second->y);
+				}
 
-				double minx = (c * size) + easting;
-				double maxx = minx + size;
-				double maxy = northing - (r * size);
-				double miny = maxy - size;
+				writers.clear();
 
 				for(LASFile& file : files) {
 
-					if(file.bounds[0] > maxx || file.bounds[2] < minx || file.bounds[1] > maxy || file.bounds[3] < miny)
-						continue;
-
-					// Get the header from the first file to use as a template.
 					std::ifstream istr(file.filename, std::ios::in | std::ios::binary);
 					liblas::Reader irdr = rfact.CreateWithStream(istr);
 					const liblas::Header& ihdr = irdr.GetHeader();
 
-					if(!owtr.get()) {
-						liblas::Header ohdr(ihdr);
-						owtr.reset(new liblas::Writer(ostr, ohdr));
+					// Create the writers for the intermediate tiles.
+					for(int r = 0; r < 2; ++r) {
+						for(int c = 0; c < 2; ++c) {
+							std::stringstream ss;
+							double x = file.x + c * size0;
+							double y = file.y + r * size0;
+							ss << "tile_" << (int) x << "_" << (int) y << "_" << size0;
+							std::string outfile = Util::pathJoin(outdir, ss.str());
+							std::cout << outfile << "\n";
+							uint64_t idx = ((uint64_t) r << 32) | c;
+							writers[idx].reset(new LASWriter(outfile, ihdr));
+						}
 					}
-
-					const liblas::Header& ohdr = owtr->GetHeader();
 
 					while(irdr.ReadNextPoint()) {
-						
-						liblas::Point pt(irdr.GetPoint());
-						
-						double x = pt.GetX();
-						double y = pt.GetY();
+						const liblas::Point& pt = irdr.GetPoint();
+						int c = (int) ((pt.GetX() - file.x) / size0);
+						int r = (int) ((pt.GetY() - file.y) / size0);
+						uint64_t idx = ((uint64_t) r << 32) | c;
+						if(c < 0 || c > 1 || r < 0 || r > 1) {
+							std::cerr << "warning: point out of bounds: " << pt.GetX() << ", " << pt.GetY() << "; " << file.x << ", " << file.y << ", " << file.filename << "; " << c << ", " << r << "\n";
+							if(c < 0) c = 0;
+							if(c > 1) c = 1;
+							if(r < 0) r = 0;
+							if(r > 1) r = 1;
+							idx = ((uint64_t) r << 32) | c;
+						}
+						writers[idx]->addPoint(pt);
+					}
 
-						if(x < minx || x >= maxx || y < miny || y >= maxy)
-							continue;
+					writers.clear();
 
-						double z = pt.GetZ();
-						
-						pt.SetHeader(&ohdr);
-						owtr->WritePoint(pt);
-						
-						++returns;
-						retNum[pt.GetReturnNumber() - 1]++;
+					istr.close();
+					Util::rm(file.filename);
 
-						if(x < bnds[0]) bnds[0] = x;
-						if(x > bnds[2]) bnds[2] = x;
-						if(y < bnds[1]) bnds[1] = y;
-						if(y > bnds[3]) bnds[3] = y;
-						if(z < bnds[4]) bnds[4] = z;
-						if(z > bnds[5]) bnds[5] = z;
+				}
+
+			} else {
+				// This is the first run, so we read all the input files into the first set of
+				// intermediate files.
+
+				// Get the header from the first file to use as a template.
+				std::ifstream istr(files[0].filename, std::ios::in | std::ios::binary);
+				liblas::Reader irdr = rfact.CreateWithStream(istr);
+				const liblas::Header& ihdr = irdr.GetHeader();
+
+				// Create the writers for the intermediate tiles.
+				for(int r = 0; r < rows0; ++r) {
+					for(int c = 0; c < cols0; ++c) {
+						std::stringstream ss;
+						double x = allBounds[0] + c * size0;
+						double y = allBounds[1] + r * size0;
+						ss << "tile_" << (int) x << "_" << (int) y << "_" << size0;
+						std::string outfile = Util::pathJoin(outdir, ss.str());
+						std::cout << outfile << "\n";
+						uint64_t idx = ((uint64_t) r << 32) | c;
+						writers[idx].reset(new LASWriter(outfile, ihdr, x, y));
 					}
 				}
 
-				if(returns == 0) {
-					owtr.reset();
-					ostr.close();
-					Util::rm(outfile);
-				} else {
-					liblas::Header ohdr(owtr->GetHeader());
-					ohdr.SetMin(bnds[0], bnds[2], bnds[4]);
-					ohdr.SetMax(bnds[1], bnds[3], bnds[5]);
-					for(int i = 0; i < 5; ++i)
-						ohdr.SetPointRecordsByReturnCount(i, retNum[i]);
-					ohdr.SetPointRecordsCount(returns);
-					owtr->SetHeader(ohdr);
+				// Iterate over the files, filling the tiles.
+				for(LASFile& file : files) {
+					std::ifstream istr(file.filename, std::ios::in | std::ios::binary);
+					liblas::Reader irdr = rfact.CreateWithStream(istr);
+					while(irdr.ReadNextPoint()) {
+						const liblas::Point& pt = irdr.GetPoint();
+						double x = pt.GetX();
+						double y = pt.GetY();
+						int c = (int) ((x - allBounds[0]) / size0);
+						int r = (int) ((y - allBounds[1]) / size0);
+						uint64_t idx = ((uint64_t) r << 32) | c;
+						writers[idx]->addPoint(pt);
+					}
 				}
 			}
-		}
+
+			size0 *= 0.5;
+			cols0 = even(((int) (allBounds[2] - allBounds[0]) / size0) + 1);
+			rows0 = even(((int) (allBounds[3] - allBounds[1]) / size0) + 1);
+
+		} while(size0 >= size);
+
+		writers.clear();
+
 
 	}
 

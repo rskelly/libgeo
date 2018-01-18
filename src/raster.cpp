@@ -2364,6 +2364,7 @@ void rightCoord(int& c, int& r, int dir) {
 	}
 }
 
+/*
 template <class T>
 T getXatD(T x, int d) {
 	switch(d % 8) {
@@ -2549,65 +2550,6 @@ void Raster::polygonizeTacet(const std::string& filename, const std::string& lay
 		}
 	}
 
-	std::cerr << "writing intermediate " << edges << "\n";
-	ep.setWritable(true);
-	Raster eout("ptest.tif", ep);
-	erast.writeTo(eout);
-
-	/*
-	for(int r = 0; r < rows * 2; ++r) {
-		for(int c = 0; c < cols * 2; ++c) {
-			if((id = erast.getInt(c, r)) != nodata) {
-
-			}
-		}
-	}
-	*/
-	/*
-			int c0 = c, r0 = r;
-			size_t count = 0;
-
-			std::cerr << "building path for " << id << "\n";
-
-			path.push_back(gp.toX(c));
-			path.push_back(gp.toY(r));
-
-			do {
-				// Get the neighbouring values. If the coord is off-raster, the value will be nodata.
-				int tl = c0 == 0 || r0 == 0 ? ignore : rast.getInt(c0 - 1, r0 - 1);        // Top left.
-				int tr = c0 == cols - 1 || r0 == 0 ? ignore : rast.getInt(c0, r0 - 1);     // Top right.
-				int bl = c0 == 0 || r0 == rows - 1 ? ignore : rast.getInt(c0 - 1, r0);     // Bottom left.
-				int br = c0 == cols - 1 || r0 == rows - 1 ? ignore : rast.getInt(c0, r0);  // Bottom right.
-				int dir = 0;
-
-				computeDirection(tl, tr, bl, br, id, c0, r0, dir);
-
-				path.push_back(gp.toX(c0));
-				path.push_back(gp.toY(r0));
-
-				// Set the pixel to the right of the direction to true,
-				// this will be filled later.
-				int vc = c0, vr = r0;
-				rightCoord(vc, vr, dir);
-				//std::cerr << "vc: " << vc << ", vr: " << vr << "\n";
-				int vidx = vr * cols + vc;
-				if(vidx >= 0 && vidx < visited.size())
-					visited[vidx] = true;
-
-				if(++count % 10000 == 0)
-					std::cerr << count << "\n";
-
-				std::cerr << "c " << c << ", " << r << ", " << c0 << ", " << r0 << "\n";
-			} while(!(c0 == c && r0 == r));
-
-			std::cerr << "last: " << c0 << ", " << r0 << "; " << props().toX(c0) << ", " << props().toY(r0) << "\n";
-			std::cerr << " -- " << path[0] << ", " << path[1] << "; " << path[path.size() - 2] << ", " << path[path.size() - 1] << "\n";
-
-			std::unique_ptr<Poly> p = ctx.polyFromPath(id, path);
-			ctx.enqueuePoly(p);
-
-		}
-	}
 
 	ctx.readFinish();
 	ctx.notifyTransfer();
@@ -2618,9 +2560,9 @@ void Raster::polygonizeTacet(const std::string& filename, const std::string& lay
 	writeT.join();
 
 	ctx.commitOutput();
-	*/
-}
 
+}
+*/
 void Raster::potrace(const std::string& filename, const std::string& layerName,
 		const std::string& driver, uint16_t srid, uint16_t band, uint16_t threads,
 		bool removeHoles, bool removeDangles, Status *status, bool *cancel) {
