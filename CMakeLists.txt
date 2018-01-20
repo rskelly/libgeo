@@ -93,3 +93,6 @@ target_link_libraries (las2grid geo geoann geoutil georaster ${Boost_LIBRARIES} 
 
 add_executable (las2tile src/apps/las2tile.cpp)
 target_link_libraries (las2tile geo geoutil ${Boost_LIBRARIES} ${LIBLAS_LIBRARY})
+
+add_executable (info src/apps/info.cpp)
+target_link_libraries (info geo geoutil ${Boost_LIBRARIES} ${GDAL_LIBRARY} ${LIBLAS_LIBRARY})
