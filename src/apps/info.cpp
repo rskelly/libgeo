@@ -4,10 +4,13 @@
 #include <string>
 #include <vector>
 
-#include <gdal_priv.h>
+#include <gdal.h>
 #include <ogrsf_frmts.h>
 
 #include <liblas/liblas.hpp>
+
+#include <json/value.h>
+#include <json/writer.h>
 
 #include "util.hpp"
 
@@ -18,7 +21,7 @@
 std::vector<std::string> charToVector(char** arr) {
 	std::vector<std::string> vec;
 	char** tmp = arr;
-	while(tmp != NULL) {
+	while(*tmp != NULL) {
 		vec.push_back(std::string(*tmp));
 		++tmp;
 	}
@@ -37,6 +40,23 @@ public:
 		type(type),
 		bounds{99999999.,99999999.,-99999999.,-99999999.} {
 	}
+
+	virtual Json::Value asJSON() {
+		Json::Value node(Json::objectValue);
+		node["type"] = type;
+		node["projection"] = projection;
+		Json::Value jbounds(Json::arrayValue);
+		for(int i = 0; i < 4; ++i)
+			jbounds.append(bounds[i]);
+		node["bounds"] = jbounds;
+		Json::Value jfiles(Json::arrayValue);
+		for(const std::string& file : files)
+			jfiles.append(file);
+		node["files"] = jfiles;
+		return node;
+	}
+
+	virtual ~Dataset() {}
 
 };
 
@@ -64,6 +84,24 @@ public:
 		if(!hasNodata)
 			nodata = 0;
 	}
+
+	Json::Value asJSON() {
+		Json::Value node(Json::objectValue);
+		node["dataType"] = dataType;
+		node["cols"] = cols;
+		node["rows"] = rows;
+		node["hasNodata"] = hasNodata;
+		if(hasNodata)
+			node["nodata"] = nodata;
+		Json::Value stats(Json::objectValue);
+		stats["min"] = min;
+		stats["max"] = max;
+		stats["mean"] = mean;
+		stats["stddev"] = stdDev;
+		node["stats"] = stats;
+		return stats;
+	}
+
 };
 
 class Raster : public Dataset {
@@ -104,7 +142,19 @@ public:
 		}
 
 		for(int i = 0; i < ds->GetRasterCount(); ++i)
-			bands.push_back(RasterBand(ds->GetRasterBand(i)));
+			bands.push_back(RasterBand(ds->GetRasterBand(i + 1)));
+	}
+
+	Json::Value asJSON() {
+		Json::Value node = Dataset::asJSON();
+		node["cols"] = cols;
+		node["rows"] = rows;
+		node["resolutionX"] = resX;
+		node["resolutionY"] = resY;
+		node["bands"] = Json::Value(Json::arrayValue);
+		for(RasterBand& band : bands)
+			node["bands"].append(band.asJSON());
+		return node;
 	}
 };
 
@@ -118,14 +168,26 @@ public:
 		geomType(layer->GetGeomType()),
 		name(layer->GetName()) {
 
-		OGREnvelope* env = nullptr;
-		if(OGRERR_FAILURE != layer->GetExtent(env, true) && env) {
-			bounds[0] = env->MinX;
-			bounds[1] = env->MinY;
-			bounds[2] = env->MaxX;
-			bounds[3] = env->MaxY;
+		OGREnvelope env;
+		if(OGRERR_FAILURE != layer->GetExtent(&env, true)) {
+			bounds[0] = env.MinX;
+			bounds[1] = env.MinY;
+			bounds[2] = env.MaxX;
+			bounds[3] = env.MaxY;
 		}
 	}
+
+	Json::Value asJSON() {
+		Json::Value node(Json::objectValue);
+		node["geomType"] = geomType;
+		node["name"] = name;
+		Json::Value jbounds(Json::arrayValue);
+		for(int i = 0; i < 4; ++i)
+			jbounds.append(bounds[i]);
+		node["bounds"] = jbounds;
+		return node;
+	}
+
 };
 
 class Vector : public Dataset {
@@ -145,6 +207,14 @@ public:
 			if(lyr.bounds[2] > bounds[2]) bounds[2] = lyr.bounds[2];
 			if(lyr.bounds[3] > bounds[3]) bounds[3] = lyr.bounds[3];
 		}
+	}
+
+	Json::Value asJSON() {
+		Json::Value node = Dataset::asJSON();
+		node["layers"] = Json::Value(Json::arrayValue);
+		for(VectorLayer& layer : layers)
+			node["layers"].append(layer.asJSON());
+		return node;
 	}
 };
 
@@ -169,7 +239,7 @@ bool tryGDAL(const std::string& filename, std::unique_ptr<Dataset>& ds) {
 
 	try {
 		
-		if(!(gds = (GDALDataset*) GDALOpen(filename.c_str(), GA_ReadOnly)))
+		if(!(gds = (GDALDataset*) GDALOpenEx(filename.c_str(), GDAL_OF_READONLY, NULL, NULL, NULL)))
 			g_runerr("Failed to open GDAL dataset.");
 
 		if(!(gdrv = gds->GetDriver()))
@@ -229,6 +299,11 @@ int handleFile(const std::string& filename) {
 		}
 	}
 
+	if(ds.get()) {
+		Json::StreamWriterBuilder wb;
+		std::string document = Json::writeString(wb, ds->asJSON());
+		std::cout << document;
+	}
 	return 0;
 
 }
