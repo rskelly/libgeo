@@ -16,6 +16,8 @@
 
 using namespace geo::util;
 
+const bool useHeader = true;
+
 class LASFile {
 public:
 	std::vector<std::string> filenames;
@@ -27,34 +29,52 @@ public:
 		bounds{99999999., 99999999., -999999999., -99999999., 99999999., -99999999.},
 		x(x), y(y) {
 		filenames.push_back(filename);
-
-		init();
 	}
 
 	LASFile(const std::vector<std::string>& filenames, double x = 0, double y = 0) :
 		filenames(filenames),
 		bounds{99999999., 99999999., -999999999., -99999999., 99999999., -99999999.},
 		x(x), y(y) {
-
-		init();
 	}
 
 	void init() {
+		liblas::ReaderFactory f;
 		for(const std::string& filename : filenames) {
+
 			std::ifstream str(filename, std::ios::in | std::ios::binary);
-			liblas::ReaderFactory f;
 			liblas::Reader reader = f.CreateWithStream(str);
-			while(reader.ReadNextPoint()) {
-				const liblas::Point& pt = reader.GetPoint();
-				double x = pt.GetX();
-				double y = pt.GetY();
-				double z = pt.GetZ();
-				if(x < bounds[0]) bounds[0] = x;
-				if(y < bounds[1]) bounds[1] = y;
-				if(x > bounds[2]) bounds[2] = x;
-				if(y > bounds[3]) bounds[3] = y;
-				if(z < bounds[4]) bounds[4] = z;
-				if(z > bounds[5]) bounds[5] = z;
+
+			if(useHeader) {
+				const liblas::Header& hdr = reader.GetHeader();
+				double minx = hdr.GetMinX();
+				double miny = hdr.GetMinY();
+				double minz = hdr.GetMinZ();
+				double maxx = hdr.GetMaxX();
+				double maxy = hdr.GetMaxY();
+				double maxz = hdr.GetMaxZ();
+
+				if(minx < bounds[0]) bounds[0] = minx;
+				if(miny < bounds[1]) bounds[1] = miny;
+				if(maxx > bounds[2]) bounds[2] = maxx;
+				if(maxy > bounds[3]) bounds[3] = maxy;
+				if(minz < bounds[4]) bounds[4] = minz;
+				if(maxz > bounds[5]) bounds[5] = maxz;
+			} else {
+				while(reader.ReadNextPoint()) {
+					const liblas::Point& pt = reader.GetPoint();
+					double x = pt.GetX();
+					double y = pt.GetY();
+					double z = pt.GetZ();
+					if(y < 6500000.) {
+						std::cerr << "oob " << x << ", " << y << ", " << z << "\n";
+					}
+					if(x < bounds[0]) bounds[0] = x;
+					if(y < bounds[1]) bounds[1] = y;
+					if(x > bounds[2]) bounds[2] = x;
+					if(y > bounds[3]) bounds[3] = y;
+					if(z < bounds[4]) bounds[4] = z;
+					if(z > bounds[5]) bounds[5] = z;
+				}
 			}
 		}
 	}
@@ -63,7 +83,7 @@ public:
 	}
 };
 
-const long maxPoints = 10000000;
+const long maxPoints = 20000000;
 
 class LASWriter {
 public:
@@ -123,6 +143,7 @@ public:
 				header->SetPointRecordsByReturnCount(i, retNum[i]);
 			header->SetPointRecordsCount(returns);
 			writer->SetHeader(*header);
+			writer->WriteHeader();
 			str.close();
 			delete writer;
 			writer = nullptr;
@@ -134,10 +155,9 @@ public:
 	}
 
 	void addPoint(const liblas::Point& pt) {
-		if(returns >= maxPoints)
-			close();
-		if(!writer)
+		if(returns >= maxPoints || !writer)
 			open();
+
 		double x = pt.GetX();
 		double y = pt.GetY();
 		double z = pt.GetZ();
@@ -159,13 +179,39 @@ public:
 	~LASWriter() {
 		close();
 		delete header;
-		if(dod) {
+		if(!totalReturns || dod) {
 			for(const std::string& f : filenames)
 				Util::rm(f);
 		}
 	}
 };
 
+class Tile {
+public:
+	double bounds[4];
+	double bufferedBounds[4];
+	std::unique_ptr<LASWriter> writer;
+
+	Tile(double minx, double miny, double maxx, double maxy, double buffer = 0) {
+		bounds[0] = minx;
+		bounds[1] = miny;
+		bounds[2] = maxx;
+		bounds[3] = maxy;
+		bufferedBounds[0] = bounds[0] - buffer;
+		bufferedBounds[1] = bounds[1] - buffer;
+		bufferedBounds[2] = bounds[2] + buffer;
+		bufferedBounds[3] = bounds[3] + buffer;
+	}
+
+	bool contains(double x, double y) {
+		return x >= bounds[0] && x < bounds[2] && y >= bounds[1] && y < bounds[3];
+	}
+
+	bool containsBuffered(double x, double y) {
+		return x >= bufferedBounds[0] && x < bufferedBounds[2] && y >= bufferedBounds[1] && y < bufferedBounds[3];
+	}
+
+};
 
 int even(int num) {
 	if(num % 2 == 1)
@@ -183,11 +229,15 @@ public:
 	}
 
 	void tile(const std::string& outdir, double size,
-		double easting, double northing, int srid, int maxFiles = 32) {
+		double easting, double northing, double buffer, int srid, int maxFiles = 32) {
 
-		double allBounds[6] = {9999999999, 9999999999, -9999999999, -9999999999, 999999999, -999999999};
+		std::cerr << std::setprecision(12);
 
-		for(const LASFile& f : files) {
+		double allBounds[6] = {9999999999., 9999999999., -9999999999., -9999999999., 999999999., -999999999.};
+
+		for(LASFile& f : files) {
+			f.init();
+			std::cerr << "file bounds " << f.bounds[0] << ", " << f.bounds[1] << "; " << f.bounds[2] << ", " << f.bounds[3] << "\n";
 			if(f.bounds[0] < allBounds[0]) allBounds[0] = f.bounds[0];
 			if(f.bounds[1] < allBounds[1]) allBounds[1] = f.bounds[1];
 			if(f.bounds[2] > allBounds[2]) allBounds[2] = f.bounds[2];
@@ -197,17 +247,19 @@ public:
 		}
 
 		if(easting <= 0)
-			easting = ((int) (allBounds[0] / size)) * size;
+			easting = ((int) (allBounds[0] / size)) * size - size;
 		if(northing <= 0)
-			northing = ((int) (allBounds[1] / size)) * size;
+			northing = ((int) (allBounds[1] / size)) * size - size;
 
+		std::cerr << "bounds a " << allBounds[0] << ", " << allBounds[1] << "; " << allBounds[2] << ", " << allBounds[3] << "\n";
 		allBounds[0] = easting;
 		allBounds[1] = northing;
-		allBounds[2] = std::ceil(allBounds[2] / size) * size;
-		allBounds[3] = std::ceil(allBounds[3] / size) * size;
+		allBounds[2] = std::ceil(allBounds[2] / size) * size + size;
+		allBounds[3] = std::ceil(allBounds[3] / size) * size + size;
+		std::cerr << "bounds b " << allBounds[0] << ", " << allBounds[1] << "; " << allBounds[2] << ", " << allBounds[3] << "\n";
 
-		int cols = even((int) (allBounds[2] - allBounds[0]) / size);
-		int rows = even((int) (allBounds[3] - allBounds[1]) / size);
+		int cols = (int) (allBounds[2] - allBounds[0]) / size;
+		int rows = (int) (allBounds[3] - allBounds[1]) / size;
 
 		// Double the tile size until few enough writers are used.
 		double size0 = size;
@@ -215,67 +267,68 @@ public:
 		int rows0 = rows;
 		while(cols0 * rows0 > maxFiles && cols0 > 1 && rows0 > 1) {
 			size0 *= 2.0;
-			cols0 = even((int) (allBounds[2] - allBounds[0]) / size0);
-			rows0 = even((int) (allBounds[3] - allBounds[1]) / size0);
+			cols0 = even(std::ceil(cols0 * 0.5));
+			rows0 = even(std::ceil(rows0 * 0.5));
 		}
 
 		liblas::ReaderFactory rfact;
-		std::unordered_map<uint64_t, std::unique_ptr<LASWriter> > writers;
+		std::vector<std::unique_ptr<Tile> > tiles;
 
 		do {
 
-			std::cerr << "cols " << cols0 << "; rows " << rows0 << "\n";
+			std::cerr << "cols " << cols0 << "; rows " << rows0 << "; size " << size0 << "\n";
+			std::cerr << "bounds " << allBounds[0] << ", " << allBounds[1] << "; " << allBounds[2] << ", " << allBounds[3] << "\n";
 
-			if(!writers.empty()) {
+			if(!tiles.empty()) {
 				// This is run n>0, so we delete the original las files and now read from the
 				// intermediate tiles.
 
-				std::unordered_map<uint64_t, std::unique_ptr<LASWriter> > tmpWriters;
+				std::vector<std::unique_ptr<LASWriter> > tmpWriters;
 
 				files.clear();
-				for(auto& w: writers) {
-					files.emplace_back(w.second->filenames, w.second->x, w.second->y);
-					w.second->close();
-					tmpWriters[w.first].swap(w.second);
+				for(std::unique_ptr<Tile>& tile : tiles) {
+					files.emplace_back(tile->writer->filenames, tile->writer->x, tile->writer->y);
+					tile->writer->close();
+					tmpWriters.push_back(std::move(tile->writer));
 				}
 
-				writers.clear();
+				tiles.clear();
 
 				for(LASFile& file : files) {
+					{
+						std::ifstream istr(file.filenames[0], std::ios::in | std::ios::binary);
+						liblas::Reader irdr = rfact.CreateWithStream(istr);
+						const liblas::Header& ihdr = irdr.GetHeader();
 
-					std::ifstream istr(file.filenames[0], std::ios::in | std::ios::binary);
-					liblas::Reader irdr = rfact.CreateWithStream(istr);
-					const liblas::Header& ihdr = irdr.GetHeader();
-
-					// Create the writers for the intermediate tiles.
-					for(int r = 0; r < 2; ++r) {
-						for(int c = 0; c < 2; ++c) {
-							std::stringstream ss;
-							double x = file.x + c * size0;
-							double y = file.y + r * size0;
-							int col = (int) ((x - allBounds[0]) / size0);
-							int row = (int) ((y - allBounds[1]) / size0);
-							ss << "tile_" << (int) x << "_" << (int) y << "_" << size0;
-							std::string outfile = Util::pathJoin(outdir, ss.str());
-							std::cout << outfile << "\n";
-							uint64_t idx = ((uint64_t) row << 32) | col;
-							writers[idx] = std::unique_ptr<LASWriter>(new LASWriter(outfile, ihdr, x, y));
+						// Create the writers for the intermediate tiles.
+						for(int r = 0; r < 2; ++r) {
+							for(int c = 0; c < 2; ++c) {
+								std::stringstream ss;
+								double x = file.x + c * size0;
+								double y = file.y + r * size0;
+								ss << "tile_" << (int) x << "_" << (int) y << "_" << size0;
+								std::string outfile = Util::pathJoin(outdir, ss.str());
+								std::unique_ptr<Tile> tile(new Tile(x, y, x + size0, y + size0, buffer));
+								tile->writer.reset(new LASWriter(outfile, ihdr, x, y));
+								tiles.push_back(std::move(tile));
+							}
 						}
 					}
 
-					while(irdr.ReadNextPoint()) {
-						const liblas::Point& pt = irdr.GetPoint();
-						int c = (int) ((pt.GetX() - allBounds[0]) / size0);
-						int r = (int) ((pt.GetY() - allBounds[1]) / size0);
-						uint64_t idx = ((uint64_t) r << 32) | c;
-						if(c < 0 || c >= cols0 || r < 0 || r >= rows0) {
-							std::cerr << "warning: point out of bounds: " << pt.GetX() << ", " << pt.GetY() << "; " << file.x << ", " << file.y << "; " << c << ", " << r << "\n";
-						} else {
-							writers[idx]->addPoint(pt);
+					for(const std::string& filename : file.filenames) {
+
+						std::ifstream istr(filename, std::ios::in | std::ios::binary);
+						liblas::Reader irdr = rfact.CreateWithStream(istr);
+
+						while(irdr.ReadNextPoint()) {
+							const liblas::Point& pt = irdr.GetPoint();
+							for(std::unique_ptr<Tile>& tile : tiles) {
+								if(tile->containsBuffered(pt.GetX(), pt.GetY()))
+									tile->writer->addPoint(pt);
+							}
 						}
 					}
 
-					istr.close();
 				}
 
 				tmpWriters.clear();
@@ -284,54 +337,56 @@ public:
 				// This is the first run, so we read all the input files into the first set of
 				// intermediate files.
 
-				// Get the header from the first file to use as a template.
-				std::ifstream istr(files[0].filenames[0], std::ios::in | std::ios::binary);
-				liblas::Reader irdr = rfact.CreateWithStream(istr);
-				const liblas::Header& ihdr = irdr.GetHeader();
+				{
+					// Get the header from the first file to use as a template.
+					std::ifstream istr(files[0].filenames[0], std::ios::in | std::ios::binary);
+					liblas::Reader irdr = rfact.CreateWithStream(istr);
+					const liblas::Header& ihdr = irdr.GetHeader();
 
-				// Create the writers for the intermediate tiles.
-				for(int r = 0; r < rows0; ++r) {
-					for(int c = 0; c < cols0; ++c) {
-						std::stringstream ss;
-						double x = allBounds[0] + c * size0;
-						double y = allBounds[1] + r * size0;
-						ss << "tile_" << (int) x << "_" << (int) y << "_" << size0;
-						std::string outfile = Util::pathJoin(outdir, ss.str());
-						std::cout << outfile << "\n";
-						uint64_t idx = ((uint64_t) r << 32) | c;
-						writers[idx] = std::unique_ptr<LASWriter>(new LASWriter(outfile, ihdr, x, y));
+					// Create the writers for the intermediate tiles.
+					for(int r = 0; r < rows0; ++r) {
+						for(int c = 0; c < cols0; ++c) {
+							std::stringstream ss;
+							double x = allBounds[0] + c * size0;
+							double y = allBounds[1] + r * size0;
+							ss << "tile_" << (int) x << "_" << (int) y << "_" << size0;
+							std::string outfile = Util::pathJoin(outdir, ss.str());
+							std::unique_ptr<Tile> tile(new Tile(x, y, x + size0, y + size0, buffer));
+							tile->writer.reset(new LASWriter(outfile, ihdr, x, y));
+							tiles.push_back(std::move(tile));
+						}
 					}
 				}
 
 				// Iterate over the files, filling the tiles.
 				for(LASFile& file : files) {
+
 					for(const std::string& filename : file.filenames) {
+
 						std::ifstream istr(filename, std::ios::in | std::ios::binary);
 						liblas::Reader irdr = rfact.CreateWithStream(istr);
+
 						while(irdr.ReadNextPoint()) {
 							const liblas::Point& pt = irdr.GetPoint();
-							double x = pt.GetX();
-							double y = pt.GetY();
-							int c = (int) ((x - allBounds[0]) / size0);
-							int r = (int) ((y - allBounds[1]) / size0);
-							uint64_t idx = ((uint64_t) r << 32) | c;
-							writers[idx]->addPoint(pt);
+							for(std::unique_ptr<Tile>& tile : tiles) {
+								if(tile->containsBuffered(pt.GetX(), pt.GetY()))
+									tile->writer->addPoint(pt);
+							}
 						}
 					}
 				}
 			}
 
 			size0 *= 0.5;
-			cols0 = even(((int) (allBounds[2] - allBounds[0]) / size0) + 1);
-			rows0 = even(((int) (allBounds[3] - allBounds[1]) / size0) + 1);
+			cols0 *= 2;
+			rows0 *= 2;
 
 		} while(size0 >= size);
 
-		for(auto& w : writers)
-			w.second->deleteOnDestruct(false);
+		for(std::unique_ptr<Tile>& tile : tiles)
+			tile->writer->deleteOnDestruct(false);
 
-		writers.clear();
-
+		tiles.clear();
 
 	}
 
@@ -346,7 +401,8 @@ void usage() {
 			<< "                 (defaults to nearest whole multiple of size).\n"
 			<< " -n <northing>   The top left corner vertical alignment\n"
 			<< "                 (defaults to nearest whole multiple of size).\n"
-			<< " -s <srid>       The spatial reference ID. Default 0.\n";
+			<< " -s <srid>       The spatial reference ID. Default 0.\n"
+			<< " -b <buffer>     Buffer for each tile. Default 0.\n";
 }
 
 int main(int argc, char** argv) {
@@ -359,6 +415,7 @@ int main(int argc, char** argv) {
 	double size = 1000;
 	double easting = 0;
 	double northing = 0;
+	double buffer = 0;
 	uint16_t srid = 0;
 	std::vector<std::string> args;
 
@@ -368,6 +425,8 @@ int main(int argc, char** argv) {
 			size = atof(argv[++i]);
 		} else if(v == "-s") {
 			srid = atoi(argv[++i]);
+		} else if(v == "-b") {
+			buffer = atof(argv[++i]);
 		} else if(v == "-e") {
 			easting = atof(argv[++i]);
 		} else if(v == "-n") {
@@ -391,7 +450,7 @@ int main(int argc, char** argv) {
 
 	std::vector<std::string> infiles(args.begin() + 1, args.end());
 	Tiler r(infiles);
-	r.tile(args[0], size, easting, northing, srid);
+	r.tile(args[0], size, easting, northing, buffer, srid);
 
 	return 0;
 }
