@@ -18,6 +18,46 @@
 #define VECTOR 2
 #define POINT_CLOUD 3
 
+Json::Value asGeom(double* bounds) {
+	Json::Value node(Json::objectValue);
+	Json::Value geom(Json::objectValue);
+	Json::Value coords(Json::arrayValue);
+	{
+		Json::Value coord(Json::arrayValue);
+		coord.append(bounds[0]);
+		coord.append(bounds[1]);
+		coords.append(coord);
+	}
+	{
+		Json::Value coord(Json::arrayValue);
+		coord.append(bounds[2]);
+		coord.append(bounds[1]);
+		coords.append(coord);
+	}
+	{
+		Json::Value coord(Json::arrayValue);
+		coord.append(bounds[2]);
+		coord.append(bounds[3]);
+		coords.append(coord);
+	}
+	{
+		Json::Value coord(Json::arrayValue);
+		coord.append(bounds[0]);
+		coord.append(bounds[3]);
+		coords.append(coord);
+	}
+	{
+		Json::Value coord(Json::arrayValue);
+		coord.append(bounds[0]);
+		coord.append(bounds[1]);
+		coords.append(coord);
+	}
+	geom["type"] = "polygon";
+	geom["coordinates"] = coords;
+	node["geometry"] = geom;
+	return node;
+
+}
 std::vector<std::string> charToVector(char** arr) {
 	std::vector<std::string> vec;
 	char** tmp = arr;
@@ -45,10 +85,7 @@ public:
 		Json::Value node(Json::objectValue);
 		node["type"] = type;
 		node["projection"] = projection;
-		Json::Value jbounds(Json::arrayValue);
-		for(int i = 0; i < 4; ++i)
-			jbounds.append(bounds[i]);
-		node["bounds"] = jbounds;
+		node["bounds"] = asGeom(bounds);
 		Json::Value jfiles(Json::arrayValue);
 		for(const std::string& file : files)
 			jfiles.append(file);
@@ -156,6 +193,7 @@ public:
 			node["bands"].append(band.asJSON());
 		return node;
 	}
+
 };
 
 class VectorLayer {
@@ -181,10 +219,7 @@ public:
 		Json::Value node(Json::objectValue);
 		node["geomType"] = geomType;
 		node["name"] = name;
-		Json::Value jbounds(Json::arrayValue);
-		for(int i = 0; i < 4; ++i)
-			jbounds.append(bounds[i]);
-		node["bounds"] = jbounds;
+		node["bounds"] = asGeom(bounds);
 		return node;
 	}
 
@@ -216,6 +251,7 @@ public:
 			node["layers"].append(layer.asJSON());
 		return node;
 	}
+
 };
 
 
@@ -299,11 +335,18 @@ int handleFile(const std::string& filename) {
 		}
 	}
 
+	Json::Value node;
+
 	if(ds.get()) {
-		Json::StreamWriterBuilder wb;
-		std::string document = Json::writeString(wb, ds->asJSON());
-		std::cout << document;
+		node = ds->asJSON();
+	} else {
+		node = Json::Value(Json::objectValue);
+		node["error"] = "Failed to understand file.";
 	}
+
+	Json::StreamWriterBuilder wb;
+	std::cout << Json::writeString(wb, node);
+
 	return 0;
 
 }
