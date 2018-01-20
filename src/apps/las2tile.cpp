@@ -9,6 +9,11 @@
 #include <vector>
 #include <unordered_map>
 #include <sstream>
+#include <memory>
+#include <string>
+#include <fstream>
+#include <cmath>
+#include <cstdint>
 
 #include <liblas/liblas.hpp>
 
