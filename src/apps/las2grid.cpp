@@ -12,33 +12,11 @@
 #include <liblas/liblas.hpp>
 
 #include "raster.hpp"
+#include "las.hpp"
 #include "ds/kdtree.hpp"
 
-class LASFile {
-public:
-	std::string filename;
-	double bounds[4];
-
-	LASFile(const std::string& filename) :
-		filename(filename) {
-
-		init();
-	}
-
-	void init() {
-		std::ifstream str(filename, std::ios::in | std::ios::binary);
-		liblas::ReaderFactory f;
-		liblas::Reader reader = f.CreateWithStream(str);
-		const liblas::Header& header = reader.GetHeader();
-		bounds[0] = header.GetMinX();
-		bounds[1] = header.GetMinY();
-		bounds[2] = header.GetMaxX();
-		bounds[3] = header.GetMaxY();
-	}
-
-	~LASFile() {
-	}
-};
+using namespace geo::raster;
+using namespace geo::las;
 
 class LASPoint {
 public:
@@ -68,8 +46,6 @@ public:
 	}
 };
 
-using namespace geo::raster;
-
 class Rasterizer {
 public:
 	std::vector<LASFile> files;
@@ -86,9 +62,11 @@ public:
 	void updateTree(double x, double y, double radius) {
 		std::unordered_set<int> requiredFiles;
 		double tbounds[4] = {x - radius, y - radius, x + radius, y + radius};
+		double fBounds[6];
 		for(size_t i = 0; i < files.size(); ++i) {
-			if(!(tbounds[2] < files[i].bounds[0] || tbounds[0] > files[i].bounds[2] ||
-				tbounds[3] < files[i].bounds[1] || tbounds[1] > files[i].bounds[3])) {
+			files[i].bounds(fBounds);
+			if(!(tbounds[2] < fBounds[0] || tbounds[0] > fBounds[2] ||
+				tbounds[3] < fBounds[1] || tbounds[1] > fBounds[3])) {
 				requiredFiles.insert(i);
 			}
 		}
@@ -123,7 +101,7 @@ public:
 				liblas::ReaderFactory fact;
 				tree = new geo::ds::KDTree<LASPoint>(2);
 				for(int a : currentFiles) {
-					std::ifstream str(files[a].filename);
+					std::ifstream str(files[a].filenames()[0]);
 					liblas::Reader rdr = fact.CreateWithStream(str);
 					while(rdr.ReadNextPoint()) {
 						const liblas::Point& pt = rdr.GetPoint();
@@ -165,12 +143,14 @@ public:
 		double easting, double northing, double radius, int srid, int threads, double percentile = 0) {
 
 		double bounds[4] = {9999999999, 9999999999, -9999999999, -9999999999};
+		double fBounds[6];
 
 		for(const LASFile& f : files) {
-			if(f.bounds[0] < bounds[0]) bounds[0] = f.bounds[0];
-			if(f.bounds[1] < bounds[1]) bounds[1] = f.bounds[1];
-			if(f.bounds[2] > bounds[2]) bounds[2] = f.bounds[2];
-			if(f.bounds[3] > bounds[3]) bounds[3] = f.bounds[3];
+			f.bounds(fBounds);
+			if(fBounds[0] < bounds[0]) bounds[0] = fBounds[0];
+			if(fBounds[1] < bounds[1]) bounds[1] = fBounds[1];
+			if(fBounds[2] > bounds[2]) bounds[2] = fBounds[2];
+			if(fBounds[3] > bounds[3]) bounds[3] = fBounds[3];
 		}
 
 		if(easting <= 0)
