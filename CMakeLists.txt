@@ -27,12 +27,12 @@ elseif(${WIN32})
 	set (libLAS_LIBRARY_DIRS "C:\\dev\\gisinternals\\lib")
 else()
 	include_directories (BEFORE SYSTEM include)
+	include_directories (BEFORE SYSTEM /opt/include)
 	include_directories (BEFORE SYSTEM ann/include)
 	include_directories (BEFORE SYSTEM /usr/include)
 	include_directories (BEFORE SYSTEM /usr/include/eigen3)
 	include_directories (BEFORE SYSTEM /usr/include/gdal)
 	include_directories (BEFORE SYSTEM /usr/include/jsoncpp)
-	include_directories (BEFORE SYSTEM /opt/include)
 endif()
 
 set (Boost_DEBUG OFF)
@@ -45,8 +45,8 @@ find_package (OpenMP REQUIRED)
 find_package (Boost COMPONENTS system filesystem date_time REQUIRED)
 find_package (GDAL 2.2 REQUIRED)
 
-find_library (JSONCPP_LIBRARY jsoncpp PATHS /usr/lib)
 find_library (LIBLAS_LIBRARY las PATHS /usr/lib NO_DEFAULT_PATH)
+find_library (JSONCPP_LIBRARY las PATHS /usr/lib NO_DEFAULT_PATH)
 find_library (GEOS_LIBRARY geos PATHS /opt/lib NO_DEFAULT_PATH)
 find_library (CRYPTO_LIB crypto)
 
@@ -76,6 +76,9 @@ target_link_libraries (geodb geo geoutil ${GDAL_LIBRARY})
 add_library (georaster SHARED src/raster.cpp)
 target_link_libraries (georaster geo geoutil geodb Threads::Threads ${GEOS_LIBRARY} ${GDAL_LIBRARY})
 
+add_library (geolas SHARED src/las.cpp)
+target_link_libraries (geolas geo geoutil ${LIBLAS_LIBRARY})
+
 add_library (geoann SHARED ann/src/ANN.cpp ann/src/brute.cpp ann/src/kd_tree.cpp ann/src/kd_util.cpp 
 	ann/src/kd_split.cpp ann/src/kd_dump.cpp ann/src/kd_search.cpp ann/src/kd_pr_search.cpp 
 	ann/src/kd_fix_rad_search.cpp ann/src/bd_tree.cpp ann/src/bd_search.cpp ann/src/bd_pr_search.cpp 
@@ -94,7 +97,7 @@ add_executable (las2grid src/apps/las2grid.cpp)
 target_link_libraries (las2grid geo geoann geoutil georaster ${Boost_LIBRARIES} ${LIBLAS_LIBRARY})
 
 add_executable (las2tile src/apps/las2tile.cpp)
-target_link_libraries (las2tile geo geoutil ${Boost_LIBRARIES} ${LIBLAS_LIBRARY})
+target_link_libraries (las2tile geo geoutil geolas ${Boost_LIBRARIES} ${LIBLAS_LIBRARY})
 
 add_executable (info src/apps/info.cpp)
 target_link_libraries (info geo geoutil ${Boost_LIBRARIES} ${GDAL_LIBRARY} ${LIBLAS_LIBRARY} ${JSONCPP_LIBRARY})
