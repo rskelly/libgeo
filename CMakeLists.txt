@@ -94,7 +94,7 @@ add_executable (polygonize src/apps/polygonize.cpp)
 target_link_libraries (polygonize geo geoutil georaster ${Boost_LIBRARIES})
 
 add_executable (las2grid src/apps/las2grid.cpp)
-target_link_libraries (las2grid geo geoann geoutil georaster ${Boost_LIBRARIES} ${LIBLAS_LIBRARY})
+target_link_libraries (las2grid geo geoann geoutil georaster geolas ${Boost_LIBRARIES} ${LIBLAS_LIBRARY})
 
 add_executable (las2tile src/apps/las2tile.cpp)
 target_link_libraries (las2tile geo geoutil geolas ${Boost_LIBRARIES} ${LIBLAS_LIBRARY})

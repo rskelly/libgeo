@@ -21,8 +21,10 @@
 #include <liblas/liblas.hpp>
 
 #include "util.hpp"
+#include "ds/kdtree.hpp"
 
 using namespace geo::util;
+using namespace geo::ds;
 
 namespace geo {
 namespace las {
@@ -277,6 +279,132 @@ public:
 		double easting = std::nan(""), double northing = std::nan(""), int maxFileHandles = 64);
 
 	~Tiler();
+
+};
+
+/**
+ * Represents a 3D point that can be used in a tree structure.
+ * can be instantiated with raw coordinates or with a
+ * liblas::Point instance.
+ */
+class Point {
+public:
+	double x; ///< The x-coordinate.
+	double y; ///< The y-coordinate.
+	double z; ///< The z-coordinate.
+	std::unique_ptr<liblas::Point> point;
+
+	/**
+	 * Construct a Point using a liblas::Point.
+	 * Will read the 3D coordinates and save a pointer
+	 * to a copy of the object.
+	 * @param pt A liblas::Point object.
+	 */
+	Point(const liblas::Point& pt);
+
+	/**
+	 * Construct a point using the three raw coordinates.
+	 * @param x The x-coordinate.
+	 * @param y The y-coordinate.
+	 * @param z The z-coordinate.
+	 */
+	Point(double x, double y, double z);
+
+	/**
+	 * Returns the class ID of this point. If no liblas::Point
+	 * or other was provided, this returns zero.
+	 */
+	int classId() const;
+
+	/**
+	 * Returns the 2D coordinate for the given index.
+	 * The modulus of the index is taken; if index % 2 == 0,
+	 * then x is returned, otherwise y.
+	 * @param idx The index.
+	 */
+	double operator[](int idx) const;
+
+	~Point();
+
+};
+
+/**
+ * Turns a set of LAS files into a raster.
+ */
+class Rasterizer {
+private:
+	std::vector<LASFile> m_files;				///< A list of LASFile instances.
+	std::unordered_set<int> m_currentFiles; 	///< A map of current files accessed by index.
+	geo::ds::KDTree<Point>* m_tree;				///< A KDTree containing points.
+
+	/**
+	 * Builds a tree from the file set whose bounds encompase the circle,
+	 * defined by the given coordinates and radius. Only done if required.
+	 * @param x 		The x-coordinate.
+	 * @param y 		The y-coordinate.
+	 * @param radius 	The search radius.
+	 */
+	void updateTree(double x, double y, double radius);
+
+	/**
+	 * Populates the given lists with Points and distances from the given coordinates
+	 * within the given radius.
+	 * @param x 		The x-coordinate.
+	 * @param y 		The y-coordinate.
+	 * @param radius 	The search radius.
+	 * @param count 	The number of points to search for.
+	 * @param pts 		The list of output Points.
+	 * @param dists 	The list of output distances.
+	 * @return The number of points found.
+	 */
+	int getPoints(double x, double y, double radius, int count, std::list<Point>& pts, std::list<double>& dists);
+
+	/**
+	 * Compute and return the statistic for the points within the neighbourhood
+	 * defined by the lists of points and distances.
+	 * @param type 	The statistic to compute.
+	 * @param pts 	The list of Points.
+	 * @param dists The list of distances.
+	 * @return The value of the computed statistic.	
+	 */
+	double compute(const std::string& type, const std::list<Point>& pts, const std::list<double>& dists);
+
+	/**
+	 * Return true if the point should not be filtered out.
+	 * @param pt A Point.
+	 * @return True if the point should be processed.
+	 */
+	bool filter(const Point& pt) const;
+
+public:
+
+	/**
+	 * Construct a Rasterizer using the given LAS file names.
+	 * @param filenames A vector containing file names.
+	 */
+	Rasterizer(const std::vector<std::string> filenames);
+
+	/**
+	 * Rasterize the point cloud using the given output filename, statistic type, resolution
+	 * and bounds. The radius gives the size of the neighbourhood around each pixel
+	 * centre.
+	 * @param filename 	The output (raster) filename.
+	 * @param type 		The name of the statistic to compute.
+	 * @param res 		The raster resolution.
+	 * @param easting 	The minimum corner coordinate of the raster.
+	 * @param northing 	The minimum corner coordinate of the raster.
+	 * @param radius 	The size of the neighbourhood around each cell centre.
+	 * @param srid 		The spatial reference ID of the output.
+	 * @param threads 	The number of threads to use in computation.
+	 * @param ext 		An extra filter value. For example, for percentiles, this is the cutoff value.
+	 */
+	void rasterize(const std::string& filename, const std::string& type, double res, 
+		double easting, double northing, double radius, int srid, int threads, double ext = 0);
+
+	/**
+	 * Destroy the Rasterizer.
+	 */
+	~Rasterizer();
 
 };
 

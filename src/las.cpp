@@ -11,8 +11,12 @@
 #include <liblas/liblas.hpp>
 
 #include "util.hpp"
+#include "raster.hpp"
 #include "las.hpp"
+#include "ds/kdtree.hpp"
 
+
+using namespace geo::raster;
 using namespace geo::util;
 using namespace geo::las;
 
@@ -194,7 +198,7 @@ int even(int num) {
 	return num;
 }
 
-Tile::Tile(double minx, double miny, double maxx, double maxy, double buffer) {
+geo::las::Tile::Tile(double minx, double miny, double maxx, double maxy, double buffer) {
 	m_bounds[0] = minx;
 	m_bounds[1] = miny;
 	m_bounds[2] = maxx;
@@ -205,7 +209,7 @@ Tile::Tile(double minx, double miny, double maxx, double maxy, double buffer) {
 	m_bufferedBounds[3] = m_bounds[3] + buffer;
 }
 
-LASWriter* Tile::writer(bool release) {
+LASWriter* geo::las::Tile::writer(bool release) {
 	if(release) {
 		return m_writer.release();
 	} else {
@@ -213,16 +217,16 @@ LASWriter* Tile::writer(bool release) {
 	}
 }
 
-void Tile::writer(LASWriter* wtr) {
+void geo::las::Tile::writer(LASWriter* wtr) {
 	m_writer.reset(wtr);
 }
 
-bool Tile::contains(double x, double y) {
+bool geo::las::Tile::contains(double x, double y) {
 	return x >= m_bounds[0] && x < m_bounds[2] 
 		&& y >= m_bounds[1] && y < m_bounds[3];
 }
 
-bool Tile::containsBuffered(double x, double y) {
+bool geo::las::Tile::containsBuffered(double x, double y) {
 	return x >= m_bufferedBounds[0] && x < m_bufferedBounds[2] 
 		&& y >= m_bufferedBounds[1] && y < m_bufferedBounds[3];
 }
@@ -412,3 +416,185 @@ void Tiler::tile(const std::string& outdir, double size, double buffer, int srid
 }
 
 Tiler::~Tiler() {}
+
+
+
+
+geo::las::Point::Point(const liblas::Point& pt) :
+	x(pt.GetX()), y(pt.GetY()), z(pt.GetZ()) {
+	point.reset(new liblas::Point(pt));
+}
+
+geo::las::Point::Point(double x, double y, double z) :
+	x(x), y(y), z(z) {
+}
+
+int geo::las::Point::classId() const {
+	if(point.get())
+		return point->GetClassification().GetClass();
+	return 0;
+}
+
+double geo::las::Point::operator[](int idx) const {
+	switch(idx % 2) {
+	case 0:
+		return x;
+	case 1:
+		return y;
+	}
+	return 0;
+}
+
+geo::las::Point::~Point() {
+}
+
+Rasterizer::Rasterizer(const std::vector<std::string> filenames) :
+	m_tree(nullptr) {
+	for(const std::string& filename : filenames)
+		m_files.emplace_back(filename);
+
+}
+
+bool Rasterizer::filter(const geo::las::Point& pt) const {
+	return pt.classId() == 2; // TODO: Make configurable.
+}
+
+void Rasterizer::updateTree(double x, double y, double radius) {
+	std::unordered_set<int> requiredFiles;
+	double tbounds[4] = {x - radius, y - radius, x + radius, y + radius};
+	double fBounds[6];
+	for(size_t i = 0; i < m_files.size(); ++i) {
+		m_files[i].bounds(fBounds);
+		if(!(tbounds[2] < fBounds[0] || tbounds[0] > fBounds[2] ||
+			tbounds[3] < fBounds[1] || tbounds[1] > fBounds[3])) {
+			requiredFiles.insert(i);
+		}
+	}
+	bool changed = false;
+	if(m_currentFiles.empty()) {
+		m_currentFiles.insert(requiredFiles.begin(), requiredFiles.end());
+		changed = true;
+	} else {
+		for(int a : m_currentFiles) {
+			if(requiredFiles.find(a) == requiredFiles.end()) {
+				changed = true;
+				break;
+			}
+		}
+		for(int a : requiredFiles) {
+			if(m_currentFiles.find(a) == m_currentFiles.end()) {
+				changed = true;
+				break;
+			}
+		}
+		if(changed) {
+			m_currentFiles.clear();
+			m_currentFiles.insert(requiredFiles.begin(), requiredFiles.end());
+		}
+	}
+	if(changed) {
+		if(m_tree) {
+			delete m_tree;
+			m_tree = nullptr;
+		}
+		if(!m_currentFiles.empty()) {
+			liblas::ReaderFactory fact;
+			m_tree = new geo::ds::KDTree<geo::las::Point>(2);
+			for(int a : m_currentFiles) {
+				std::ifstream str(m_files[a].filenames()[0]);
+				liblas::Reader rdr = fact.CreateWithStream(str);
+				while(rdr.ReadNextPoint()) {
+					const liblas::Point& pt = rdr.GetPoint();
+					geo::las::Point lpt(pt);
+					if(filter(lpt))
+						m_tree->add(lpt);
+				}
+			}
+			try {
+				m_tree->build();
+			} catch(const std::exception& ex) {
+				g_warn("Failed to build tree.");
+			}
+		}
+	}
+}
+
+int Rasterizer::getPoints(double x, double y, double radius, int count, 
+		std::list<geo::las::Point>& pts, std::list<double>& dists) {
+	updateTree(x, y, radius);
+	geo::las::Point pt(x, y, 0);
+	int ret = 0;
+	if(m_tree)
+		ret = m_tree->radSearch(pt, radius, count, std::back_inserter(pts), std::back_inserter(dists));
+	return ret;
+}
+
+double Rasterizer::compute(const std::string& type, 
+		const std::list<geo::las::Point>& pts, const std::list<double>& dists) {
+	double e = 0;
+	double c = 0;
+	for(const geo::las::Point& pt : pts) {
+		e += pt.z;
+		++c;
+	}
+	return c > 0 ? e / c : 0;
+}
+
+void Rasterizer::rasterize(const std::string& filename, const std::string& type, double res, 
+	double easting, double northing, double radius, int srid, int threads, double ext) {
+
+	double bounds[4] = {9999999999, 9999999999, -9999999999, -9999999999};
+	double fBounds[6];
+
+	for(const LASFile& f : m_files) {
+		f.bounds(fBounds);
+		if(fBounds[0] < bounds[0]) bounds[0] = fBounds[0];
+		if(fBounds[1] < bounds[1]) bounds[1] = fBounds[1];
+		if(fBounds[2] > bounds[2]) bounds[2] = fBounds[2];
+		if(fBounds[3] > bounds[3]) bounds[3] = fBounds[3];
+	}
+
+	if(easting <= 0)
+		easting = ((int) (bounds[0] / res)) * res;
+	if(northing <= 0)
+		northing = ((int) (bounds[3] / res)) * res;
+
+	int cols = (int) ((bounds[2] - bounds[0]) / res) + 1;
+	int rows = (int) ((bounds[3] - bounds[1]) / res) + 1;
+
+	GridProps props;
+	props.setTrans(easting, res, northing, -res);
+	props.setSize(cols, rows);
+	props.setNoData(-9999.0);
+	props.setDataType(DataType::Float32);
+	props.setSrid(srid);
+	props.setWritable(true);
+	Raster rast(filename, props);
+
+	for(int r = 0; r < rows; ++r) {
+		for(int c = 0; c < cols; ++c) {
+			int count = 100;
+			double x = props.toX(c) + props.resolutionX() / 2;
+			double y = props.toY(r) + props.resolutionY() / 2;
+			std::list<Point> pts;
+			std::list<double> dists;
+			int ret;
+			while((ret = getPoints(x, y, radius, count, pts, dists)) >= count) {
+				pts.clear();
+				dists.clear();
+				count *= 2;
+				std::cerr << "count " << count << "; ret " << ret << "\n";
+			}
+			if(ret) {
+				rast.setFloat(c, r, compute(type, pts, dists));
+			} else {
+				rast.setFloat(c, r, -9999.0);
+			}
+		}
+	}
+}
+
+Rasterizer::~Rasterizer() {
+	if(m_tree)
+		delete m_tree;
+}
