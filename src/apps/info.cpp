@@ -99,7 +99,7 @@ public:
 
 class RasterBand {
 public:
-	std::string dataType;
+	int dataType;
 	int cols;
 	int rows;
 	double nodata;
@@ -136,7 +136,7 @@ public:
 		stats["mean"] = mean;
 		stats["stddev"] = stdDev;
 		node["stats"] = stats;
-		return stats;
+		return node;
 	}
 
 };
@@ -331,14 +331,14 @@ int handleFile(const std::string& filename) {
 
 	if(!tryGDAL(filename, ds)) {
 		if(!tryLAS(filename, ds)) {
-			g_runerr("Unknown file type: " << filename);
+			// Zippo.
 		}
 	}
 
-	Json::Value node;
+	Json::Value node(Json::objectValue);
 
 	if(ds.get()) {
-		node = ds->asJSON();
+		node["dataset"] = ds->asJSON();
 	} else {
 		node = Json::Value(Json::objectValue);
 		node["error"] = "Failed to understand file.";

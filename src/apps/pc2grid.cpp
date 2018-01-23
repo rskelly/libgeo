@@ -5,13 +5,16 @@
  *      Author: rob
  */
 
+#include <pointcloud.hpp>
 #include <fstream>
 #include <vector>
 #include <unordered_set>
+#include <iostream>
 
+#include "pointcloud.hpp"
 
 void usage() {
-	std::cerr << "Usage: las2grid [options] <output raster> <input las [*]>\n"
+	std::cerr << "Usage: pc2grid [options] <output raster> <input las [*]>\n"
 			<< " -r <resolution> The output resolution in map units.\n"
 			<< " -e <easting>    The top left corner horizontal alignment\n"
 			<< "                 (defaults to nearest multiple of resolution).\n"
@@ -27,8 +30,6 @@ void usage() {
 }
 
 int main(int argc, char** argv) {
-
-	using namespace geo::raster;
 
 	if(argc < 3) {
 		usage();
@@ -83,7 +84,7 @@ int main(int argc, char** argv) {
 	}
 
 	std::vector<std::string> infiles(args.begin() + 1, args.end());
-	Rasterizer r(infiles);
+	geo::pc::Rasterizer r(infiles);
 	r.rasterize(args[0], type, res, easting, northing, radius, srid, threads, 0);
 
 	return 0;

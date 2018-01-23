@@ -1,5 +1,5 @@
-#ifndef __LAS_HPP__
-#define __LAS_HPP__
+#ifndef __PC_HPP__
+#define __PC_HPP__
 
 /**
  * Classes for working with LiDAR point clouds, specifically LAS files.
@@ -11,6 +11,7 @@
 #include <fstream>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 #include <sstream>
 #include <memory>
 #include <string>
@@ -27,15 +28,15 @@ using namespace geo::util;
 using namespace geo::ds;
 
 namespace geo {
-namespace las {
+namespace pc {
 
 /**
- * A class representing a source LAS file. Maintains
+ * A class representing a source point cloud file. Maintains
  * the position of the tile, by the minimum x and y coordinates, 
  * the tiles bounding box and a list of filenames of the tile's
  * constituent files.
  */
-class LASFile {
+class PCFile {
 private:
 	double m_x;								///< Minimum corner x-coordinate.
 	double m_y;								///< Minimum corner y-coordinate.
@@ -45,20 +46,20 @@ private:
 public:
 
 	/**
-	 * Construct a LASFile object using the given filename and corner coordinate.
+	 * Construct a PCFile object using the given filename and corner coordinate.
 	 * @param filename 	The filename of a consituent file.
 	 * @param x 		The minimum x-coordinate.
 	 * @param y 		The minimum y-coordinate.
 	 */
-	LASFile(const std::string& filename, double x = 0, double y = 0);
+	PCFile(const std::string& filename, double x = 0, double y = 0);
 
 	/**
-	 * Construct a LASFile object using the given filenames and corner coordinate.
+	 * Construct a PCFile object using the given filenames and corner coordinate.
 	 * @param filenames	A list of filenames of consituent files.
 	 * @param x 		The minimum x-coordinate.
 	 * @param y 		The minimum y-coordinate.
 	 */
-	LASFile(const std::vector<std::string>& filenames, double x = 0, double y = 0);
+	PCFile(const std::vector<std::string>& filenames, double x = 0, double y = 0);
 
 	/**
 	 * Get the minimum x-coordinate.
@@ -92,14 +93,14 @@ public:
 	 */
 	void init(bool useHeader = true);
 
-	~LASFile();
+	~PCFile();
 
 };
 
 /**
  * A class that is responsible for writing new tiles.
  */
-class LASWriter {
+class PCWriter {
 private:
 	int m_fileIdx;							///< The current file index.
 	int m_returns;							///< The number of returns (points) in the current file.
@@ -123,14 +124,14 @@ private:
 
 public:
 	/**
-	 * Construct an instance of a LASWriter using the given output filename, {liblas::Header} and corner
+	 * Construct an instance of a PCWriter using the given output filename, {liblas::Header} and corner
 	 * coordinate.
 	 * @param filename 	The output filename template. This is the file path without an index part or extension.
 	 * @param hdr 		A {liblas::Header} to be used as a template for the new file.
 	 * @param x 		The minimum x-coordinate of the tile.
 	 * @param y 		The minimum y-coordinate of the tile.
 	 */
-	LASWriter(const std::string& filename, const liblas::Header& hdr, double x = 0, double y = 0);
+	PCWriter(const std::string& filename, const liblas::Header& hdr, double x = 0, double y = 0);
 
 	/**
 	 * Get the minimum x-coordinate.
@@ -185,20 +186,20 @@ public:
 	 * Destroy the writer. Will close any open files, and, if {dod} is set to
 	 * true, will delete constituent files.
 	 */
-	~LASWriter();
+	~PCWriter();
 
 };
 
 /**
  * Represents a single tile, its geographic extent and its buffered extent.
- * Contains a LASWriter instance for writing to the file(s) associated
+ * Contains a PCWriter instance for writing to the file(s) associated
  * with the tile.
  */
 class Tile {
 private:
 	double m_bounds[4];						///< The geographic bounds of the tile.
 	double m_bufferedBounds[4];				///< The buffered extent of the tile.
-	std::unique_ptr<LASWriter> m_writer;	///< The LASWriter used for writing points.
+	std::unique_ptr<PCWriter> m_writer;	///< The PCWriter used for writing points.
 
 public:
 	/**
@@ -212,20 +213,20 @@ public:
 	Tile(double minx, double miny, double maxx, double maxy, double buffer = 0);
 
 	/**
-	 * Return a pointer to the LASWriter owned by this tile.
+	 * Return a pointer to the PCWriter owned by this tile.
 	 * @param release If true, the tile will relinquish ownership of the 
-	 * LASWriter instance.
-	 * @return A pointer to the \ling LASWriter owned by this tile.
+	 * PCWriter instance.
+	 * @return A pointer to the \ling PCWriter owned by this tile.
 	 */
-	LASWriter* writer(bool release = false);
+	PCWriter* writer(bool release = false);
 
 	/**
-	 * Set a LASWriter instance on this tile. This tile is
+	 * Set a PCWriter instance on this tile. This tile is
 	 * the unique owner of the instance. Failure will
-	 * result if the caller destroys the LASWriter.
-	 * @param wtr A LASWriter pointer.
+	 * result if the caller destroys the PCWriter.
+	 * @param wtr A PCWriter pointer.
 	 */
-	void writer(LASWriter* wtr);
+	void writer(PCWriter* wtr);
 
 	/**
 	 * Returns true if the given coordinate is within the bounds of this tile's
@@ -248,20 +249,20 @@ public:
 };
 
 /**
- * Performs the tiling of a set of LAS files.
+ * Performs the tiling of a set of point cloud files.
  */
 class Tiler {
 public:
-	std::vector<LASFile> files;	///< The list of LASFile instances.
+	std::vector<PCFile> files;	///< The list of PCFile instances.
 
 	/**
 	 * Construct a tiler with the given list of initial filenames.
-	 * @param filenames A list of filenames of LAS files to process.
+	 * @param filenames A list of filenames of point cloud files to process.
 	 */
 	Tiler(const std::vector<std::string> filenames);
 
 	/**
-	 * Tile the list of LAS files; write the output to the given output directory.
+	 * Tile the list of point cloud files; write the output to the given output directory.
 	 * @param outdir			The output directory.
 	 * @param size 				The length of one side of the tile.
 	 * @param buffer 			The size of the buffer around each tile. Default 0.
@@ -289,15 +290,15 @@ public:
  */
 class Point {
 public:
-	double x; ///< The x-coordinate.
-	double y; ///< The y-coordinate.
-	double z; ///< The z-coordinate.
-	std::unique_ptr<liblas::Point> point;
+	double x; 				///< The x-coordinate.
+	double y; 				///< The y-coordinate.
+	double z; 				///< The z-coordinate.
+	liblas::Point* point;	///< The (optional) liblas::Point instance. Deleted on destruction.
 
 	/**
-	 * Construct a Point using a liblas::Point.
-	 * Will read the 3D coordinates and save a pointer
-	 * to a copy of the object.
+	 * Construct a Point using a liblas::Point. Will read the 3D
+	 * coordinates and save a pointer to a copy of the object.
+	 * The copy is deleted on destruction.
 	 * @param pt A liblas::Point object.
 	 */
 	Point(const liblas::Point& pt);
@@ -329,13 +330,34 @@ public:
 };
 
 /**
- * Turns a set of LAS files into a raster.
+ * Used by Rasterizer to compute cell values from the points found
+ * in the neighbourhood of a cell.
+ */
+class Computer {
+public:
+
+	/**
+		 * Compute and return the statistic for the points within the neighbourhood
+		 * defined by the lists of points and distances.
+		 * @param type 	The statistic to compute.
+		 * @param pts 	The list of Points.
+		 * @param dists The list of distances.
+		 * @return The value of the computed statistic.
+		 */
+		virtual double compute(const std::list<Point>& pts, const std::list<double>& dists, double radius) = 0;
+
+		virtual ~Computer() {}
+};
+
+/**
+ * Turns a set of point cloud files into a raster.
  */
 class Rasterizer {
 private:
-	std::vector<LASFile> m_files;				///< A list of LASFile instances.
-	std::unordered_set<int> m_currentFiles; 	///< A map of current files accessed by index.
-	geo::ds::KDTree<Point>* m_tree;				///< A KDTree containing points.
+	std::vector<PCFile> m_files;							///< A list of PCFile instances.
+	std::unordered_set<int> m_currentFiles; 				///< A set of current files accessed by index.
+	geo::ds::KDTree<Point>* m_tree;							///< A KDTree containing points.
+	std::unordered_map<std::string, Computer*> m_computers;	///< A map of computers.
 
 	/**
 	 * Builds a tree from the file set whose bounds encompase the circle,
@@ -360,16 +382,6 @@ private:
 	int getPoints(double x, double y, double radius, int count, std::list<Point>& pts, std::list<double>& dists);
 
 	/**
-	 * Compute and return the statistic for the points within the neighbourhood
-	 * defined by the lists of points and distances.
-	 * @param type 	The statistic to compute.
-	 * @param pts 	The list of Points.
-	 * @param dists The list of distances.
-	 * @return The value of the computed statistic.	
-	 */
-	double compute(const std::string& type, const std::list<Point>& pts, const std::list<double>& dists);
-
-	/**
 	 * Return true if the point should not be filtered out.
 	 * @param pt A Point.
 	 * @return True if the point should be processed.
@@ -379,10 +391,17 @@ private:
 public:
 
 	/**
-	 * Construct a Rasterizer using the given LAS file names.
+	 * Construct a Rasterizer using the given point cloud file names.
 	 * @param filenames A vector containing file names.
 	 */
 	Rasterizer(const std::vector<std::string> filenames);
+
+	/**
+	 * Add a Computer to the Rasterizer.
+	 * @param name The name of the computer.
+	 * @param computer The Computer instance.
+	 */
+	void addComputer(const std::string& name, Computer* computer);
 
 	/**
 	 * Rasterize the point cloud using the given output filename, statistic type, resolution

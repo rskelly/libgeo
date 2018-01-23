@@ -44,9 +44,10 @@ find_package (Threads REQUIRED)
 find_package (OpenMP REQUIRED)
 find_package (Boost COMPONENTS system filesystem date_time REQUIRED)
 find_package (GDAL 2.2 REQUIRED)
+find_package(CGAL REQUIRED COMPONENTS Core)
 
 find_library (LIBLAS_LIBRARY las PATHS /usr/lib NO_DEFAULT_PATH)
-find_library (JSONCPP_LIBRARY las PATHS /usr/lib NO_DEFAULT_PATH)
+find_library (JSONCPP_LIBRARY jsoncpp PATHS /usr/lib NO_DEFAULT_PATH)
 find_library (GEOS_LIBRARY geos PATHS /opt/lib NO_DEFAULT_PATH)
 find_library (CRYPTO_LIB crypto)
 
@@ -76,8 +77,8 @@ target_link_libraries (geodb geo geoutil ${GDAL_LIBRARY})
 add_library (georaster SHARED src/raster.cpp)
 target_link_libraries (georaster geo geoutil geodb Threads::Threads ${GEOS_LIBRARY} ${GDAL_LIBRARY})
 
-add_library (geolas SHARED src/las.cpp)
-target_link_libraries (geolas geo geoutil ${LIBLAS_LIBRARY})
+add_library (geopc SHARED src/pointcloud.cpp)
+target_link_libraries (geopc geo geoutil georaster geoann ${LIBLAS_LIBRARY} ${CGAL_LIBRARY} ${Boost_LIBRARIES})
 
 add_library (geoann SHARED ann/src/ANN.cpp ann/src/brute.cpp ann/src/kd_tree.cpp ann/src/kd_util.cpp 
 	ann/src/kd_split.cpp ann/src/kd_dump.cpp ann/src/kd_search.cpp ann/src/kd_pr_search.cpp 
@@ -85,7 +86,7 @@ add_library (geoann SHARED ann/src/ANN.cpp ann/src/brute.cpp ann/src/kd_tree.cpp
 	ann/src/bd_fix_rad_search.cpp ann/src/perf.cpp)
 target_link_libraries (geoann geo geoutil)
 
-# Tests ##################################################################################################
+# Applications ##################################################################################################
 
 add_executable (kdtree_test src/tests/kdtree_test.cpp)
 target_link_libraries (kdtree_test geoann ${Boost_LIBRARIES})
@@ -93,11 +94,11 @@ target_link_libraries (kdtree_test geoann ${Boost_LIBRARIES})
 add_executable (polygonize src/apps/polygonize.cpp)
 target_link_libraries (polygonize geo geoutil georaster ${Boost_LIBRARIES})
 
-add_executable (las2grid src/apps/las2grid.cpp)
-target_link_libraries (las2grid geo geoann geoutil georaster geolas ${Boost_LIBRARIES} ${LIBLAS_LIBRARY})
+add_executable (pc2grid src/apps/pc2grid.cpp)
+target_link_libraries (pc2grid geo geoann geoutil georaster geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY})
 
-add_executable (las2tile src/apps/las2tile.cpp)
-target_link_libraries (las2tile geo geoutil geolas ${Boost_LIBRARIES} ${LIBLAS_LIBRARY})
+add_executable (pc2tile src/apps/pc2tile.cpp)
+target_link_libraries (pc2tile geo geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY})
 
 add_executable (info src/apps/info.cpp)
 target_link_libraries (info geo geoutil ${Boost_LIBRARIES} ${GDAL_LIBRARY} ${LIBLAS_LIBRARY} ${JSONCPP_LIBRARY})

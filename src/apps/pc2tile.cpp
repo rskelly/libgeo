@@ -30,10 +30,7 @@
 #include <liblas/liblas.hpp>
 
 #include "util.hpp"
-#include "las.hpp"
-
-using namespace geo::util;
-using namespace geo::las;
+#include "pointcloud.hpp"
 
 /**
  * Prints the useage message.
@@ -98,7 +95,7 @@ int main(int argc, char** argv) {
 	}
 
 	std::vector<std::string> infiles(args.begin() + 1, args.end());
-	Tiler r(infiles);
+	geo::pc::Tiler r(infiles);
 	r.tile(args[0], size, buffer, srid, easting, northing, handles);
 
 	return 0;
