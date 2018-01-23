@@ -2324,12 +2324,14 @@ bool computeDirection(int tl, int tr, int bl, int br, int target, int& c, int& r
 		case 2: ++c; dir = 1; return true;
 		case 8: --c; dir = 4; return true;
 		}
+		break;
 	case 2: 
 	case 6: 
 		switch(dir) {
 		case 1: ++r; dir = 8; return true;
 		case 4: --r; dir = 2; return true;
 		}
+		break;
 	case 4:
 	case 5: ++r; dir = 8; return true;
 	case 8:
