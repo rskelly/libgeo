@@ -270,7 +270,7 @@ public:
 
 bool tryGDAL(const std::string& filename, std::unique_ptr<Dataset>& ds) {
 
-	GDALDataset* gds;
+	GDALDataset* gds = nullptr;
 	GDALDriver* gdrv;
 
 	try {
@@ -295,12 +295,14 @@ bool tryGDAL(const std::string& filename, std::unique_ptr<Dataset>& ds) {
 			g_runerr("Dataset is not a vector or raster. Something is amiss (missing driver?)");
 		}
 
-		GDALClose(gds);
+		if(gds)
+			GDALClose(gds);
 		return true;
 
 	} catch(std::exception& ex) {
 		g_debug("It's not a valid GDAL dataset: " << ex.what());
-		GDALClose(gds);
+		if(gds)
+			GDALClose(gds);
 		return false;
 	}
 
