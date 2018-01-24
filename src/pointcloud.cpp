@@ -1023,7 +1023,7 @@ Rasterizer::Rasterizer(const std::vector<std::string> filenames) :
 }
 
 bool Rasterizer::filter(const geo::pc::Point& pt) const {
-	return pt.classId() == 2; // TODO: Make configurable.
+	return true;//pt.classId() == 2; // TODO: Make configurable.
 }
 
 void Rasterizer::updateTree(double x, double y, double radius) {
@@ -1112,7 +1112,8 @@ void Rasterizer::rasterize(const std::string& filename, const std::string& type,
 	double bounds[4] = {9999999999, 9999999999, -9999999999, -9999999999};
 	double fBounds[6];
 
-	for(const PCFile& f : m_files) {
+	for(PCFile& f : m_files) {
+		f.init();
 		f.bounds(fBounds);
 		if(fBounds[0] < bounds[0]) bounds[0] = fBounds[0];
 		if(fBounds[1] < bounds[1]) bounds[1] = fBounds[1];
