@@ -338,55 +338,114 @@ public:
 
 	/**
 		 * Compute and return the statistic for the points within the neighbourhood
-		 * defined by the lists of points and distances.
+		 * defined by the lists of points.
 		 * @param type 	The statistic to compute.
 		 * @param pts 	The list of Points.
-		 * @param dists The list of distances.
 		 * @return The value of the computed statistic.
 		 */
-		virtual double compute(const std::list<Point>& pts, const std::list<double>& dists, double radius) = 0;
+		virtual double compute(double x, double y, const std::list<Point>& pts, double radius) = 0;
 
 		virtual ~Computer() {}
 };
 
+class Cell {
+public:
+	double x0;
+	double y0;
+	double x1;
+	double y1;
+	double cx;
+	double cy;
+	std::list<Point> values;
+
+	/**
+	 * Construct a representation of a grid cell using
+	 * the geographic bounds of the cell (inclusive).
+	 * @param x0 The minimum x-coordinate.
+	 * @param y0 The minimum x-coordinate.
+	 * @param x0 The maximum x-coordinate.
+	 * @param y1 The maximum y-coordinate.
+	 */
+	Cell(double x0, double y0, double x1, double y1) {
+		setBounds(x0, y0, x1, y1);
+	}
+
+	Cell();
+
+	void setBounds(double x0, double y0, double x1, double y1) {
+		this->x0 = x0;
+		this->y0 = y0;
+		this->x1 = x1;
+		this->y1 = y1;
+		cx = (x1 - x0) / 2;
+		cy = (y1 - y0) / 2;
+	}
+
+	/**
+	 * Returns true if the coordinate is within the radius of the
+	 * center of this cell. If the given radius is <= 0, returns
+	 * true if the coordinate is within the rectangular bounds of the cell.
+	 * @param x 		The x-coordinate.
+	 * @param y 		The y-coordinate.
+	 * @param radius 	The radius to search.
+	 * @return True, if the point is within the cell.
+	 */
+	bool contains(double x, double y, double radius) const {
+		if(radius > 0) {
+			return std::pow(cx - x, 2.0) + std::pow(cy - y, 2.0) <= radius * radius;
+		} else {
+			return x >= x0 && x <= x1 && y >= y0 && y <= y1;
+		}
+	}
+
+	/**
+	 * Returns true if this cell intersects the given bounding box.
+	 * If the radius is >= 0, the circular area around the cell's centre
+	 * is checked for intersection, otherwise the cell's rectangular area is used.
+	 * @param bx0 The minimum x-coordinate of the bounding box.
+	 * @param by0 The minimum y-coordinate of the bounding box.
+	 * @param bx1 The maximum x-coordinate of the bounding box.
+	 * @param by1 The maximum y-coordinate of the bounding box.
+	 * @param radius 	The radius to search.
+	 * @return True, if the cell intersects with the box.
+	 */
+	bool intersects(double bx0, double by0, double bx1, double by1, double radius) const {
+		if(radius > 0) {
+			// If the center is in the box, automatically true.
+			if(!(cx < bx0 || cx > bx1 || cy < by0 || cy > by1))
+				return true;
+			// Otherwise check that the centre is within radius of the sides of the box.
+			// This only works if axes are aligned.
+			double closeX = std::min(std::abs(bx0 - cx), std::abs(bx1 - cx));
+			double closeY = std::min(std::abs(by0 - cy), std::abs(by1 - cy));
+			return std::abs(closeX - cx) <= radius && std::abs(closeY - cy) <= radius;
+		} else {
+			return !(bx1 < x0 && bx0 > x1 && by1 < y0 && by0 > y1);
+		}
+	}
+
+};
 /**
  * Turns a set of point cloud files into a raster.
  */
 class Rasterizer {
 private:
 	std::vector<PCFile> m_files;							///< A list of PCFile instances.
-	std::unordered_set<int> m_currentFiles; 				///< A set of current files accessed by index.
-	geo::ds::KDTree<Point>* m_tree;							///< A KDTree containing points.
+	std::unordered_map<size_t, Cell> m_grid;				///< The map of all grid cells and their contents.
 	std::unordered_map<std::string, Computer*> m_computers;	///< A map of computers.
 
 	/**
-	 * Builds a tree from the file set whose bounds encompase the circle,
-	 * defined by the given coordinates and radius. Only done if required.
-	 * @param x 		The x-coordinate.
-	 * @param y 		The y-coordinate.
-	 * @param radius 	The search radius.
+	 * Populate the iterator with the cells that are concerned about this point.
+	 * If the radius is <= 0, a single rectangular cell area is used, otherwise
+	 * the circular radius around the cell's centre is used.
+	 * @param x 		The x-coordinate of the point.
+	 * @param y 		The y-coordinate of the point.
+	 * @param radius	The radius around the centre of the cell. If <= 0, the cell's rectangular grid is used.
+	 * @param iter		A back_inserter which will receive the Cell instances.
+	 * @return The number of cells found.
 	 */
-	void updateTree(double x, double y, double radius);
-
-	/**
-	 * Populates the given lists with Points and distances from the given coordinates
-	 * within the given radius.
-	 * @param x 		The x-coordinate.
-	 * @param y 		The y-coordinate.
-	 * @param radius 	The search radius.
-	 * @param count 	The number of points to search for.
-	 * @param pts 		The list of output Points.
-	 * @param dists 	The list of output distances.
-	 * @return The number of points found.
-	 */
-	int getPoints(double x, double y, double radius, int count, std::list<Point>& pts, std::list<double>& dists);
-
-	/**
-	 * Return true if the point should not be filtered out.
-	 * @param pt A Point.
-	 * @return True if the point should be processed.
-	 */
-	bool filter(const Point& pt) const;
+	template <class T>
+	int getAffectedCells(double x, double y, double radius, T iter);
 
 public:
 

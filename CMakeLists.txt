@@ -27,8 +27,8 @@ elseif(${WIN32})
 	set (libLAS_LIBRARY_DIRS "C:\\dev\\gisinternals\\lib")
 else()
 	include_directories (BEFORE SYSTEM include)
-	include_directories (BEFORE SYSTEM /opt/include)
 	include_directories (BEFORE SYSTEM ann/include)
+	include_directories (BEFORE SYSTEM /opt/include)
 	include_directories (BEFORE SYSTEM /usr/include)
 	include_directories (BEFORE SYSTEM /usr/include/eigen3)
 	include_directories (BEFORE SYSTEM /usr/include/gdal)
@@ -42,14 +42,16 @@ set (Boost_USE_STATIC_RUNTIME OFF)
 set (THREADS_PREFER_PTHREAD_FLAG ON)
 find_package (Threads REQUIRED)
 find_package (OpenMP REQUIRED)
-find_package (Boost COMPONENTS system filesystem date_time REQUIRED)
+find_package (Boost 1.62 COMPONENTS system filesystem date_time thread REQUIRED)
 find_package (GDAL 2.2 REQUIRED)
-find_package(CGAL REQUIRED COMPONENTS Core)
+find_package (CGAL REQUIRED COMPONENTS Core)
 
-find_library (LIBLAS_LIBRARY las PATHS /usr/lib NO_DEFAULT_PATH)
-find_library (JSONCPP_LIBRARY jsoncpp PATHS /usr/lib NO_DEFAULT_PATH)
-find_library (GEOS_LIBRARY geos PATHS /opt/lib NO_DEFAULT_PATH)
+find_library (LIBLAS_LIBRARY las PATHS /usr/lib)
+find_library (JSONCPP_LIBRARY jsoncpp PATHS /usr/lib/x86_64-linux-gnu)
+find_library (GEOS_LIBRARY geos PATHS /opt/lib NO_DEFAULT_PATH) # To use 3.6.2, which has a different API than 3.5.x
 find_library (CRYPTO_LIB crypto)
+
+message(${GEOS_LIBRARY})
 
 if(OPENMP_FOUND)
 	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_C_FLAGS} -fopenmp")
@@ -72,13 +74,13 @@ add_library (geoutil SHARED src/util.cpp src/md5.cpp)
 target_link_libraries (geoutil geo rt ${Boost_LIBRARIES} ${GDAL_LIBRARY} ${CRYPTO_LIB})
 
 add_library (geodb SHARED src/db.cpp)
-target_link_libraries (geodb geo geoutil ${GDAL_LIBRARY})
+target_link_libraries (geodb geo geoutil)
 
 add_library (georaster SHARED src/raster.cpp)
-target_link_libraries (georaster geo geoutil geodb Threads::Threads ${GEOS_LIBRARY} ${GDAL_LIBRARY})
+target_link_libraries (georaster geo geoutil geodb Threads::Threads ${GEOS_LIBRARY})
 
 add_library (geopc SHARED src/pointcloud.cpp)
-target_link_libraries (geopc geo geoutil georaster geoann ${LIBLAS_LIBRARY} ${CGAL_LIBRARY} ${Boost_LIBRARIES})
+target_link_libraries (geopc geo geoutil georaster geoann ${LIBLAS_LIBRARY} ${CGAL_LIBRARY})
 
 add_library (geoann SHARED ann/src/ANN.cpp ann/src/brute.cpp ann/src/kd_tree.cpp ann/src/kd_util.cpp 
 	ann/src/kd_split.cpp ann/src/kd_dump.cpp ann/src/kd_search.cpp ann/src/kd_pr_search.cpp 
@@ -95,10 +97,10 @@ add_executable (polygonize src/apps/polygonize.cpp)
 target_link_libraries (polygonize geo geoutil georaster ${Boost_LIBRARIES})
 
 add_executable (pc2grid src/apps/pc2grid.cpp)
-target_link_libraries (pc2grid geo geoann geoutil georaster geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY})
+target_link_libraries (pc2grid geo geoann geoutil georaster geopc)
 
 add_executable (pc2tile src/apps/pc2tile.cpp)
-target_link_libraries (pc2tile geo geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY})
+target_link_libraries (pc2tile geo geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY} ${GEOS_LIBRARY})
 
 add_executable (info src/apps/info.cpp)
-target_link_libraries (info geo geoutil ${Boost_LIBRARIES} ${GDAL_LIBRARY} ${LIBLAS_LIBRARY} ${JSONCPP_LIBRARY})
+target_link_libraries (info geo geoutil ${GDAL_LIBRARY} ${LIBLAS_LIBRARY} ${JSONCPP_LIBRARY})

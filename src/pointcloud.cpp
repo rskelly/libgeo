@@ -465,7 +465,7 @@ geo::pc::Point::~Point() {
 
 class MeanComputer : public Computer {
 public:
-	double compute(const std::list<geo::pc::Point>& pts, const std::list<double>& dists, double radius) {
+	double compute(double x, double y, const std::list<geo::pc::Point>& pts, double radius) {
 		double sum = 0;
 		int count = 0;
 		for(const geo::pc::Point& pt : pts) {
@@ -478,8 +478,8 @@ public:
 
 class PopVarianceComputer : public MeanComputer {
 public:
-	double compute(const std::list<geo::pc::Point>& pts, const std::list<double>& dists, double radius) {
-		double mean = MeanComputer::compute(pts, dists, radius);
+	double compute(double x, double y, const std::list<geo::pc::Point>& pts, double radius) {
+		double mean = MeanComputer::compute(x, y, pts, radius);
 		if(std::isnan(mean))
 			return mean;
 		double sum = 0;
@@ -492,8 +492,8 @@ public:
 
 class PopStdDevComputer : public PopVarianceComputer {
 public:
-	double compute(const std::list<geo::pc::Point>& pts, const std::list<double>& dists, double radius) {
-		double variance = PopVarianceComputer::compute(pts, dists, radius);
+	double compute(double x, double y, const std::list<geo::pc::Point>& pts, double radius) {
+		double variance = PopVarianceComputer::compute(x, y, pts, radius);
 		if(std::isnan(variance))
 			return variance;
 		return std::sqrt(variance);
@@ -503,10 +503,10 @@ public:
 
 class SampVarianceComputer : public MeanComputer {
 public:
-	double compute(const std::list<geo::pc::Point>& pts, const std::list<double>& dists, double radius) {
+	double compute(double x, double y, const std::list<geo::pc::Point>& pts, double radius) {
 		if(pts.size() < 2)
 			return std::nan("");
-		double mean = MeanComputer::compute(pts, dists, radius);
+		double mean = MeanComputer::compute(x, y, pts, radius);
 		if(std::isnan(mean))
 			return mean;
 		double sum = 0;
@@ -519,8 +519,8 @@ public:
 
 class SampStdDevComputer : public SampVarianceComputer {
 public:
-	double compute(const std::list<geo::pc::Point>& pts, const std::list<double>& dists, double radius) {
-		double variance = SampVarianceComputer::compute(pts, dists, radius);
+	double compute(double x, double y, const std::list<geo::pc::Point>& pts, double radius) {
+		double variance = SampVarianceComputer::compute(x, y, pts, radius);
 		if(std::isnan(variance))
 			return variance;
 		return std::sqrt(variance);
@@ -542,7 +542,7 @@ public:
 			g_runerr("Percentile must be between 0 and 100.");
 	}
 
-	double compute(const std::list<geo::pc::Point>& pts, const std::list<double>& dists, double radius) {
+	double compute(double x, double y, const std::list<geo::pc::Point>& pts, double radius) {
 		if(pts.size() < 2)
 			return std::nan("");
 		std::vector<geo::pc::Point> _pts(pts.begin(), pts.end());
@@ -556,7 +556,7 @@ public:
 class MaxComputer : public Computer {
 public:
 
-	double compute(const std::list<geo::pc::Point>& pts, const std::list<double>& dists, double radius) {
+	double compute(double x, double y, const std::list<geo::pc::Point>& pts, double radius) {
 	double max = std::numeric_limits<double>::lowest();
 		for(const geo::pc::Point& pt : pts) {
 			if(pt.z > max)
@@ -570,7 +570,7 @@ public:
 class MinComputer : public Computer {
 public:
 
-	double compute(const std::list<geo::pc::Point>& pts, const std::list<double>& dists, double radius) {
+	double compute(double x, double y, const std::list<geo::pc::Point>& pts, double radius) {
 		double min = std::numeric_limits<double>::max();
 		for(const geo::pc::Point& pt : pts) {
 			if(pt.z < min)
@@ -583,7 +583,7 @@ public:
 
 class DensityComputer : public Computer {
 public:
-	double compute(const std::list<geo::pc::Point>& pts, const std::list<double>& dists, double radius) {
+	double compute(double x, double y, const std::list<geo::pc::Point>& pts, double radius) {
 		double area = radius * radius * M_PI;
 		if(pts.empty())
 			return std::nan("");
@@ -594,7 +594,7 @@ public:
 
 class CountComputer : public Computer {
 public:
-	double compute(const std::list<geo::pc::Point>& pts, const std::list<double>& dists, double radius) {
+	double compute(double x, double y, const std::list<geo::pc::Point>& pts, double radius) {
 		return (double) pts.size();
 	}
 
@@ -605,18 +605,18 @@ public:
 	MeanComputer meanComp;
 	SampStdDevComputer sampStdDevComp;
 
-	double compute(const std::list<geo::pc::Point>& pts, const std::list<double>& dists, double radius) {
+	double compute(double x, double y, const std::list<geo::pc::Point>& pts, double radius) {
 		if(pts.empty())
 			return std::nan("");
 		// Fisher-Pearson
-		double mean = meanComp.compute(pts, dists, radius);
+		double mean = meanComp.compute(x, y, pts, radius);
 		if(std::isnan(mean))
 			return mean;
 		size_t count = pts.size();
 		double sum = 0.0;
 		for (const geo::pc::Point& pt : pts)
 			sum += std::pow(pt.z - mean, 3.0) / count;
-		double sd = sampStdDevComp.compute(pts, dists, radius);
+		double sd = sampStdDevComp.compute(x, y, pts, radius);
 		double skew = sum / std::pow(sd, 3.0);
 		return skew;
 	}
@@ -628,18 +628,18 @@ public:
 	MeanComputer meanComp;
 	SampStdDevComputer sampStdDevComp;
 
-	double compute(const std::list<geo::pc::Point>& pts, const std::list<double>& dists, double radius) {
+	double compute(double x, double y, const std::list<geo::pc::Point>& pts, double radius) {
 		if(pts.empty())
 			return std::nan("");
 		// Fisher-Pearson
-		double mean = meanComp.compute(pts, dists, radius);
+		double mean = meanComp.compute(x, y, pts, radius);
 		if(std::isnan(mean))
 			return mean;
 		size_t count = pts.size();
 		double sum = 0.0;
 		for (const geo::pc::Point& pt : pts)
 			sum += std::pow(pt.z - mean, 4.0) / count;
-		double sd = sampStdDevComp.compute(pts, dists, radius);
+		double sd = sampStdDevComp.compute(x, y, pts, radius);
 		double kurt = sum / std::pow(sd, 4.0) - 3.0;
 		return kurt;
 	}
@@ -651,14 +651,14 @@ public:
 	MeanComputer meanComp;
 	SampStdDevComputer sampStdDevComp;
 
-	double compute(const std::list<geo::pc::Point>& pts, const std::list<double>& dists, double radius) {
+	double compute(double x, double y, const std::list<geo::pc::Point>& pts, double radius) {
 		if(pts.empty())
 			return std::nan("");
 		// Fisher-Pearson
-		double mean = meanComp.compute(pts, dists, radius);
+		double mean = meanComp.compute(x, y, pts, radius);
 		if(std::isnan(mean))
 			return mean;
-		double sd = sampStdDevComp.compute(pts, dists, radius);
+		double sd = sampStdDevComp.compute(x, y, pts, radius);
 		double cov = mean != 0 ? sd / mean : std::nan("");
 		return cov;
 	}
@@ -670,7 +670,7 @@ public:
 	MeanComputer meanComp;
 	SampStdDevComputer sampStdDevComp;
 
-	double compute(const std::list<geo::pc::Point>& pts, const std::list<double>& dists, double radius) {
+	double compute(double x, double y, const std::list<geo::pc::Point>& pts, double radius) {
 		g_runerr("Not implemented.");
 	}
 
@@ -901,7 +901,7 @@ private:
 
 public:
 
-	double compute(const std::list<geo::pc::Point>& pts, const std::list<double>& dists, double radius) {
+	double compute(double x, double y, const std::list<geo::pc::Point>& pts, double radius) {
 		if(pts.empty())
 			return std::nan("");
 
@@ -993,10 +993,11 @@ public:
  *
  */
 
-Rasterizer::Rasterizer(const std::vector<std::string> filenames) :
-	m_tree(nullptr) {
+Rasterizer::Rasterizer(const std::vector<std::string> filenames) {
+
 	for(const std::string& filename : filenames)
 		m_files.emplace_back(filename);
+
 	addComputer("min", new MinComputer());
 	addComputer("min", new MaxComputer());
 	addComputer("percentile-5", new PercentileComputer(0.05));
@@ -1022,84 +1023,15 @@ Rasterizer::Rasterizer(const std::vector<std::string> filenames) :
 	addComputer("rugosity-acr", new RugosityComputer());
 }
 
-bool Rasterizer::filter(const geo::pc::Point& pt) const {
-	return true;//pt.classId() == 2; // TODO: Make configurable.
-}
-
-void Rasterizer::updateTree(double x, double y, double radius) {
-	std::unordered_set<int> requiredFiles;
-	double tbounds[4] = {x - radius, y - radius, x + radius, y + radius};
-	double fBounds[6];
-	for(size_t i = 0; i < m_files.size(); ++i) {
-		m_files[i].bounds(fBounds);
-		if(!(tbounds[2] < fBounds[0] || tbounds[0] > fBounds[2] ||
-			tbounds[3] < fBounds[1] || tbounds[1] > fBounds[3])) {
-			requiredFiles.insert(i);
-		}
-	}
-	bool changed = false;
-	if(m_currentFiles.empty()) {
-		m_currentFiles.insert(requiredFiles.begin(), requiredFiles.end());
-		changed = true;
-	} else {
-		for(int a : m_currentFiles) {
-			if(requiredFiles.find(a) == requiredFiles.end()) {
-				changed = true;
-				break;
-			}
-		}
-		for(int a : requiredFiles) {
-			if(m_currentFiles.find(a) == m_currentFiles.end()) {
-				changed = true;
-				break;
-			}
-		}
-		if(changed) {
-			m_currentFiles.clear();
-			m_currentFiles.insert(requiredFiles.begin(), requiredFiles.end());
-		}
-	}
-	if(changed) {
-		if(m_tree) {
-			delete m_tree;
-			m_tree = nullptr;
-		}
-		if(!m_currentFiles.empty()) {
-			liblas::ReaderFactory fact;
-			m_tree = new geo::ds::KDTree<geo::pc::Point>(2);
-			for(int a : m_currentFiles) {
-				std::ifstream str(m_files[a].filenames()[0]);
-				liblas::Reader rdr = fact.CreateWithStream(str);
-				while(rdr.ReadNextPoint()) {
-					const liblas::Point& pt = rdr.GetPoint();
-					geo::pc::Point lpt(pt);
-					if(filter(lpt))
-						m_tree->add(lpt);
-				}
-			}
-			try {
-				m_tree->build();
-			} catch(const std::exception& ex) {
-				g_warn("Failed to build tree.");
-			}
-		}
-	}
-}
-
-int Rasterizer::getPoints(double x, double y, double radius, int count, 
-		std::list<geo::pc::Point>& pts, std::list<double>& dists) {
-	updateTree(x, y, radius);
-	geo::pc::Point pt(x, y, 0);
-	int ret = 0;
-	if(m_tree)
-		ret = m_tree->radSearch(pt, radius, count, std::back_inserter(pts), std::back_inserter(dists));
-	return ret;
-}
-
 void Rasterizer::addComputer(const std::string& name, Computer* computer) {
 	if(m_computers.find(name) != m_computers.end())
 		delete m_computers[name];
 	m_computers[name] = computer;
+}
+
+template <class T>
+int Rasterizer::getAffectedCells(double x, double y, double radius, T iter) {
+
 }
 
 void Rasterizer::rasterize(const std::string& filename, const std::string& type, double res, 
@@ -1110,15 +1042,16 @@ void Rasterizer::rasterize(const std::string& filename, const std::string& type,
 		g_runerr("No computer for type " << type);
 
 	double bounds[4] = {9999999999, 9999999999, -9999999999, -9999999999};
-	double fBounds[6];
-
-	for(PCFile& f : m_files) {
-		f.init();
-		f.bounds(fBounds);
-		if(fBounds[0] < bounds[0]) bounds[0] = fBounds[0];
-		if(fBounds[1] < bounds[1]) bounds[1] = fBounds[1];
-		if(fBounds[2] > bounds[2]) bounds[2] = fBounds[2];
-		if(fBounds[3] > bounds[3]) bounds[3] = fBounds[3];
+	{
+		double fBounds[6];
+		for(PCFile& f: m_files) {
+			f.init();
+			f.bounds(fBounds);
+			if(fBounds[0] < bounds[0]) bounds[0] = fBounds[0];
+			if(fBounds[1] < bounds[1]) bounds[1] = fBounds[1];
+			if(fBounds[2] > bounds[2]) bounds[2] = fBounds[2];
+			if(fBounds[3] > bounds[3]) bounds[3] = fBounds[3];
+		}
 	}
 
 	if(easting <= 0)
@@ -1138,32 +1071,94 @@ void Rasterizer::rasterize(const std::string& filename, const std::string& type,
 	props.setWritable(true);
 	Raster rast(filename, props);
 
-	for(int r = 0; r < rows; ++r) {
-		for(int c = 0; c < cols; ++c) {
-			int count = 100;
-			double x = props.toX(c) + props.resolutionX() / 2;
-			double y = props.toY(r) + props.resolutionY() / 2;
-			std::list<Point> pts;
-			std::list<double> dists;
-			int ret;
-			while((ret = getPoints(x, y, radius, count, pts, dists)) >= count) {
-				pts.clear();
-				dists.clear();
-				count *= 2;
-				std::cerr << "count " << count << "; ret " << ret << "\n";
+	for(size_t r = 0; r < (size_t) rows; ++r) {
+		for(size_t c = 0; c < (size_t) cols; ++c) {
+
+			double x0 = props.toX(c);
+			double y0 = props.toY(r);
+			double x1 = x0 + props.resolutionX();
+			double y1 = y0 + props.resolutionY();
+
+			if(x0 > x1) {
+				double tmp = x0;
+				x0 = x1;
+				x1 = tmp;
 			}
-			if(ret) {
-				rast.setFloat(c, r, comp->compute(pts, dists, radius));
-			} else {
-				rast.setFloat(c, r, -9999.0);
+
+			if(y0 > y1) {
+				double tmp = y0;
+				y0 = y1;
+				y1 = tmp;
+			}
+
+			m_grid[(r << 32) | c].setBounds(x0, y0, x1, y1);
+		}
+	}
+
+	liblas::ReaderFactory fact;
+	std::list<size_t> q;
+	std::list<size_t> cells;
+	std::list<size_t> finalize;
+
+	for(size_t i = 0; i < m_files.size(); ++i)
+		q.push_back(i);
+
+	while(!q.empty()) {
+
+		PCFile& f = m_files[q.front()];
+
+		for(const std::string& filename : f.filenames()) {
+			std::ifstream str(filename);
+			liblas::Reader rdr = fact.CreateWithStream(str);
+			while(rdr.ReadNextPoint()) {
+				const liblas::Point& pt = rdr.GetPoint();
+				if(pt.GetClassification().GetClass() == 2) { // TODO: Configurable.
+					cells.clear();
+					double x = pt.GetX();
+					double y = pt.GetY();
+					if(getAffectedCells(x, y, radius, std::back_inserter(cells))) {
+						for(size_t& idx : cells)
+							m_grid[idx].values.emplace_back(pt);
+					}
+				}
 			}
 		}
+
+		std::list<std::tuple<double, double, double, double> > bnds;
+		double b[4];
+		for(size_t& idx : q) {
+			m_files[idx].bounds(b);
+			bnds.emplace_back(b[0], b[1], b[2], b[3]);
+		}
+
+		for(auto& item : m_grid) {
+			bool hit = false;
+			for(const std::tuple<double, double, double, double>& b : bnds) {
+				if(item.second.intersects(std::get<0>(b), std::get<1>(b), std::get<2>(b), std::get<3>(b), radius)) {
+					hit = true;
+					break;
+				}
+			}
+
+			if(hit) {
+				double v = comp->compute(item.second.cx, item.second.cy, item.second.values, radius);
+				if(std::isnan(v))
+					v = -9999.0;
+				rast.setFloat(item.second.cy, item.second.cx, v, 1);
+				finalize.push_back(item.first);
+			}
+		}
+
+		for(size_t& idx : finalize)
+			m_grid.erase(idx);
+
+		q.pop_front();
 	}
 }
 
 Rasterizer::~Rasterizer() {
-	if(m_tree)
-		delete m_tree;
+	//if(m_tree)
+	//	delete m_tree;
 	for(auto& c : m_computers)
 		delete c.second;
 }
