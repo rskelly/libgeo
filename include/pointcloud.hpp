@@ -22,6 +22,7 @@
 #include <liblas/liblas.hpp>
 
 #include "util.hpp"
+#include "raster.hpp"
 #include "ds/kdtree.hpp"
 
 using namespace geo::util;
@@ -370,15 +371,15 @@ public:
 		setBounds(x0, y0, x1, y1);
 	}
 
-	Cell();
+	Cell() : x0(0), y0(0), x1(0), y1(0), cx(0), cy(0) {}
 
 	void setBounds(double x0, double y0, double x1, double y1) {
 		this->x0 = x0;
 		this->y0 = y0;
 		this->x1 = x1;
 		this->y1 = y1;
-		cx = (x1 - x0) / 2;
-		cy = (y1 - y0) / 2;
+		cx = x0 + (x1 - x0) / 2;
+		cy = y0 + (y1 - y0) / 2;
 	}
 
 	/**
@@ -445,7 +446,7 @@ private:
 	 * @return The number of cells found.
 	 */
 	template <class T>
-	int getAffectedCells(double x, double y, double radius, T iter);
+	int getAffectedCells(double x, double y, double radius, const geo::raster::GridProps& props, T iter);
 
 public:
 

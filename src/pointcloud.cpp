@@ -1030,8 +1030,39 @@ void Rasterizer::addComputer(const std::string& name, Computer* computer) {
 }
 
 template <class T>
-int Rasterizer::getAffectedCells(double x, double y, double radius, T iter) {
-
+int Rasterizer::getAffectedCells(double x, double y, double radius, const GridProps& props, T iter) {
+	int count = 0;
+	if(radius > 0) {
+		// Get the bounding indices of the cells to check.
+		size_t c0 = std::max(0, props.toCol(x - radius) - 1);
+		size_t c1 = std::min(props.cols(), props.toCol(x + radius) + 1);
+		size_t r0 = std::max(0, props.toRow(y - radius) - 1);
+		size_t r1 = std::min(props.rows(), props.toRow(y + radius) + 1);
+		// Squared radius for quick check.
+		double rad2 = radius * radius;
+		for(size_t r = r0; r <= r1; ++r) {
+			for(size_t c = c0; c <= c1; ++c) {
+				size_t idx = (r << 32) | c;
+				if(m_grid.find(idx) != m_grid.end()) {
+					const Cell& cell = m_grid[idx];
+					// If the point is within the circular neighbourhood of the cell's centre,
+					// add it.
+					double dist = std::pow(cell.cx - x, 2.0) + std::pow(cell.cy - y, 2.0);
+					//std::cerr << x << ", " << y << ", " << cell.cx << ", " << cell.cy << ", " << radius << ", " << rad2 << ", " << (cell.cx - x) << ", " << (cell.cy - y) << ", " << dist << "\n";
+					if(dist <= rad2) {
+						iter = idx;
+						++count;
+					}
+				}
+			}
+		}
+	} else {
+		// Just get the index and add it.
+		size_t idx = ((size_t) props.toRow(y) << 32) | props.toCol(x);
+		iter = idx;
+		++count;
+	}
+	return count;
 }
 
 void Rasterizer::rasterize(const std::string& filename, const std::string& type, double res, 
@@ -1073,24 +1104,20 @@ void Rasterizer::rasterize(const std::string& filename, const std::string& type,
 
 	for(size_t r = 0; r < (size_t) rows; ++r) {
 		for(size_t c = 0; c < (size_t) cols; ++c) {
-
 			double x0 = props.toX(c);
 			double y0 = props.toY(r);
 			double x1 = x0 + props.resolutionX();
 			double y1 = y0 + props.resolutionY();
-
 			if(x0 > x1) {
 				double tmp = x0;
 				x0 = x1;
 				x1 = tmp;
 			}
-
 			if(y0 > y1) {
 				double tmp = y0;
 				y0 = y1;
 				y1 = tmp;
 			}
-
 			m_grid[(r << 32) | c].setBounds(x0, y0, x1, y1);
 		}
 	}
@@ -1116,7 +1143,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::string& type,
 					cells.clear();
 					double x = pt.GetX();
 					double y = pt.GetY();
-					if(getAffectedCells(x, y, radius, std::back_inserter(cells))) {
+					if(getAffectedCells(x, y, radius, props, std::back_inserter(cells))) {
 						for(size_t& idx : cells)
 							m_grid[idx].values.emplace_back(pt);
 					}
@@ -1144,7 +1171,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::string& type,
 				double v = comp->compute(item.second.cx, item.second.cy, item.second.values, radius);
 				if(std::isnan(v))
 					v = -9999.0;
-				rast.setFloat(item.second.cy, item.second.cx, v, 1);
+				rast.setFloat(props.toCol(item.second.cx), props.toRow(item.second.cy), v, 1);
 				finalize.push_back(item.first);
 			}
 		}
