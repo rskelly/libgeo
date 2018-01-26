@@ -42,16 +42,14 @@ set (Boost_USE_STATIC_RUNTIME OFF)
 set (THREADS_PREFER_PTHREAD_FLAG ON)
 find_package (Threads REQUIRED)
 find_package (OpenMP REQUIRED)
-find_package (Boost 1.62 COMPONENTS system filesystem date_time thread REQUIRED)
+find_package (Boost 1.58 COMPONENTS system filesystem date_time thread REQUIRED)
 find_package (GDAL 2.2 REQUIRED)
 find_package (CGAL REQUIRED COMPONENTS Core)
 
 find_library (LIBLAS_LIBRARY las PATHS /usr/lib)
 find_library (JSONCPP_LIBRARY jsoncpp PATHS /usr/lib/x86_64-linux-gnu)
-find_library (GEOS_LIBRARY geos PATHS /opt/lib NO_DEFAULT_PATH) # To use 3.6.2, which has a different API than 3.5.x
 find_library (CRYPTO_LIB crypto)
-
-message(${GEOS_LIBRARY})
+find_library (GEOS_LIBRARY geos PATHS /opt/lib NO_DEFAULT_PATH) # To use 3.6.2, which has a different API than 3.5.x
 
 if(OPENMP_FOUND)
 	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_C_FLAGS} -fopenmp")
