@@ -724,11 +724,15 @@ void MappedFile::reset(uint64_t size) {
 			}
 
 			if(m_fileBacked) {
-				if(m_filename.empty())
+				if(m_filename.empty()) {
 					m_filename = Util::pathJoin(Util::tmpDir(), name());
-				{
 					std::filebuf fbuf;
 					fbuf.open(m_filename, std::ios_base::in | std::ios_base::out | std::ios_base::trunc | std::ios_base::binary);
+					fbuf.pubseekoff(m_size - 1, std::ios_base::beg);
+					fbuf.sputc(0);
+				} else {
+					std::filebuf fbuf;
+					fbuf.open(m_filename, std::ios_base::in | std::ios_base::out | std::ios_base::binary);
 					fbuf.pubseekoff(m_size - 1, std::ios_base::beg);
 					fbuf.sputc(0);
 				}
