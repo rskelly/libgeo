@@ -1149,7 +1149,6 @@ Raster::Raster(const std::string &filename, const GridProps &props) :
 		m_bcols(0), m_brows(0),
 		m_bcol(-1), m_brow(-1),
 		m_band(1),
-		m_block(nullptr),
 		m_dirty(false), 
 		m_bband(0),
 		m_type(GDT_Unknown) {
@@ -1202,7 +1201,6 @@ Raster::Raster(const std::string &filename, const GridProps &props) :
 			m_ds->GetRasterBand(i)->SetNoDataValue(m_props.nodata());
 	}
 	m_ds->GetRasterBand(1)->GetBlockSize(&m_bcols, &m_brows);
- 	m_block = malloc(m_bcols * m_brows * getTypeSize(m_props.dataType()));
 }
 
 Raster::Raster(const std::string &filename, bool writable) :
@@ -1210,7 +1208,6 @@ Raster::Raster(const std::string &filename, bool writable) :
 		m_bcols(0), m_brows(0),
 		m_bcol(-1), m_brow(-1),
 		m_band(1),
-		m_block(nullptr),
 		m_dirty(false),
 		m_bband(0),
 		m_type(GDT_Unknown) {
@@ -1245,7 +1242,13 @@ Raster::Raster(const std::string &filename, bool writable) :
 	m_props.setProjection(std::string(m_ds->GetProjectionRef()));
 	m_props.setNoData(m_ds->GetRasterBand(1)->GetNoDataValue()); // TODO: This might not be a real nodata value.
 	m_ds->GetRasterBand(1)->GetBlockSize(&m_bcols, &m_brows);
- 	m_block = malloc(m_bcols * m_brows * getTypeSize(m_props.dataType()));
+}
+
+void* Raster::getBlock(int band) {
+	if(m_blocks.find(band) == m_blocks.end()) {
+		m_blocks[band] = malloc(m_bcols * m_brows * getTypeSize(m_props.dataType()));
+	}
+	return m_blocks[band];
 }
 
 GDALDataset* Raster::ds() const {
@@ -1296,7 +1299,7 @@ void Raster::writeToRaster(Raster &grd,
 		if(!bnd)
 			g_runerr("Failed to find band " << m_bband);
 		std::lock_guard<std::mutex> lk(m_mtx);
-		if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, m_block))
+		if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, getBlock(m_bband)))
 			g_runerr("Failed to flush to: " << filename());
 		m_dirty = false;
 	}
@@ -1351,7 +1354,7 @@ void Raster::writeToMemRaster(MemRaster &grd,
 		if(!bnd)
 			g_runerr("Failed to find band " << bnd);
 		std::lock_guard<std::mutex> lk(m_mtx);
-		if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, m_block))
+		if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, getBlock(m_bband)))
 			g_runerr("Failed to flush to: " << filename());
 		m_dirty = false;
 	}
@@ -1422,7 +1425,7 @@ double Raster::getFloat(int col, int row, int band) {
 			if(!bnd)
 				g_runerr("Failed to find band " << bnd);
 			std::lock_guard<std::mutex> lk(m_mtx);
-			if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, m_block))
+			if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, getBlock(m_bband)))
 				g_runerr("Failed to flush to: " << filename());
 			m_dirty = false;
 		}
@@ -1431,7 +1434,7 @@ double Raster::getFloat(int col, int row, int band) {
 			g_argerr("Failed to find band " << band);
 		{
 			std::lock_guard<std::mutex> lk(m_mtx);
-			if(CPLE_None != rb->ReadBlock(bcol, brow, m_block))
+			if(CPLE_None != rb->ReadBlock(bcol, brow, getBlock(band)))
 				g_runerr("Failed to read from: " << filename());
 		}
 		m_bcol = bcol;
@@ -1440,7 +1443,7 @@ double Raster::getFloat(int col, int row, int band) {
 	}
 	int idx = (row % m_brows) * m_bcols + (col % m_bcols);
 	double v = 0;
-	readFromBlock(m_block, getGDType(), &v, idx);
+	readFromBlock(getBlock(m_bband), getGDType(), &v, idx);
 	return v;
 }
 
@@ -1462,7 +1465,7 @@ int Raster::getInt(int col, int row, int band) {
 			if(!bnd)
 				g_runerr("Failed to find band " << m_bband);
 			std::lock_guard<std::mutex> lk(m_mtx);
-			if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, m_block))
+			if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, getBlock(m_bband)))
 				g_runerr("Failed to flush to: " << filename());
 			m_dirty = false;
 		}
@@ -1471,7 +1474,7 @@ int Raster::getInt(int col, int row, int band) {
 			g_argerr("Failed to find band " << band);
 		{
 			std::lock_guard<std::mutex> lk(m_mtx);
-			if(CPLE_None != rb->ReadBlock(bcol, brow, m_block))
+			if(CPLE_None != rb->ReadBlock(bcol, brow, getBlock(band)))
 				g_runerr("Failed to read from: " << filename());
 		}
 		m_bcol = bcol;
@@ -1480,7 +1483,7 @@ int Raster::getInt(int col, int row, int band) {
 	}
 	int idx = (row % m_brows) * m_bcols + (col % m_bcols);
 	int v = 0;
-	readFromBlock(m_block, getGDType(), &v, idx);
+	readFromBlock(getBlock(m_bband), getGDType(), &v, idx);
 	return v;
 }
 
@@ -1510,21 +1513,21 @@ void Raster::setFloat(int col, int row, double v, int band) {
 			GDALRasterBand* bnd = m_ds->GetRasterBand(m_bband);
 			if(!bnd)
 				g_runerr("Failed to find band " << m_bband);
-			if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, m_block))
+			if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, getBlock(m_bband)))
 				g_runerr("Failed to flush to: " << filename());
 			m_dirty = false;
 		}
 		GDALRasterBand *rb = m_ds->GetRasterBand(band);
 		if(!rb)
 			g_argerr("Failed to find band " << band);
-		if(CPLE_None != rb->ReadBlock(bcol, brow, m_block))
+		if(CPLE_None != rb->ReadBlock(bcol, brow, getBlock(band)))
 			g_runerr("Failed to read from: " << filename());
 		m_bcol = bcol;
 		m_brow = brow;
 		m_bband = band;
 	}
 	int idx = (row % m_brows) * m_bcols + (col % m_bcols);
-	writeToBlock(m_block, getGDType(), v, idx);
+	writeToBlock(getBlock(m_bband), getGDType(), v, idx);
 	m_dirty = true;
 }
 
@@ -1538,21 +1541,21 @@ void Raster::setInt(int col, int row, int v, int band) {
 			GDALRasterBand* bnd = m_ds->GetRasterBand(m_bband);
 			if(!bnd)
 				g_runerr("Failed to find band " << m_bband);
-			if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, m_block))
+			if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, getBlock(m_bband)))
 				g_runerr("Failed to flush to: " << filename());
 			m_dirty = false;
 		}
 		GDALRasterBand *rb = m_ds->GetRasterBand(band);
 		if(!rb)
 			g_argerr("Failed to find band " << band);
-		if(CPLE_None != rb->ReadBlock(bcol, brow, m_block))
+		if(CPLE_None != rb->ReadBlock(bcol, brow, getBlock(band)))
 			g_runerr("Failed to read from: " << filename());
 		m_bcol = bcol;
 		m_brow = brow;
 		m_bband = band;
 	}
 	int idx = (row % m_brows) * m_bcols + (col % m_bcols);
-	writeToBlock(m_block, getGDType(), v, idx);
+	writeToBlock(getBlock(m_bband), getGDType(), v, idx);
 	m_dirty = true;
 }
 
@@ -2679,7 +2682,7 @@ void Raster::flush() {
 		if(!bnd)
 			g_runerr("Failed to find band " << m_band);
 		std::lock_guard<std::mutex> lk(m_mtx);
-		if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, m_block))
+		if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, getBlock(m_band)))
 			g_warn("Failed to write block to " << filename());
 	}
 	m_ds->FlushCache();
@@ -2687,10 +2690,8 @@ void Raster::flush() {
 
 Raster::~Raster() {
 	flush();
-	if(m_block)
-		free(m_block);
-	m_block = nullptr;
+	for(auto& item : m_blocks)
+		free(item.second);
 	if(m_ds)
 		GDALClose(m_ds);
-	m_ds = nullptr;
 }

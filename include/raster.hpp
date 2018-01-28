@@ -1102,15 +1102,25 @@ namespace geo {
             int m_bcols, m_brows;		// The size of the GDAL block.
             int m_bcol, m_brow;			// The current loaded block position.
             int m_band;
-    		void *m_block;
+    		//void *m_block;
             bool m_dirty;
             int m_bband;
             std::string m_filename;     // Raster filename
             GridProps m_props;
             GDALDataType m_type;        // GDALDataType -- limits the possible template types.
             std::mutex m_mtx;
+            std::unordered_map<int, void*> m_blocks;
 
             GDALDataType getGDType() const;
+
+            /**
+             * Get an allocated block of memory from the map of cached
+             * blocks corresponding to the given band. If it has not
+             * already been allocated, allocated it.
+             * @param band The raster band.
+             * @return A pointer to the allocated block.
+             */
+            void* getBlock(int band);
 
         protected:
             GDALDataset* ds() const;
