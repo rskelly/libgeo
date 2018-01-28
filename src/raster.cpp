@@ -164,71 +164,6 @@ namespace geo {
 				}
 			}
 
-			/*
-			class G_DLL_EXPORT LRUCacheItem {
-			public:
-				int col, row, band;
-				void* data;
-
-				LRUCacheItem(int col, int row, int band, uint64_t size) :
-					col(col), row(row), band(band),
-					data(nullptr) {
-					data = malloc(size);
-				}
-
-				~LRUCacheItem() {
-					free(data);
-				}
-			};
-
-			class G_DLL_EXPORT LRUCache {
-			private:
-				size_t m_slots;
-				size_t m_size;
-				uint64_t m_time;
-				GDALDataset* m_ds;
-				std::map<uint64_t, std::string> m_timeItems;
-				std::unordered_map<std::string, uint64_t> m_itemsTime;
-				std::unordered_map<std::string, std::unique_ptr<LRUCacheItem> > m_items;
-
-				void evict() {
-					auto it = m_timeItems.begin();
-					uint64_t time = it->first;
-					std::string idx = it->second;
-					m_items.erase(idx);
-					m_timeItems.erase(time);
-					m_itemsTime.erase(idx);
-				}
-
-				std::string getIdx(int col, int row, int band) {
-					return std::to_string(col) + std::string(":") + std::to_string(row) + std::string(":") + std::to_string(band);
-				}
-
-			public:
-				LRUCache(size_t slots, size_t size, GDALDataset* ds) :
-					m_slots(slots), m_size(size), m_time(0),
-					m_ds(ds) {}
-
-				void* get(int col, int row, int band) {
-					std::string idx = getIdx(col, row, band);
-					if(m_items.find(idx) == m_items.end()) {
-						while(m_items.size() >= m_slots)
-							evict();
-						m_items[idx].reset(new LRUCacheItem(col, row, band, m_size));
-						++m_time;
-						m_timeItems[m_time] = idx;
-						m_itemsTime[idx] = m_time;
-					} else {
-						m_timeItems.erase(m_time);
-						++m_time;
-						m_timeItems[m_time] = idx;
-						m_itemsTime[idx] = m_time;
-					}
-					return m_items[idx]->data;
-				}
-			};
-			*/
-
 		} //util
 	} // raster
 } // geo
@@ -1570,12 +1505,11 @@ void Raster::setFloat(int col, int row, double v, int band) {
 		g_runerr("This raster is not writable.");
 	int bcol = col / m_bcols;
 	int brow = row / m_brows;
-	if(bcol != m_bcol || brow != m_brow || band != m_band) {
+	if(bcol != m_bcol || brow != m_brow || band != m_bband) {
 		if(m_dirty) {
 			GDALRasterBand* bnd = m_ds->GetRasterBand(m_bband);
 			if(!bnd)
 				g_runerr("Failed to find band " << m_bband);
-			std::lock_guard<std::mutex> lk(m_mtx);
 			if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, m_block))
 				g_runerr("Failed to flush to: " << filename());
 			m_dirty = false;
@@ -1583,11 +1517,8 @@ void Raster::setFloat(int col, int row, double v, int band) {
 		GDALRasterBand *rb = m_ds->GetRasterBand(band);
 		if(!rb)
 			g_argerr("Failed to find band " << band);
-		{
-			std::lock_guard<std::mutex> lk(m_mtx);
-			if(CPLE_None != rb->ReadBlock(bcol, brow, m_block))
-				g_runerr("Failed to read from: " << filename());
-		}
+		if(CPLE_None != rb->ReadBlock(bcol, brow, m_block))
+			g_runerr("Failed to read from: " << filename());
 		m_bcol = bcol;
 		m_brow = brow;
 		m_bband = band;
@@ -1602,12 +1533,11 @@ void Raster::setInt(int col, int row, int v, int band) {
 		g_runerr("This raster is not writable.");
 	int bcol = col / m_bcols;
 	int brow = row / m_brows;
-	if(bcol != m_bcol || brow != m_brow || band != m_band) {
+	if(bcol != m_bcol || brow != m_brow || band != m_bband) {
 		if(m_dirty) {
 			GDALRasterBand* bnd = m_ds->GetRasterBand(m_bband);
 			if(!bnd)
 				g_runerr("Failed to find band " << m_bband);
-			std::lock_guard<std::mutex> lk(m_mtx);
 			if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, m_block))
 				g_runerr("Failed to flush to: " << filename());
 			m_dirty = false;
@@ -1615,11 +1545,8 @@ void Raster::setInt(int col, int row, int v, int band) {
 		GDALRasterBand *rb = m_ds->GetRasterBand(band);
 		if(!rb)
 			g_argerr("Failed to find band " << band);
-		{
-			std::lock_guard<std::mutex> lk(m_mtx);
-			if(CPLE_None != rb->ReadBlock(bcol, brow, m_block))
-				g_runerr("Failed to read from: " << filename());
-		}
+		if(CPLE_None != rb->ReadBlock(bcol, brow, m_block))
+			g_runerr("Failed to read from: " << filename());
 		m_bcol = bcol;
 		m_brow = brow;
 		m_bband = band;
