@@ -22,13 +22,18 @@ void usage() {
 			<< "                 (defaults to nearest whole multiple of resolution).\n"
 			<< " -d <radius>     The search radius for finding points.\n"
 			<< " -s <srid>       The spatial reference ID. Default 0.\n"
-			<< " -m <method>     The type of raster: mean (default), median, min, max, \n"
+			<< " -m <methods>    Comma-separated list of statistics to compute; one on each \n"
+			<< "                 layer (see below.) Default mean.\n"
 			<< "                 rugosity, variance, std. deviation and percentile.\n"
 			<< "                 For percentile, use the form, 'percenile:n', where\n"
 			<< "                 n is the percentile (no % sign); 1 - 99.\n"
 			<< " -i <density>    The estimated number of points per cell underestimating this\n"
-			<< "                 saves disk space at the cost of efficiency.\n"
-			<< " -t <t>          The number of threads. Default 1.\n";
+			<< "                 saves disk space at the cost of efficiency.\n";
+
+	std::cerr << " Available computers: \n";
+	for(auto& item : geo::pc::Rasterizer::availableComputers())
+		std::cerr << " - " << item.first << ": " << item.second << ".\n";
+
 }
 
 int main(int argc, char** argv) {
@@ -44,14 +49,14 @@ int main(int argc, char** argv) {
 	double radius = 0;
 	int density = 64;
 	uint16_t srid = 0;
-	uint16_t threads = 1;
-	std::string type = "mean";
+	std::vector<std::string> types;
 	std::vector<std::string> args;
 
 	for(int i = 1; i < argc; ++i) {
 		std::string v = argv[i];
 		if(v == "-m") {
-			type = argv[++i];
+			std::string type = argv[++i];
+			Util::splitString(std::back_inserter(types), Util::lower(type), ",");
 		} else if(v == "-r") {
 			res = atof(argv[++i]);
 		} else if(v == "-i") {
@@ -64,13 +69,15 @@ int main(int argc, char** argv) {
 			easting = atof(argv[++i]);
 		} else if(v == "-n") {
 			northing = atof(argv[++i]);
-		} else if(v == "-t") {
-			threads = atoi(argv[++i]);
 		} else {
 			args.push_back(argv[i]);
 		}
 	}
 
+	if(types.empty()) {
+		std::cerr << "No methods given; defaulting to mean.\n";
+		types.push_back("mean");
+	}
 	if(res <= 0) {
 		std::cerr << "Resolution must be >0.\n";
 		usage();
@@ -83,15 +90,15 @@ int main(int argc, char** argv) {
 		return 1;
 	}
 
-	if(threads <= 0) {
-		std::cerr << "Illegal thread value. Defaulting to 1.\n";
-		threads = 1;
-	}
-
 	std::vector<std::string> infiles(args.begin() + 1, args.end());
-	geo::pc::Rasterizer r(infiles);
-	r.rasterize(args[0], type, res, easting, northing, radius, srid, density, threads, 0);
 
+	try {
+		geo::pc::Rasterizer r(infiles);
+		r.rasterize(args[0], types, res, easting, northing, radius, srid, density, 0);
+	} catch(const std::exception& ex) {
+		std::cerr << ex.what() << "\n";
+		usage();
+	}
 	return 0;
 }
 

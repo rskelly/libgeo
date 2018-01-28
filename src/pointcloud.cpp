@@ -16,22 +16,13 @@
 #include <sys/mman.h>
 #include <string.h>
 
-#include <CGAL/Plane_3.h>
-#include <CGAL/linear_least_squares_fitting_3.h>
-#include <CGAL/Exact_predicates_inexact_constructions_kernel.h>
-#include <CGAL/Projection_traits_xy_3.h>
-#include <CGAL/Delaunay_triangulation_2.h>
-#include <CGAL/convex_hull_2.h>
-#include <CGAL/linear_least_squares_fitting_3.h>
-#include <CGAL/Polygon_2_algorithms.h>
-
 #include <liblas/liblas.hpp>
 
 #include "util.hpp"
 #include "raster.hpp"
 #include "pointcloud.hpp"
 #include "ds/kdtree.hpp"
-
+#include "pc_computer.hpp"
 
 using namespace geo::raster;
 using namespace geo::util;
@@ -435,571 +426,61 @@ void Tiler::tile(const std::string& outdir, double size, double buffer, int srid
 Tiler::~Tiler() {}
 
 
-
-
 geo::pc::Point::Point(const liblas::Point& pt) :
-	x(pt.GetX()), y(pt.GetY()), z(pt.GetZ()),
-	point(new liblas::Point(pt)){
+	m_x(pt.GetX()),
+	m_y(pt.GetY()),
+	m_z(pt.GetZ()),
+	m_point(new liblas::Point(pt)) {
 }
 
 geo::pc::Point::Point(double x, double y, double z) :
-	x(x), y(y), z(z),
-	point(nullptr) {
+	m_x(x),
+	m_y(y),
+	m_z(z),
+	m_point(nullptr) {
 }
 
 geo::pc::Point::Point() :
-	x(0), y(0), z(0),
-	point(nullptr) {
+	m_x(0),
+	m_y(0),
+	m_z(0),
+	m_point(nullptr) {
 }
 
 int geo::pc::Point::classId() const {
-	if(point)
-		return point->GetClassification().GetClass();
+	if(m_point)
+		return m_point->GetClassification().GetClass();
 	return 0;
 }
 
 double geo::pc::Point::operator[](int idx) const {
 	switch(idx % 2) {
 	case 0:
-		return x;
+		return m_x;
 	case 1:
-		return y;
+		return m_y;
 	}
 	return 0;
 }
 
+double geo::pc::Point::x() const {
+	return m_x;
+}
+
+double geo::pc::Point::y() const {
+	return m_y;
+}
+
+double geo::pc::Point::z() const {
+	return m_z;
+}
+
+double geo::pc::Point::value() const {
+	return m_z;
+}
+
 geo::pc::Point::~Point() {
 }
-
-class MeanComputer : public Computer {
-public:
-	double compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
-		double sum = 0;
-		int count = 0;
-		for(const geo::pc::Point& pt : pts) {
-			sum += pt.z;
-			++count;
-		}
-		return count > 0 ? sum / count : std::nan("");
-	}
-};
-
-class PopVarianceComputer : public MeanComputer {
-public:
-	double compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
-		double mean = MeanComputer::compute(x, y, pts, radius);
-		if(std::isnan(mean))
-			return mean;
-		double sum = 0;
-		for(const geo::pc::Point& pt : pts)
-			sum += std::pow(pt.z - mean, 2.0);
-		return sum / pts.size();
-	}
-
-};
-
-class PopStdDevComputer : public PopVarianceComputer {
-public:
-	double compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
-		double variance = PopVarianceComputer::compute(x, y, pts, radius);
-		if(std::isnan(variance))
-			return variance;
-		return std::sqrt(variance);
-	}
-
-};
-
-class SampVarianceComputer : public MeanComputer {
-public:
-	double compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
-		if(pts.size() < 2)
-			return std::nan("");
-		double mean = MeanComputer::compute(x, y, pts, radius);
-		if(std::isnan(mean))
-			return mean;
-		double sum = 0;
-		for(const geo::pc::Point& pt : pts)
-			sum += std::pow(pt.z - mean, 2.0);
-		return sum / (pts.size() - 1);
-	}
-
-};
-
-class SampStdDevComputer : public SampVarianceComputer {
-public:
-	double compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
-		double variance = SampVarianceComputer::compute(x, y, pts, radius);
-		if(std::isnan(variance))
-			return variance;
-		return std::sqrt(variance);
-	}
-
-};
-
-bool pointSort(const geo::pc::Point& a, const geo::pc::Point& b) {
-	return a.z < b.z;
-}
-
-class PercentileComputer : public Computer {
-public:
-	double percentile;
-
-	PercentileComputer(double percentile) :
-		percentile(percentile) {
-		if(percentile <= 0 || percentile >= 100)
-			g_runerr("Percentile must be between 0 and 100.");
-	}
-
-	double compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
-		if(pts.size() < 2)
-			return std::nan("");
-		std::vector<geo::pc::Point> _pts(pts.begin(), pts.end());
-		std::sort(_pts.begin(), _pts.end(), pointSort);
-		size_t idx = (size_t) (_pts.size() * percentile);
-		return (_pts[idx + 1].z - _pts[idx].z) / 2.0;
-	}
-
-};
-
-class MaxComputer : public Computer {
-public:
-
-	double compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
-	double max = std::numeric_limits<double>::lowest();
-		for(const geo::pc::Point& pt : pts) {
-			if(pt.z > max)
-				max = pt.z;
-		}
-		return max;
-	}
-
-};
-
-class MinComputer : public Computer {
-public:
-
-	double compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
-		double min = std::numeric_limits<double>::max();
-		for(const geo::pc::Point& pt : pts) {
-			if(pt.z < min)
-				min = pt.z;
-		}
-		return min;
-	}
-
-};
-
-class DensityComputer : public Computer {
-public:
-	double compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
-		double area = radius * radius * M_PI;
-		if(pts.empty())
-			return std::nan("");
-		return pts.size() / area;
-	}
-
-};
-
-class CountComputer : public Computer {
-public:
-	double compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
-		return (double) pts.size();
-	}
-
-};
-
-class SkewComputer : public Computer {
-public:
-	MeanComputer meanComp;
-	SampStdDevComputer sampStdDevComp;
-
-	double compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
-		if(pts.empty())
-			return std::nan("");
-		// Fisher-Pearson
-		double mean = meanComp.compute(x, y, pts, radius);
-		if(std::isnan(mean))
-			return mean;
-		size_t count = pts.size();
-		double sum = 0.0;
-		for (const geo::pc::Point& pt : pts)
-			sum += std::pow(pt.z - mean, 3.0) / count;
-		double sd = sampStdDevComp.compute(x, y, pts, radius);
-		double skew = sum / std::pow(sd, 3.0);
-		return skew;
-	}
-
-};
-
-class KurtosisComputer : public Computer {
-public:
-	MeanComputer meanComp;
-	SampStdDevComputer sampStdDevComp;
-
-	double compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
-		if(pts.empty())
-			return std::nan("");
-		// Fisher-Pearson
-		double mean = meanComp.compute(x, y, pts, radius);
-		if(std::isnan(mean))
-			return mean;
-		size_t count = pts.size();
-		double sum = 0.0;
-		for (const geo::pc::Point& pt : pts)
-			sum += std::pow(pt.z - mean, 4.0) / count;
-		double sd = sampStdDevComp.compute(x, y, pts, radius);
-		double kurt = sum / std::pow(sd, 4.0) - 3.0;
-		return kurt;
-	}
-
-};
-
-class CoVComputer : public Computer {
-public:
-	MeanComputer meanComp;
-	SampStdDevComputer sampStdDevComp;
-
-	double compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
-		if(pts.empty())
-			return std::nan("");
-		// Fisher-Pearson
-		double mean = meanComp.compute(x, y, pts, radius);
-		if(std::isnan(mean))
-			return mean;
-		double sd = sampStdDevComp.compute(x, y, pts, radius);
-		double cov = mean != 0 ? sd / mean : std::nan("");
-		return cov;
-	}
-
-};
-
-class CanopyGapFractionComputer : public Computer {
-public:
-	MeanComputer meanComp;
-	SampStdDevComputer sampStdDevComp;
-
-	double compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
-		g_runerr("Not implemented.");
-	}
-
-};
-
-/*
- * void fcLidarBLa(const std::list<std::unique_ptr<LiDARPoint> > &values, double *result) {
-	double gnd = 0.0;
-	double all = 0.0;
-	for (const std::unique_ptr<LiDARPoint>& pt : values) {
-		if (pt->isGround())
-			gnd += pt->intensity();
-		if (pt->cls() < 2) // TODO: This should perhaps be filtered by class to remove bogus points.
-			all += pt->intensity();
-	}
-	result[0] = all != 0.0 ? 1.0 - std::sqrt(gnd / all) : -9999.0;
-}
-
-void fcLidarBLb(const std::list<std::unique_ptr<LiDARPoint> > &values, double *result) {
-	double gndSingle = 0.0, gndLast = 0.0, first = 0.0, single = 0.0,
-			intermediate = 0.0, last = 0.0, total = 0.0;
-	for (const std::unique_ptr<LiDARPoint>& pt : values) {
-		if (pt->isGround()) {
-			if (pt->isSingle())
-				gndSingle += pt->intensity();
-			if (pt->isLast())
-				gndLast += pt->intensity();
-		}
-		if (pt->isFirst())
-			first += pt->intensity();
-		if (pt->isSingle())
-			single += pt->intensity();
-		if (pt->isIntermediate())
-			intermediate += pt->intensity();
-		if (pt->isLast())
-			last += pt->intensity();
-		total += pt->intensity(); // TODO: This should perhaps be filtered by class to remove bogus points.
-	}
-	if (total == 0.0) {
-		result[0] = -9999.0;
-	} else {
-		double denom = (first + single) / total
-				+ std::sqrt((intermediate + last) / total);
-		if (denom == 0.0) {
-			result[0] = -9999.;
-		} else {
-			result[0] = (gndSingle / total + std::sqrt(gndLast / total))
-					/ denom;
-		}
-	}
-}
-
-void fcLidarIR(const std::list<std::unique_ptr<LiDARPoint> > &values, double *result) {
-	double canopy = 0.0, total = 0.0;
-	for (const std::unique_ptr<LiDARPoint>& pt : values) {
-		if (!pt->isGround())
-			canopy += pt->intensity();
-		total += pt->intensity();
-	}
-	result[0] = total != 0.0 ? canopy / total : -9999.0;
-}
-
-void fcLidarRR(const std::list<std::unique_ptr<LiDARPoint> > &values, double *result) {
-	unsigned int canopy = 0, total = 0;
-	for (const std::unique_ptr<LiDARPoint>& pt : values) {
-		if (!pt->isGround())
-			++canopy;
-		++total;
-	}
-	result[0] = total != 0.0 ? (double) canopy / total : -9999.0;
-}
-
-void fcLidarFR(const std::list<std::unique_ptr<LiDARPoint> > &values, double *result) {
-	unsigned int canopy = 0, total = 0;
-	for (const std::unique_ptr<LiDARPoint>& pt : values) {
-		if (pt->isFirst()) {
-			if (!pt->isGround())
-				++canopy;
-			++total;
-		}
-	}
-	result[0] = total != 0.0 ? (double) canopy / total : -9999.0;
-}
-
-void ccf(const std::list<std::unique_ptr<LiDARPoint> >& values, double *result, double threshold) {
-	if (values.size() < 75) {
-		result[0] = -9999.0;
-	} else {
-		double maxZ = -9999.0;
-		for (const std::unique_ptr<LiDARPoint>& pt : values)
-			maxZ = g_max(maxZ, pt->z());
-		double htIncrement = (maxZ - threshold) / 20.0;
-		double curHeight = threshold;
-		for (int band = 0; band <= 20; ++band) {
-			double count = 0;
-			for (const std::unique_ptr<LiDARPoint>& pt : values) {
-				if (pt->z() > curHeight)
-					++count;
-			}
-			result[band] = (double) count / values.size();
-			curHeight += htIncrement;
-		}
-	}
-}
-
-void gap(const std::list<std::unique_ptr<LiDARPoint> > &values, double *result, double threshold) {
-	if (!values.size()) {
-		result[0] = -9999.0;
-	} else {
-		int cnt = 0;
-		for (const std::unique_ptr<LiDARPoint>& p : values) {
-			if (p->z() > threshold)
-				++cnt;
-		}
-		result[0] = 1.0 - ((double) cnt / values.size());
-	}
-}
-
-CellGapFraction::CellGapFraction(unsigned char type, double threshold) :
-		CellStats(), m_type(type), m_threshold(threshold) {
-}
-
-void CellGapFraction::threshold(double t) {
-	m_threshold = t;
-}
-
-int CellGapFraction::bands() const {
-	switch (m_type) {
-	case GAP_CCF:
-		return 21;
-	default:
-		return 1;
-	}
-}
-
-void CellGapFraction::compute(double x, double y,
-		const std::list<std::unique_ptr<LiDARPoint> > &values, double *result) {
-	if (!values.size()) {
-		result[0] = -9999.0;
-	} else {
-		switch (m_type) {
-		case GAP_BLA:
-			fcLidarBLa(values, result);
-			break;
-		case GAP_BLB:
-			fcLidarBLb(values, result);
-			break;
-		case GAP_IR:
-			fcLidarIR(values, result);
-			break;
-		case GAP_RR:
-			fcLidarRR(values, result);
-			break;
-		case GAP_FR:
-			fcLidarFR(values, result);
-			break;
-		case GAP_CCF:
-			ccf(values, result, m_threshold);
-			break;
-		case GAP_GAP:
-			gap(values, result, m_threshold);
-			break;
-		default:
-			g_argerr("Unknown Gap Fraction method: " << m_type);
-		}
-	}
-}
- *
- */
-
-typedef CGAL::Exact_predicates_inexact_constructions_kernel K;
-typedef CGAL::Projection_traits_xy_3<K> Gt;
-typedef CGAL::Delaunay_triangulation_2<Gt> Delaunay;
-typedef K::Point_3 Point_3;
-typedef K::Plane_3 Plane_3;
-typedef Delaunay::Finite_faces_iterator Finite_faces_iterator;
-typedef Delaunay::Face Face;
-
-class RugosityComputer : public Computer {
-private:
-
-	/**
-	 * Compute planar area.
-	 */
-	double computePArea(double x1, double y1, double z1, double x2, double y2,
-			double z2, double x3, double y3, double z3) {
-		double side0 = std::sqrt(std::pow(x1 - x2, 2.0) + std::pow(y1 - y2, 2.0) + std::pow(z1 - z2, 2.0));
-		double side1 = std::sqrt(std::pow(x2 - x3, 2.0) + std::pow(y2 - y3, 2.0) + std::pow(z2 - z3, 2.0));
-		double side2 = std::sqrt(std::pow(x3 - x1, 2.0) + std::pow(y3 - y1, 2.0) + std::pow(z3 - z1, 2.0));
-		double s = (side0 + side1 + side2) / 2.0;
-		return std::sqrt(s * (s - side0) * (s - side1) * (s - side2));
-	}
-
-	/**
-	 * Compute the area of a face.
-	 */
-	double computeFArea(const Face &face) {
-		Point_3 p1 = face.vertex(0)->point();
-		Point_3 p2 = face.vertex(1)->point();
-		Point_3 p3 = face.vertex(2)->point();
-		return computePArea(p1.x(), p1.y(), p1.z(), p2.x(), p2.y(), p2.z(), p3.x(),
-				p3.y(), p3.z());
-	}
-
-	double toPlane(const Point_3 &p, const Plane_3 &plane, const Point_3 &centroid) {
-		return (p.x() * plane.a() + p.y() * plane.b() + plane.d()) / -plane.c();
-	}
-
-	double polyArea(const std::list<Point_3> &hull, const Plane_3 &plane,
-			const Point_3 &centroid) {
-		double area = 0.0;
-		auto it0 = hull.begin();
-		auto it1 = hull.begin();
-		it1++;
-		do {
-			double z0 = toPlane(*it0, plane, centroid);
-			double z1 = toPlane(*it1, plane, centroid);
-			area += computePArea(it0->x(), it0->y(), z0, it1->x(), it1->y(), z1,
-					centroid.x(), centroid.y(), centroid.z());
-			it0++;
-			it1++;
-			if (it1 == hull.end())
-				it1 = hull.begin();
-		} while (it0 != hull.end());
-		return area;
-	}
-
-
-public:
-
-	double compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
-		if(pts.empty())
-			return std::nan("");
-
-		double area = radius * radius * M_PI;
-		double density = pts.size() / area;
-
-		std::list<Point_3> verts;
-		for (const geo::pc::Point& pt : pts)
-			verts.push_back(Point_3(pt.x, pt.y, pt.z));
-
-		// Convex hull and POBF
-		std::list<Point_3> hull;
-		Plane_3 plane;
-		Point_3 centroid;
-		CGAL::convex_hull_2(verts.begin(), verts.end(), std::back_inserter(hull), Gt());
-		CGAL::linear_least_squares_fitting_3(hull.begin(), hull.end(), plane, centroid, CGAL::Dimension_tag<0>());
-
-		// POBF surface area.
-		double parea = polyArea(hull, plane, centroid);
-
-		// If the poly area is zero, quit.
-		if(parea <= 0)
-			return std::nan("");
-
-		// Delaunay 3D surface area.
-		double tarea = 0.0;
-		Delaunay dt(verts.begin(), verts.end());
-		for (Finite_faces_iterator it = dt.finite_faces_begin(); it != dt.finite_faces_end(); ++it)
-			tarea += computeFArea(*it);
-
-		// TODO: This is an attempt at modelling the relationship between the ACR and
-		// density. The fractal dimension is involved. Should be redone and documented.
-		double densityFactor = 1.0 / (2.49127261 + 9.01659384 * std::sqrt(density * 32.65748276));
-
-		double acr = (tarea / parea) * densityFactor;
-
-		return acr;
-	}
-
-};
-
-/*
- *         namespace pointstats_config {
-
-            std::map<std::string, uint8_t> types = {
-                {"Minimum", TYPE_MIN},
-                {"Maximum", TYPE_MAX},
-                {"Mean", TYPE_MEAN},
-                {"Density", TYPE_DENSITY},
-                {"Sample Variance", TYPE_VARIANCE},
-                {"Sample Std. Dev.", TYPE_STDDEV},
-                {"Population Variance", TYPE_PVARIANCE},
-                {"Population Std. Dev.", TYPE_PSTDDEV},
-                {"Count", TYPE_COUNT},
-                {"Quantile", TYPE_QUANTILE},
-                {"Median", TYPE_MEDIAN},
-                {"Rugosity", TYPE_RUGOSITY},
-                {"Kurtosis", TYPE_KURTOSIS},
-                {"Skewness", TYPE_SKEW},
-                {"Gap Fraction", TYPE_GAP_FRACTION},
-                {"CoV", TYPE_COV}
-            };
-            std::map<std::string, uint8_t> attributes = {
-                {"Height", ATT_HEIGHT},
-                {"Intensity", ATT_INTENSITY}
-            };
-            std::map<std::string, uint8_t> gapFractionTypes = {
-                {"IR", GAP_IR},
-                {"BLa", GAP_BLA},
-                {"BLb", GAP_BLB},
-                {"RR", GAP_RR},
-                {"FR", GAP_FR},
-                {"CCF", GAP_CCF},
-                {"GAP", GAP_GAP}
-            };
-
-            std::map<std::string, uint8_t> snapModes = {
-                {"None" , SNAP_NONE},
-                {"Grid" , SNAP_GRID},
-                {"Origin" , SNAP_ORIGIN}
-            };
-
-            std::map<std::string, uint8_t> areaModes = {
-                {"Full Cell", AREA_CELL},
-                {"Radius", AREA_RADIUS}
-            };
-
-        } // config
- *
- */
 
 class MemGrid {
 private:
@@ -1009,8 +490,8 @@ private:
 	size_t m_currentLine;
 	size_t m_lineLength;
 	size_t m_totalLength;
-	std::unordered_map<size_t, std::vector<size_t> > m_lines; // The current position in the data for idx. May be spread across segments.
-	std::unordered_map<size_t, size_t> m_positions;     // The start indices of the lines for an index. Modulus to get the line index.
+	std::unordered_map<size_t, std::vector<size_t> > m_lines;	///< The current position in the data for idx. May be spread across segments.
+	std::unordered_map<size_t, size_t> m_positions;				///< The start indices of the lines for an index. Modulus to get the line index.
 
 	void resize(size_t size) {
 		m_mapped.reset(size);
@@ -1022,10 +503,10 @@ private:
 		size_t pos;
 		if(m_positions.find(idx) == m_positions.end()) {
 			// If there's no entry for this pixel, start one.
-			pos = m_positions[idx] = 0;
-			line = m_currentLine;
+			pos = 0;
+			line = m_currentLine++;
 			m_lines[idx].push_back(line);
-			++m_currentLine;
+			m_positions[idx] = pos;
 		} else {
 			pos = m_positions[idx];
 			size_t i = pos / m_lineCount;
@@ -1033,16 +514,19 @@ private:
 			if(i >= lines.size()) {
 				// If the current position is beyond the end of the
 				// last line, start a new one.
-				line = m_currentLine;
+				line = m_currentLine++;
 				lines.push_back(line);
-				++m_currentLine;
 			} else {
+				// Otherwise use the line corresponding to the position.
 				line = lines[i];
 			}
 		}
+		// Skip to the line, then advance by the position.
 		size_t offset = line * m_lineCount + pos % m_lineCount;
+		// If the offset is beyond the end of the file, extend the buffer.
 		if(offset * sizeof(double) >= m_totalLength)
 			resize(m_totalLength * 2);
+		// Get the address at offset.
 		double* buf = ((double*) m_mapped.data()) + offset;
 		*buf = x;
 		*(buf + 1) = y;
@@ -1053,19 +537,20 @@ private:
 	size_t readPoints(size_t idx, std::vector<geo::pc::Point>& pts) {
 		if(m_lines.find(idx) == m_lines.end())
 			return 0;
+		double* data = (double*) m_mapped.data();
+		std::vector<size_t>& lines = m_lines[idx];
 		size_t count = 0;
 		size_t maxPos = m_positions[idx];
-		std::vector<size_t>& lines = m_lines[idx];
-		size_t offset = lines[0] * m_lineCount;
-		double* data = (double*) m_mapped.data();
-		double* buf = data + offset;
-		for(size_t pos = 0; pos < maxPos; pos += 3) {
-			if(pos % m_lineCount == 0 && pos > 0) {
-				offset = lines[pos / m_lineCount] * m_lineCount;
-				buf = data + offset;
+		size_t pos = 0;
+		while(pos < maxPos) {
+			size_t offset = lines[pos / m_lineCount] * m_lineCount;
+			double* buf = data + offset;
+			for(size_t p = 0;p < m_lineCount && (pos + p) < maxPos; p += 3) {
+				pts.emplace_back(*buf, *(buf + 1), *(buf + 2));
+				buf += 3;
+				++count;
 			}
-			pts.emplace_back(*buf, *(buf + 1), *(buf + 2));
-			++count;
+			pos += m_lineCount;
 		}
 		return count;
 	}
@@ -1097,48 +582,75 @@ public:
 	}
 };
 
-Rasterizer::Rasterizer(const std::vector<std::string> filenames) {
+const std::unordered_map<std::string, std::string> computerNames = {
+		{"min", "The minimum value"},
+		{"min", "The maximum value"},
+		{"percentile-5", "The 5th percentile"},
+		{"decile-1", "The 1st decile"},
+		{"decile-2", "The 2nd decile"},
+		{"quartile-1", "The 1st quartile"},
+		{"decile-3", "The 3rd decile"},
+		{"decile-4", "The 4th decile"},
+		{"decile-5", "The 4th decile"},
+		{"quartile-2", "The 2nd quartile"},
+		{"median", "The median value"},
+		{"decile-6", "The 6th decile"},
+		{"decile-7", "The 7th decile"},
+		{"quantile-3", "The 3rd quantile"},
+		{"decile-8", "The 8th decile"},
+		{"decile-9", "The 9th decile"},
+		{"percentile-95", "The 95th percentile"},
+		{"mean", "The mean value"},
+		{"variance", "The variance with n-1"},
+		{"std-dev", "The standard deviation with n-1"},
+		{"rugosity-acr", "The arc-chord rugosity (DuPreez, 2004)"}
+};
 
+Computer* getComputer(const std::string& name) {
+	if(name == "min") { 						return new MinComputer();
+	} else if(name == "min") { 					return new MaxComputer();
+	} else if(name == "percentile-5") { 		return new PercentileComputer(0.05);
+	} else if(name == "decile-1") { 			return new PercentileComputer(0.1);
+	} else if(name == "decile-2") { 			return new PercentileComputer(0.2);
+	} else if(name == "quartile-1") { 			return new PercentileComputer(0.25);
+	} else if(name == "decile-3") { 			return new PercentileComputer(0.3);
+	} else if(name == "decile-4") { 			return new PercentileComputer(0.4);
+	} else if(name == "decile-5") { 			return new PercentileComputer(0.5);
+	} else if(name == "quartile-2") { 			return new PercentileComputer(0.5);
+	} else if(name == "median") { 				return new PercentileComputer(0.5);
+	} else if(name == "decile-6") { 			return new PercentileComputer(0.6);
+	} else if(name == "decile-7") { 			return new PercentileComputer(0.7);
+	} else if(name == "quartile-3") { 			return new PercentileComputer(0.75);
+	} else if(name == "decile-8") { 			return new PercentileComputer(0.8);
+	} else if(name == "decile-9") { 			return new PercentileComputer(0.9);
+	} else if(name == "percentile-95") { 		return new PercentileComputer(0.95);
+	} else if(name == "mean") { 				return new MeanComputer();
+	} else if(name == "variance") { 			return new VarianceComputer();
+	} else if(name == "std-dev") { 				return new StdDevComputer();
+	} else if(name == "rugosity-acr") { 		return new RugosityComputer();
+	}
+	g_runerr("Unknown computer name: " << name);
+}
+
+Rasterizer::Rasterizer(const std::vector<std::string> filenames) {
 	for(const std::string& filename : filenames)
 		m_files.emplace_back(filename);
-
-	addComputer("min", new MinComputer());
-	addComputer("min", new MaxComputer());
-	addComputer("percentile-5", new PercentileComputer(0.05));
-	addComputer("decile-1", new PercentileComputer(0.1));
-	addComputer("decile-2", new PercentileComputer(0.2));
-	addComputer("quartile-1", new PercentileComputer(0.25));
-	addComputer("decile-3", new PercentileComputer(0.3));
-	addComputer("decile-4", new PercentileComputer(0.4));
-	addComputer("decile-5", new PercentileComputer(0.5));
-	addComputer("quantile-2", new PercentileComputer(0.5));
-	addComputer("median", new PercentileComputer(0.5));
-	addComputer("decile-6", new PercentileComputer(0.6));
-	addComputer("decile-7", new PercentileComputer(0.7));
-	addComputer("quantile-3", new PercentileComputer(0.75));
-	addComputer("decile-8", new PercentileComputer(0.8));
-	addComputer("decile-9", new PercentileComputer(0.9));
-	addComputer("percentile-95", new PercentileComputer(0.95));
-	addComputer("mean", new MeanComputer());
-	addComputer("sample-variance", new SampVarianceComputer());
-	addComputer("sample-std-dev", new SampStdDevComputer());
-	addComputer("population-variance", new PopVarianceComputer());
-	addComputer("population-std-dev", new PopStdDevComputer());
-	addComputer("rugosity-acr", new RugosityComputer());
 }
 
-void Rasterizer::addComputer(const std::string& name, Computer* computer) {
-	if(m_computers.find(name) != m_computers.end())
-		delete m_computers[name];
-	m_computers[name] = computer;
+const std::unordered_map<std::string, std::string>& Rasterizer::availableComputers() {
+	return computerNames;
 }
 
-void Rasterizer::rasterize(const std::string& filename, const std::string& type, double res, 
-	double easting, double northing, double radius, int srid, int density, int threads, double ext) {
+bool Rasterizer::filter(const geo::pc::Point& pt) const {
+	return pt.classId() == 2;
+}
 
-	Computer* comp = m_computers[type];
-	if(!comp)
-		g_runerr("No computer for type " << type);
+void Rasterizer::rasterize(const std::string& filename, const std::vector<std::string>& types,
+		double res,	double easting, double northing, double radius, int srid, int density, double ext) {
+
+	std::vector<std::unique_ptr<Computer> > computers;
+	for(const std::string& name : types)
+		computers.emplace_back(getComputer(name));
 
 	double bounds[4] = {9999999999, 9999999999, -9999999999, -9999999999};
 	{
@@ -1168,11 +680,16 @@ void Rasterizer::rasterize(const std::string& filename, const std::string& type,
 	props.setDataType(DataType::Float32);
 	props.setSrid(srid);
 	props.setWritable(true);
+	props.setBands(computers.size() + 1);
 	Raster rast(filename, props);
 
 	liblas::ReaderFactory fact;
 	MemGrid grid(cols * rows, density);
 
+	// The squared radius for comparison.
+	double rad0 = radius * radius;
+	// The radius of the "box" of pixels to check for a claim on the current point.
+	int radpx = (int) std::ceil(radius / std::abs(props.resolutionX()));
 	int i = 0;
 	for(PCFile& file : m_files) {
 		std::cerr << "Reading file " << i++ << " of " << m_files.size() << ".\n";
@@ -1180,12 +697,22 @@ void Rasterizer::rasterize(const std::string& filename, const std::string& type,
 			std::ifstream str(filename);
 			liblas::Reader rdr = fact.CreateWithStream(str);
 			while(rdr.ReadNextPoint()) {
-				const liblas::Point& pt = rdr.GetPoint();
-				if((int) pt.GetClassification().GetClass() == 2) { // TODO: Configurable.
-					double x = pt.GetX();
-					double y = pt.GetY();
-					double z = pt.GetZ();
-					grid.add(props.toCol(x), props.toRow(y), x, y, z);
+				const geo::pc::Point pt(rdr.GetPoint());
+				if(filter(pt)) { // TODO: Configurable.
+					double x = pt.x();
+					double y = pt.y();
+					double z = pt.z();
+					int col = props.toCol(x);
+					int row = props.toRow(y);
+					for(int r = row - radpx; r < row + radpx + 1; ++r) {
+						for(int c = col - radpx; c < col + radpx + 1; ++c) {
+							double cx = props.toX(c);
+							double cy = props.toY(r);
+							double dist = std::pow(cx - x, 2.0) + std::pow(cy - y, 2.0);
+							if(dist <= rad0)
+								grid.add(c, r, x, y, z);
+						}
+					}
 				}
 			}
 		}
@@ -1196,18 +723,23 @@ void Rasterizer::rasterize(const std::string& filename, const std::string& type,
 		if(r % 100 == 0)
 			std::cerr << "Row " << r << " of " << rows << "\n";
 		for(size_t c = 0; c < (size_t) cols; ++c) {
-			if(grid.get(c, r, values)) {
+			size_t count = grid.get(c, r, values);
+			rast.setFloat((int) c, (int) r, count, 1);
+			if(count) {
 				double x = props.toX(c) + props.resolutionX();
 				double y = props.toY(r) + props.resolutionY();
-				double val = comp->compute(x, y, values, radius);
-				rast.setFloat((int) c, (int) r, val, 1);
+				for(size_t i = 0; i < computers.size(); ++i) {
+					double val = computers[i]->compute(x, y, values, radius);
+					rast.setFloat((int) c, (int) r, val, i + 2);
+				}
 				values.clear();
+			} else {
+				for(size_t i = 0; i < computers.size(); ++i)
+					rast.setFloat((int) c, (int) r, -9999.0, i + 2);
 			}
 		}
 	}
 }
 
 Rasterizer::~Rasterizer() {
-	for(auto& c : m_computers)
-		delete c.second;
 }

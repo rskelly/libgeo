@@ -290,11 +290,13 @@ public:
  * liblas::Point instance.
  */
 class Point {
+private:
+	double m_x; 			///< The x-coordinate.
+	double m_y; 			///< The y-coordinate.
+	double m_z; 			///< The z-coordinate.
+	liblas::Point* m_point;	///< The (optional) liblas::Point instance. Deleted on destruction.
+
 public:
-	double x; 				///< The x-coordinate.
-	double y; 				///< The y-coordinate.
-	double z; 				///< The z-coordinate.
-	liblas::Point* point;	///< The (optional) liblas::Point instance. Deleted on destruction.
 
 	/**
 	 * Construct a Point using a liblas::Point. Will read the 3D
@@ -327,6 +329,18 @@ public:
 	 * @param idx The index.
 	 */
 	double operator[](int idx) const;
+
+	double x() const;
+
+	double y() const;
+
+	double z() const;
+
+	/**
+	 * This is the getter for values used in competition.
+	 * The source of the value may be changed.
+	 */
+	double value() const;
 
 	~Point();
 
@@ -433,8 +447,7 @@ public:
  */
 class Rasterizer {
 private:
-	std::vector<PCFile> m_files;							///< A list of PCFile instances.
-	std::unordered_map<std::string, Computer*> m_computers;	///< A map of computers.
+	std::vector<PCFile> m_files;		///< A list of PCFile instances.
 
 public:
 
@@ -445,29 +458,33 @@ public:
 	Rasterizer(const std::vector<std::string> filenames);
 
 	/**
-	 * Add a Computer to the Rasterizer.
-	 * @param name The name of the computer.
-	 * @param computer The Computer instance.
+	 * Returns a mapping of computer names and brief descriptions.
 	 */
-	void addComputer(const std::string& name, Computer* computer);
+	static const std::unordered_map<std::string, std::string>& availableComputers();
 
 	/**
 	 * Rasterize the point cloud using the given output filename, statistic type, resolution
 	 * and bounds. The radius gives the size of the neighbourhood around each pixel
 	 * centre.
 	 * @param filename 	The output (raster) filename.
-	 * @param type 		The name of the statistic to compute.
+	 * @param types		The list of statistics to compute.
 	 * @param res 		The raster resolution.
 	 * @param easting 	The minimum corner coordinate of the raster.
 	 * @param northing 	The minimum corner coordinate of the raster.
 	 * @param radius 	The size of the neighbourhood around each cell centre.
 	 * @param srid 		The spatial reference ID of the output.
 	 * @param density   The estimated number of points per cell; used for reserving mapped memory. Default 32.
-	 * @param threads 	The number of threads to use in computation.
 	 * @param ext 		An extra filter value. For example, for percentiles, this is the cutoff value.
 	 */
-	void rasterize(const std::string& filename, const std::string& type, double res, 
-		double easting, double northing, double radius, int srid, int density = 32, int threads = 1, double ext = 0);
+	void rasterize(const std::string& filename, const std::vector<std::string>& types, double res,
+		double easting, double northing, double radius, int srid, int density = 32, double ext = 0);
+
+	/**
+	 * Returns true if the given point should be processed.
+	 * @param pt A geo::pc::Point.
+	 * @return True if the given point should be processed.
+	 */
+	bool filter(const geo::pc::Point& pt) const;
 
 	/**
 	 * Destroy the Rasterizer.
