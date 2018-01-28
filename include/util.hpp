@@ -20,6 +20,7 @@ namespace std {
 
 #include <boost/interprocess/mapped_region.hpp>
 #include <boost/interprocess/shared_memory_object.hpp>
+#include <boost/interprocess/file_mapping.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/algorithm/string/join.hpp>
 #include <boost/algorithm/string/case_conv.hpp>
@@ -233,12 +234,20 @@ namespace geo {
 			std::unique_ptr<Buffer> m_data;
             boost::interprocess::mapped_region* m_region;
 			boost::interprocess::shared_memory_object* m_shm;
+			boost::interprocess::file_mapping* m_fm;
+			bool m_fileBacked;
+			std::string m_filename;
 
         public:
 
             // Create a mapped file with the given size.
-			MappedFile(const std::string& name, uint64_t size);
-			MappedFile(uint64_t size);
+			MappedFile(const std::string& name, uint64_t size, bool fileBacked = false);
+			MappedFile(uint64_t size, bool fileBacked = false);
+			MappedFile();
+
+			void init(size_t size, bool fileBacked);
+
+			void init(const std::string& name, size_t size, bool fileBacked);
 
             const std::string& name() const;
 

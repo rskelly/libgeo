@@ -11,7 +11,10 @@
 #include <cstdint>
 #include <list>
 
+#include <errno.h>
 #include <math.h>
+#include <sys/mman.h>
+#include <string.h>
 
 #include <CGAL/Plane_3.h>
 #include <CGAL/linear_least_squares_fitting_3.h>
@@ -444,6 +447,11 @@ geo::pc::Point::Point(double x, double y, double z) :
 	point(nullptr) {
 }
 
+geo::pc::Point::Point() :
+	x(0), y(0), z(0),
+	point(nullptr) {
+}
+
 int geo::pc::Point::classId() const {
 	if(point)
 		return point->GetClassification().GetClass();
@@ -465,7 +473,7 @@ geo::pc::Point::~Point() {
 
 class MeanComputer : public Computer {
 public:
-	double compute(double x, double y, const std::list<geo::pc::Point>& pts, double radius) {
+	double compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
 		double sum = 0;
 		int count = 0;
 		for(const geo::pc::Point& pt : pts) {
@@ -478,7 +486,7 @@ public:
 
 class PopVarianceComputer : public MeanComputer {
 public:
-	double compute(double x, double y, const std::list<geo::pc::Point>& pts, double radius) {
+	double compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
 		double mean = MeanComputer::compute(x, y, pts, radius);
 		if(std::isnan(mean))
 			return mean;
@@ -492,7 +500,7 @@ public:
 
 class PopStdDevComputer : public PopVarianceComputer {
 public:
-	double compute(double x, double y, const std::list<geo::pc::Point>& pts, double radius) {
+	double compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
 		double variance = PopVarianceComputer::compute(x, y, pts, radius);
 		if(std::isnan(variance))
 			return variance;
@@ -503,7 +511,7 @@ public:
 
 class SampVarianceComputer : public MeanComputer {
 public:
-	double compute(double x, double y, const std::list<geo::pc::Point>& pts, double radius) {
+	double compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
 		if(pts.size() < 2)
 			return std::nan("");
 		double mean = MeanComputer::compute(x, y, pts, radius);
@@ -519,7 +527,7 @@ public:
 
 class SampStdDevComputer : public SampVarianceComputer {
 public:
-	double compute(double x, double y, const std::list<geo::pc::Point>& pts, double radius) {
+	double compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
 		double variance = SampVarianceComputer::compute(x, y, pts, radius);
 		if(std::isnan(variance))
 			return variance;
@@ -542,7 +550,7 @@ public:
 			g_runerr("Percentile must be between 0 and 100.");
 	}
 
-	double compute(double x, double y, const std::list<geo::pc::Point>& pts, double radius) {
+	double compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
 		if(pts.size() < 2)
 			return std::nan("");
 		std::vector<geo::pc::Point> _pts(pts.begin(), pts.end());
@@ -556,7 +564,7 @@ public:
 class MaxComputer : public Computer {
 public:
 
-	double compute(double x, double y, const std::list<geo::pc::Point>& pts, double radius) {
+	double compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
 	double max = std::numeric_limits<double>::lowest();
 		for(const geo::pc::Point& pt : pts) {
 			if(pt.z > max)
@@ -570,7 +578,7 @@ public:
 class MinComputer : public Computer {
 public:
 
-	double compute(double x, double y, const std::list<geo::pc::Point>& pts, double radius) {
+	double compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
 		double min = std::numeric_limits<double>::max();
 		for(const geo::pc::Point& pt : pts) {
 			if(pt.z < min)
@@ -583,7 +591,7 @@ public:
 
 class DensityComputer : public Computer {
 public:
-	double compute(double x, double y, const std::list<geo::pc::Point>& pts, double radius) {
+	double compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
 		double area = radius * radius * M_PI;
 		if(pts.empty())
 			return std::nan("");
@@ -594,7 +602,7 @@ public:
 
 class CountComputer : public Computer {
 public:
-	double compute(double x, double y, const std::list<geo::pc::Point>& pts, double radius) {
+	double compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
 		return (double) pts.size();
 	}
 
@@ -605,7 +613,7 @@ public:
 	MeanComputer meanComp;
 	SampStdDevComputer sampStdDevComp;
 
-	double compute(double x, double y, const std::list<geo::pc::Point>& pts, double radius) {
+	double compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
 		if(pts.empty())
 			return std::nan("");
 		// Fisher-Pearson
@@ -628,7 +636,7 @@ public:
 	MeanComputer meanComp;
 	SampStdDevComputer sampStdDevComp;
 
-	double compute(double x, double y, const std::list<geo::pc::Point>& pts, double radius) {
+	double compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
 		if(pts.empty())
 			return std::nan("");
 		// Fisher-Pearson
@@ -651,7 +659,7 @@ public:
 	MeanComputer meanComp;
 	SampStdDevComputer sampStdDevComp;
 
-	double compute(double x, double y, const std::list<geo::pc::Point>& pts, double radius) {
+	double compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
 		if(pts.empty())
 			return std::nan("");
 		// Fisher-Pearson
@@ -670,7 +678,7 @@ public:
 	MeanComputer meanComp;
 	SampStdDevComputer sampStdDevComp;
 
-	double compute(double x, double y, const std::list<geo::pc::Point>& pts, double radius) {
+	double compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
 		g_runerr("Not implemented.");
 	}
 
@@ -901,7 +909,7 @@ private:
 
 public:
 
-	double compute(double x, double y, const std::list<geo::pc::Point>& pts, double radius) {
+	double compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
 		if(pts.empty())
 			return std::nan("");
 
@@ -993,6 +1001,102 @@ public:
  *
  */
 
+class MemGrid {
+private:
+	geo::util::MappedFile m_mapped;
+	size_t m_lineCount;
+	size_t m_cellCount;
+	size_t m_currentLine;
+	size_t m_lineLength;
+	size_t m_totalLength;
+	std::unordered_map<size_t, std::vector<size_t> > m_lines; // The current position in the data for idx. May be spread across segments.
+	std::unordered_map<size_t, size_t> m_positions;     // The start indices of the lines for an index. Modulus to get the line index.
+
+	void resize(size_t size) {
+		m_mapped.reset(size);
+		m_totalLength = size;
+	}
+
+	void writePoint(size_t idx, double x, double y, double z) {
+		size_t line;
+		size_t pos;
+		if(m_positions.find(idx) == m_positions.end()) {
+			// If there's no entry for this pixel, start one.
+			pos = m_positions[idx] = 0;
+			line = m_currentLine;
+			m_lines[idx].push_back(line);
+			++m_currentLine;
+		} else {
+			pos = m_positions[idx];
+			size_t i = pos / m_lineCount;
+			std::vector<size_t>& lines = m_lines[idx];
+			if(i >= lines.size()) {
+				// If the current position is beyond the end of the
+				// last line, start a new one.
+				line = m_currentLine;
+				lines.push_back(line);
+				++m_currentLine;
+			} else {
+				line = lines[i];
+			}
+		}
+		size_t offset = line * m_lineCount + pos % m_lineCount;
+		if(offset * sizeof(double) >= m_totalLength)
+			resize(m_totalLength * 2);
+		double* buf = ((double*) m_mapped.data()) + offset;
+		*buf = x;
+		*(buf + 1) = y;
+		*(buf + 2) = z;
+		m_positions[idx] = pos + 3;
+	}
+
+	size_t readPoints(size_t idx, std::vector<geo::pc::Point>& pts) {
+		if(m_lines.find(idx) == m_lines.end())
+			return 0;
+		size_t count = 0;
+		size_t maxPos = m_positions[idx];
+		std::vector<size_t>& lines = m_lines[idx];
+		size_t offset = lines[0] * m_lineCount;
+		double* data = (double*) m_mapped.data();
+		double* buf = data + offset;
+		for(size_t pos = 0; pos < maxPos; pos += 3) {
+			if(pos % m_lineCount == 0 && pos > 0) {
+				offset = lines[pos / m_lineCount] * m_lineCount;
+				buf = data + offset;
+			}
+			pts.emplace_back(*buf, *(buf + 1), *(buf + 2));
+			++count;
+		}
+		return count;
+	}
+
+public:
+
+	MemGrid(size_t cellCount, size_t lineCount = 512) :
+		m_lineCount(lineCount * 3),
+		m_cellCount(cellCount),
+		m_currentLine(0),
+		m_lineLength(m_lineCount * sizeof(double)),
+		m_totalLength(cellCount * m_lineLength) {
+
+		m_mapped.init(m_totalLength, true);
+	}
+
+	void add(int col, int row, double x, double y, double z) {
+		size_t idx = ((size_t) row << 32) | col;
+		writePoint(idx, x, y, z);
+	}
+
+	size_t get(size_t col, size_t row, std::vector<geo::pc::Point>& out) {
+		size_t idx = (row << 32) | col;
+		return readPoints(idx, out);
+	}
+
+	~MemGrid() {
+		Util::rm(m_mapped.name());
+	}
+};
+
 Rasterizer::Rasterizer(const std::vector<std::string> filenames) {
 
 	for(const std::string& filename : filenames)
@@ -1029,44 +1133,8 @@ void Rasterizer::addComputer(const std::string& name, Computer* computer) {
 	m_computers[name] = computer;
 }
 
-template <class T>
-int Rasterizer::getAffectedCells(double x, double y, double radius, const GridProps& props, T iter) {
-	int count = 0;
-	if(radius > 0) {
-		// Get the bounding indices of the cells to check.
-		size_t c0 = std::max(0, props.toCol(x - radius) - 1);
-		size_t c1 = std::min(props.cols(), props.toCol(x + radius) + 1);
-		size_t r0 = std::max(0, props.toRow(y - radius) - 1);
-		size_t r1 = std::min(props.rows(), props.toRow(y + radius) + 1);
-		// Squared radius for quick check.
-		double rad2 = radius * radius;
-		for(size_t r = r0; r <= r1; ++r) {
-			for(size_t c = c0; c <= c1; ++c) {
-				size_t idx = (r << 32) | c;
-				if(m_grid.find(idx) != m_grid.end()) {
-					const Cell& cell = m_grid[idx];
-					// If the point is within the circular neighbourhood of the cell's centre,
-					// add it.
-					double dist = std::pow(cell.cx - x, 2.0) + std::pow(cell.cy - y, 2.0);
-					//std::cerr << x << ", " << y << ", " << cell.cx << ", " << cell.cy << ", " << radius << ", " << rad2 << ", " << (cell.cx - x) << ", " << (cell.cy - y) << ", " << dist << "\n";
-					if(dist <= rad2) {
-						iter = idx;
-						++count;
-					}
-				}
-			}
-		}
-	} else {
-		// Just get the index and add it.
-		size_t idx = ((size_t) props.toRow(y) << 32) | props.toCol(x);
-		iter = idx;
-		++count;
-	}
-	return count;
-}
-
 void Rasterizer::rasterize(const std::string& filename, const std::string& type, double res, 
-	double easting, double northing, double radius, int srid, int threads, double ext) {
+	double easting, double northing, double radius, int srid, int density, int threads, double ext) {
 
 	Computer* comp = m_computers[type];
 	if(!comp)
@@ -1102,90 +1170,44 @@ void Rasterizer::rasterize(const std::string& filename, const std::string& type,
 	props.setWritable(true);
 	Raster rast(filename, props);
 
-	for(size_t r = 0; r < (size_t) rows; ++r) {
-		for(size_t c = 0; c < (size_t) cols; ++c) {
-			double x0 = props.toX(c);
-			double y0 = props.toY(r);
-			double x1 = x0 + props.resolutionX();
-			double y1 = y0 + props.resolutionY();
-			if(x0 > x1) {
-				double tmp = x0;
-				x0 = x1;
-				x1 = tmp;
-			}
-			if(y0 > y1) {
-				double tmp = y0;
-				y0 = y1;
-				y1 = tmp;
-			}
-			m_grid[(r << 32) | c].setBounds(x0, y0, x1, y1);
-		}
-	}
-
 	liblas::ReaderFactory fact;
-	std::list<size_t> q;
-	std::list<size_t> cells;
-	std::list<size_t> finalize;
+	MemGrid grid(cols * rows, density);
 
-	for(size_t i = 0; i < m_files.size(); ++i)
-		q.push_back(i);
-
-	while(!q.empty()) {
-
-		PCFile& f = m_files[q.front()];
-
-		for(const std::string& filename : f.filenames()) {
+	int i = 0;
+	for(PCFile& file : m_files) {
+		std::cerr << "Reading file " << i++ << " of " << m_files.size() << ".\n";
+		for(const std::string& filename : file.filenames()) {
 			std::ifstream str(filename);
 			liblas::Reader rdr = fact.CreateWithStream(str);
 			while(rdr.ReadNextPoint()) {
 				const liblas::Point& pt = rdr.GetPoint();
-				if(pt.GetClassification().GetClass() == 2) { // TODO: Configurable.
-					cells.clear();
+				if((int) pt.GetClassification().GetClass() == 2) { // TODO: Configurable.
 					double x = pt.GetX();
 					double y = pt.GetY();
-					if(getAffectedCells(x, y, radius, props, std::back_inserter(cells))) {
-						for(size_t& idx : cells)
-							m_grid[idx].values.emplace_back(pt);
-					}
+					double z = pt.GetZ();
+					grid.add(props.toCol(x), props.toRow(y), x, y, z);
 				}
 			}
 		}
+	}
 
-		std::list<std::tuple<double, double, double, double> > bnds;
-		double b[4];
-		for(size_t& idx : q) {
-			m_files[idx].bounds(b);
-			bnds.emplace_back(b[0], b[1], b[2], b[3]);
-		}
-
-		for(auto& item : m_grid) {
-			bool hit = false;
-			for(const std::tuple<double, double, double, double>& b : bnds) {
-				if(item.second.intersects(std::get<0>(b), std::get<1>(b), std::get<2>(b), std::get<3>(b), radius)) {
-					hit = true;
-					break;
-				}
-			}
-
-			if(hit) {
-				double v = comp->compute(item.second.cx, item.second.cy, item.second.values, radius);
-				if(std::isnan(v))
-					v = -9999.0;
-				rast.setFloat(props.toCol(item.second.cx), props.toRow(item.second.cy), v, 1);
-				finalize.push_back(item.first);
+	std::vector<geo::pc::Point> values;
+	for(size_t r = 0; r < (size_t) rows; ++r) {
+		if(r % 100 == 0)
+			std::cerr << "Row " << r << " of " << rows << "\n";
+		for(size_t c = 0; c < (size_t) cols; ++c) {
+			if(grid.get(c, r, values)) {
+				double x = props.toX(c) + props.resolutionX();
+				double y = props.toY(r) + props.resolutionY();
+				double val = comp->compute(x, y, values, radius);
+				rast.setFloat((int) c, (int) r, val, 1);
+				values.clear();
 			}
 		}
-
-		for(size_t& idx : finalize)
-			m_grid.erase(idx);
-
-		q.pop_front();
 	}
 }
 
 Rasterizer::~Rasterizer() {
-	//if(m_tree)
-	//	delete m_tree;
 	for(auto& c : m_computers)
 		delete c.second;
 }

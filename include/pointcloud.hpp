@@ -312,6 +312,8 @@ public:
 	 */
 	Point(double x, double y, double z);
 
+	Point();
+
 	/**
 	 * Returns the class ID of this point. If no liblas::Point
 	 * or other was provided, this returns zero.
@@ -344,7 +346,7 @@ public:
 		 * @param pts 	The list of Points.
 		 * @return The value of the computed statistic.
 		 */
-		virtual double compute(double x, double y, const std::list<Point>& pts, double radius) = 0;
+		virtual double compute(double x, double y, const std::vector<Point>& pts, double radius) = 0;
 
 		virtual ~Computer() {}
 };
@@ -432,21 +434,7 @@ public:
 class Rasterizer {
 private:
 	std::vector<PCFile> m_files;							///< A list of PCFile instances.
-	std::unordered_map<size_t, Cell> m_grid;				///< The map of all grid cells and their contents.
 	std::unordered_map<std::string, Computer*> m_computers;	///< A map of computers.
-
-	/**
-	 * Populate the iterator with the cells that are concerned about this point.
-	 * If the radius is <= 0, a single rectangular cell area is used, otherwise
-	 * the circular radius around the cell's centre is used.
-	 * @param x 		The x-coordinate of the point.
-	 * @param y 		The y-coordinate of the point.
-	 * @param radius	The radius around the centre of the cell. If <= 0, the cell's rectangular grid is used.
-	 * @param iter		A back_inserter which will receive the Cell instances.
-	 * @return The number of cells found.
-	 */
-	template <class T>
-	int getAffectedCells(double x, double y, double radius, const geo::raster::GridProps& props, T iter);
 
 public:
 
@@ -474,11 +462,12 @@ public:
 	 * @param northing 	The minimum corner coordinate of the raster.
 	 * @param radius 	The size of the neighbourhood around each cell centre.
 	 * @param srid 		The spatial reference ID of the output.
+	 * @param density   The estimated number of points per cell; used for reserving mapped memory. Default 32.
 	 * @param threads 	The number of threads to use in computation.
 	 * @param ext 		An extra filter value. For example, for percentiles, this is the cutoff value.
 	 */
 	void rasterize(const std::string& filename, const std::string& type, double res, 
-		double easting, double northing, double radius, int srid, int threads, double ext = 0);
+		double easting, double northing, double radius, int srid, int density = 32, int threads = 1, double ext = 0);
 
 	/**
 	 * Destroy the Rasterizer.

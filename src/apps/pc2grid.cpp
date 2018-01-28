@@ -22,10 +22,12 @@ void usage() {
 			<< "                 (defaults to nearest whole multiple of resolution).\n"
 			<< " -d <radius>     The search radius for finding points.\n"
 			<< " -s <srid>       The spatial reference ID. Default 0.\n"
-			<< " -p <type>       The type of raster: mean (default), median, min, max, \n"
+			<< " -m <method>     The type of raster: mean (default), median, min, max, \n"
 			<< "                 rugosity, variance, std. deviation and percentile.\n"
 			<< "                 For percentile, use the form, 'percenile:n', where\n"
 			<< "                 n is the percentile (no % sign); 1 - 99.\n"
+			<< " -i <density>    The estimated number of points per cell underestimating this\n"
+			<< "                 saves disk space at the cost of efficiency.\n"
 			<< " -t <t>          The number of threads. Default 1.\n";
 }
 
@@ -40,6 +42,7 @@ int main(int argc, char** argv) {
 	double easting = 0;
 	double northing = 0;
 	double radius = 0;
+	int density = 64;
 	uint16_t srid = 0;
 	uint16_t threads = 1;
 	std::string type = "mean";
@@ -47,10 +50,12 @@ int main(int argc, char** argv) {
 
 	for(int i = 1; i < argc; ++i) {
 		std::string v = argv[i];
-		if(v == "-p") {
+		if(v == "-m") {
 			type = argv[++i];
 		} else if(v == "-r") {
 			res = atof(argv[++i]);
+		} else if(v == "-i") {
+			density = atoi(argv[++i]);
 		} else if(v == "-d") {
 			radius = atof(argv[++i]);
 		} else if(v == "-s") {
@@ -85,7 +90,7 @@ int main(int argc, char** argv) {
 
 	std::vector<std::string> infiles(args.begin() + 1, args.end());
 	geo::pc::Rasterizer r(infiles);
-	r.rasterize(args[0], type, res, easting, northing, radius, srid, threads, 0);
+	r.rasterize(args[0], type, res, easting, northing, radius, srid, density, threads, 0);
 
 	return 0;
 }
