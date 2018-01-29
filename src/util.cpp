@@ -639,25 +639,31 @@ std::string Util::sha256File(const std::string& file) {
 
 using namespace boost::interprocess;
 
-MappedFile::MappedFile(const std::string& name, uint64_t size, bool fileBacked) :
+MappedFile::MappedFile(const std::string& name, uint64_t size, bool fileBacked, bool deleteOnDestruct) :
 	m_size(0),
 	m_name(name),
 	m_region(nullptr),
 	m_shm(nullptr),
 	m_fm(nullptr),
-	m_fileBacked(fileBacked) {
+	m_fileBacked(fileBacked),
+	m_deleteOnDestruct(deleteOnDestruct),
+	m_fileExists(Util::exists(name)),
+	m_fileInited(false) {
 
 	if (size > 0)
 		reset(size);
 }
 
-MappedFile::MappedFile(uint64_t size, bool fileBacked) :
+MappedFile::MappedFile(uint64_t size, bool fileBacked, bool deleteOnDestruct) :
 	m_size(0),
-	m_name("geo_util_mapped_" + geo::crypto::UUID::uuid()),
+	m_name(Util::pathJoin(Util::tmpDir(), "geo_util_mapped_" + geo::crypto::UUID::uuid())),
 	m_region(nullptr),
 	m_shm(nullptr),
 	m_fm(nullptr),
-	m_fileBacked(fileBacked) {
+	m_fileBacked(fileBacked),
+	m_deleteOnDestruct(deleteOnDestruct),
+	m_fileExists(false),
+	m_fileInited(false) {
 
 	if (size > 0)
 		reset(size);
@@ -665,21 +671,31 @@ MappedFile::MappedFile(uint64_t size, bool fileBacked) :
 
 MappedFile::MappedFile() :
 	m_size(0),
-	m_name("geo_util_mapped_" + geo::crypto::UUID::uuid()),
+	m_name(Util::pathJoin(Util::tmpDir(), "geo_util_mapped_" + geo::crypto::UUID::uuid())),
 	m_region(nullptr),
 	m_shm(nullptr),
 	m_fm(nullptr),
-	m_fileBacked(false) {
+	m_fileBacked(false),
+	m_deleteOnDestruct(true),
+	m_fileExists(false),
+	m_fileInited(false) {
 }
 
-void MappedFile::init(size_t size, bool fileBacked) {
+void MappedFile::flush() {
+	if(m_region)
+		m_region->flush();
+}
+
+void MappedFile::init(size_t size, bool fileBacked, bool deleteOnDestruct) {
 	m_fileBacked = fileBacked;
+	m_deleteOnDestruct = deleteOnDestruct;
 	reset(size);
 }
 
-void MappedFile::init(const std::string& name, size_t size, bool fileBacked) {
+void MappedFile::init(const std::string& name, size_t size, bool fileBacked, bool deleteOnDestruct) {
 	m_name = name;
 	m_fileBacked = fileBacked;
+	m_deleteOnDestruct = deleteOnDestruct;
 	reset(size);
 }
 
@@ -714,39 +730,38 @@ void MappedFile::reset(uint64_t size) {
 	size = fixSize(size);
 	if(size < m_size)
 		g_runerr("Cannot shrink mapped files.");
-	#pragma omp critical(__mapped_file_reset__)
-	{
-		if(size != 0 && size != m_size) {
-			m_size = size;
-			if (m_region) {
-				m_region->flush();
-				delete m_region;
-			}
+	if(size != 0 && size != m_size) {
+		m_size = size;
+		if (m_region) {
+			m_region->flush();
+			delete m_region;
+		}
 
-			if(m_fileBacked) {
-				if(m_filename.empty()) {
-					m_filename = Util::pathJoin(Util::tmpDir(), name());
+		if(m_fileBacked) {
+			if(!m_fileExists) {
+				if(!m_fileInited && !Util::exists(m_name)) {
 					std::filebuf fbuf;
-					fbuf.open(m_filename, std::ios_base::in | std::ios_base::out | std::ios_base::trunc | std::ios_base::binary);
+					fbuf.open(m_name, std::ios_base::in | std::ios_base::out | std::ios_base::trunc | std::ios_base::binary);
 					fbuf.pubseekoff(m_size - 1, std::ios_base::beg);
 					fbuf.sputc(0);
+					m_fileInited = true;
 				} else {
 					std::filebuf fbuf;
-					fbuf.open(m_filename, std::ios_base::in | std::ios_base::out | std::ios_base::binary);
+					fbuf.open(m_name, std::ios_base::in | std::ios_base::out | std::ios_base::binary);
 					fbuf.pubseekoff(m_size - 1, std::ios_base::beg);
 					fbuf.sputc(0);
 				}
-				if (m_fm)
-					delete m_fm;
-				m_fm = new file_mapping(m_filename.c_str(), read_write);
-				m_region = new mapped_region(*m_fm, read_write, 0, m_size);
-			} else {
-				if (m_shm)
-					delete m_shm;
-				m_shm = new shared_memory_object(open_or_create, m_name.c_str(), read_write);
-				m_shm->truncate(m_size);
-				m_region = new mapped_region(*m_shm, read_write);
 			}
+			if (m_fm)
+				delete m_fm;
+			m_fm = new file_mapping(m_name.c_str(), read_write);
+			m_region = new mapped_region(*m_fm, read_write, 0, m_size);
+		} else {
+			if (m_shm)
+				delete m_shm;
+			m_shm = new shared_memory_object(open_or_create, m_name.c_str(), read_write);
+			m_shm->truncate(m_size);
+			m_region = new mapped_region(*m_shm, read_write);
 		}
 	}
 }
@@ -768,7 +783,8 @@ MappedFile::~MappedFile() {
 	if(m_region) {
 		m_region->flush();
 		if(m_fm) {
-			file_mapping::remove(m_filename.c_str());
+			if(m_deleteOnDestruct)
+				file_mapping::remove(m_name.c_str());
 			delete m_fm;
 		}
 		if(m_shm) {

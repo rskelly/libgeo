@@ -236,18 +236,22 @@ namespace geo {
 			boost::interprocess::shared_memory_object* m_shm;
 			boost::interprocess::file_mapping* m_fm;
 			bool m_fileBacked;
-			std::string m_filename;
+			bool m_deleteOnDestruct;
+			bool m_fileExists; // True if the file was preexisting -- assumed to contain data.
+			bool m_fileInited;
 
         public:
 
             // Create a mapped file with the given size.
-			MappedFile(const std::string& name, uint64_t size, bool fileBacked = false);
-			MappedFile(uint64_t size, bool fileBacked = false);
+			MappedFile(const std::string& name, uint64_t size, bool fileBacked = false, bool deleteOnDestruct = true);
+			MappedFile(uint64_t size, bool fileBacked = false, bool deleteOnDestruct = true);
 			MappedFile();
 
-			void init(size_t size, bool fileBacked);
+			void init(size_t size, bool fileBacked, bool deleteOnDestruct = true);
 
-			void init(const std::string& name, size_t size, bool fileBacked);
+			void init(const std::string& name, size_t size, bool fileBacked, bool deleteOnDestruct = true);
+
+			void flush();
 
             const std::string& name() const;
 
@@ -288,6 +292,46 @@ namespace geo {
 
             bool read(void* output, uint64_t position, uint64_t size);
 
+        };
+
+        /**
+         * A file-backed allocator for stl classes.
+         */
+        template<typename T>
+        class mmap_allocator {
+        private:
+			MappedFile m_file;
+			std::string m_filename;
+			bool m_inited;
+
+        public:
+			typedef T value_type;
+
+			mmap_allocator(const std::string& filename) :
+			  m_filename(filename),
+			  m_inited(false) {
+			}
+
+			mmap_allocator() :
+			  m_inited(false) {
+			}
+
+			T* allocate (size_t n) {
+			  if(m_inited) {
+				  m_file.reset(n);
+			  } else {
+				  m_inited = true;
+				  if(m_filename.empty()) {
+					  m_file.init(m_filename, n, true);
+				  } else {
+					  m_file.init(n, true);
+				  }
+			  }
+			  return reinterpret_cast<T*>(m_file.data());
+			}
+
+			void deallocate (T* p, size_t n) {
+			}
         };
 
         /**
