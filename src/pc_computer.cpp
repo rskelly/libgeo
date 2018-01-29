@@ -12,6 +12,28 @@
 #include "pointcloud.hpp"
 #include "pc_computer.hpp"
 
+IDWComputer::IDWComputer(double exponent) : exponent(exponent) {}
+
+double IDWComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
+	if(pts.empty())
+		return std::nan("");
+	double result = 0;
+	double div = 0;
+	for(const geo::pc::Point& pt : pts) {
+		double d = std::pow(x - pt.x(), 2.0) + std::pow(y - pt.y(), 2.0);
+		if(d == 0) {
+			result = pt.z();
+			div = 1;
+			break;
+		} else {
+			double w = std::pow(1 / d, exponent);
+			result += w * pt.z();
+			div += w;
+		}
+	}
+	return result / div;
+}
+
 double MeanComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
 	double sum = 0;
 	int count = 0;

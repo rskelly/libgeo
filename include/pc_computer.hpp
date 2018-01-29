@@ -10,6 +10,13 @@
 
 #include "pointcloud.hpp"
 
+class IDWComputer : public geo::pc::Computer {
+public:
+	double exponent;
+	IDWComputer(double exponent = 2);
+	double compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius);
+};
+
 class MeanComputer : public geo::pc::Computer {
 public:
 	double compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius);
