@@ -242,22 +242,75 @@ namespace geo {
 
         public:
 
-            // Create a mapped file with the given size.
+            /**
+             * Create a memory-mapped object (possibly file-backed) with the given name and size (in bytes).
+             * If the name is a filename and the file exists, the object assumes that this file contains
+             * data and should be treated as an already-mapped file. If the name does not describe an extant file
+             * a new file is created with that name. For anonymous memory segments, the name is not
+             * treated as a file, and is just used to identify the segment.
+             * @param name 				A name for the memory segment; a filename if the mapped memory is to be file-backed.
+             * @param size 				The number of bytes to map.
+             * @param fileBacked 		Set to true to cause the object to map memory to a file.
+             * @param deleteOnDestruct 	If true, the mapped file will be deleted on destruction.
+             */
 			MappedFile(const std::string& name, uint64_t size, bool fileBacked = false, bool deleteOnDestruct = true);
+
+            /**
+             * Create a memory-mapped object (possibly file-backed) with an automatically-assigned name.
+             * @param size 				The number of bytes to map.
+             * @param fileBacked 		Set to true to cause the object to map memory to a file.
+             * @param deleteOnDestruct 	If true, the mapped file will be deleted on destruction.
+             */
 			MappedFile(uint64_t size, bool fileBacked = false, bool deleteOnDestruct = true);
+
+            /**
+             * Create a memory-mapped object (possibly file-backed) with an automatically-assigned name.
+             */
 			MappedFile();
 
+            /**
+             * Initialize the object with the given size (in bytes).
+             * @param name 				A name for the memory segment; a filename if the mapped memory is to be file-backed.
+             * @param size 				The number of bytes to map.
+             * @param fileBacked 		Set to true to cause the object to map memory to a file.
+             * @param deleteOnDestruct 	If true, the mapped file will be deleted on destruction.
+             */
 			void init(size_t size, bool fileBacked, bool deleteOnDestruct = true);
 
+            /**
+             * Initialize the object with the given name and size (in bytes).
+             * If the name is a filename and the file exists, the object assumes that this file contains
+             * data and should be treated as an already-mapped file. If the name does not describe an extant file
+             * a new file is created with that name. For anonymous memory segments, the name is not
+             * treated as a file, and is just used to identify the segment.
+             * @param name 				A name for the memory segment; a filename if the mapped memory is to be file-backed.
+             * @param size 				The number of bytes to map.
+             * @param fileBacked 		Set to true to cause the object to map memory to a file.
+             * @param deleteOnDestruct 	If true, the mapped file will be deleted on destruction.
+             */
 			void init(const std::string& name, size_t size, bool fileBacked, bool deleteOnDestruct = true);
 
+			/**
+			 * Flush the memory.
+			 */
 			void flush();
 
+			/**
+			 * Return the name of the mapped memory segment. May be a filename for file-backed objects.
+			 * @return The name of the mapped memory segment.
+			 */
             const std::string& name() const;
 
+            /**
+             * Return the address of the mapped data.
+             * @return A pointer into the mapped segment.
+             */
             void* data();
 
-            // Resize the memory up or down.
+            /**
+             * Resize the mapped memory segment. Not currently shrinkable.
+             * @param The size in bytes of the resized segment.
+             */
             void reset(uint64_t size);
 
             // Return the page size.
@@ -269,7 +322,12 @@ namespace geo {
 
             ~MappedFile();
 
-            // Write the object to memory, resize if necessary.
+            /**
+             * Write the object to memory, resize if necessary.
+             * @param item 		The item to write.
+             * @param position	The offset to write to, relative to the start address of the segment.
+             * @return True if the operation is successful.
+             */
             template <class T>
             bool write(const T& item, uint64_t position) {
                 if(size() < position + sizeof(T))
@@ -278,10 +336,20 @@ namespace geo {
                 return true;
             }
 
-
+            /**
+             * Write the object to memory, resize if necessary.
+             * @param item 		The item to write.
+             * @param position	The offset to write to, relative to the start address of the segment.
+             * @return True if the operation is successful.
+             */
             bool write(void* input, uint64_t position, uint64_t size);
 
-            // Read the object from memory, return false if fails.
+            /**
+             * Read the object from memory.
+             * @param item 		The item to read.
+             * @param position	The offset to from, relative to the start address of the segment.
+             * @return True if the operation is successful.
+             */
             template <class T>
             bool read(T& item, uint64_t position) {
                 if(position + sizeof(T) > size())
@@ -290,6 +358,12 @@ namespace geo {
                 return true;
             }
 
+            /**
+             * Read the object from memory.
+             * @param item 		The item to read.
+             * @param position	The offset to from, relative to the start address of the segment.
+             * @return True if the operation is successful.
+             */
             bool read(void* output, uint64_t position, uint64_t size);
 
         };

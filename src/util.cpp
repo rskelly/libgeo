@@ -637,48 +637,39 @@ std::string Util::sha256File(const std::string& file) {
 	return std::string(outputBuffer);
 }
 
+
 using namespace boost::interprocess;
 
+std::string mapName() {
+	return Util::pathJoin(Util::tmpDir(), "geo_util_mapped_" + geo::crypto::UUID::uuid());
+}
+
+MappedFile::MappedFile() :
+		MappedFile(0, false, false) {
+}
+
+MappedFile::MappedFile(uint64_t size, bool fileBacked, bool deleteOnDestruct) :
+		MappedFile(mapName(), size, fileBacked, deleteOnDestruct) {
+}
+
 MappedFile::MappedFile(const std::string& name, uint64_t size, bool fileBacked, bool deleteOnDestruct) :
-	m_size(0),
+	m_size(size),
 	m_name(name),
 	m_region(nullptr),
 	m_shm(nullptr),
 	m_fm(nullptr),
 	m_fileBacked(fileBacked),
 	m_deleteOnDestruct(deleteOnDestruct),
-	m_fileExists(Util::exists(name)),
-	m_fileInited(false) {
-
-	if (size > 0)
-		reset(size);
-}
-
-MappedFile::MappedFile(uint64_t size, bool fileBacked, bool deleteOnDestruct) :
-	m_size(0),
-	m_name(Util::pathJoin(Util::tmpDir(), "geo_util_mapped_" + geo::crypto::UUID::uuid())),
-	m_region(nullptr),
-	m_shm(nullptr),
-	m_fm(nullptr),
-	m_fileBacked(fileBacked),
-	m_deleteOnDestruct(deleteOnDestruct),
 	m_fileExists(false),
 	m_fileInited(false) {
 
+	if(m_fileBacked && Util::exists(name)) {
+		m_fileExists = true;
+		m_deleteOnDestruct = false;
+	}
+
 	if (size > 0)
 		reset(size);
-}
-
-MappedFile::MappedFile() :
-	m_size(0),
-	m_name(Util::pathJoin(Util::tmpDir(), "geo_util_mapped_" + geo::crypto::UUID::uuid())),
-	m_region(nullptr),
-	m_shm(nullptr),
-	m_fm(nullptr),
-	m_fileBacked(false),
-	m_deleteOnDestruct(true),
-	m_fileExists(false),
-	m_fileInited(false) {
 }
 
 void MappedFile::flush() {
@@ -687,16 +678,21 @@ void MappedFile::flush() {
 }
 
 void MappedFile::init(size_t size, bool fileBacked, bool deleteOnDestruct) {
-	m_fileBacked = fileBacked;
-	m_deleteOnDestruct = deleteOnDestruct;
-	reset(size);
+	init(mapName(), size, fileBacked, deleteOnDestruct);
 }
 
 void MappedFile::init(const std::string& name, size_t size, bool fileBacked, bool deleteOnDestruct) {
 	m_name = name;
 	m_fileBacked = fileBacked;
 	m_deleteOnDestruct = deleteOnDestruct;
-	reset(size);
+
+	if(m_fileBacked && Util::exists(name)) {
+		m_fileExists = true;
+		m_deleteOnDestruct = false;
+	}
+
+	if(size > 0)
+		reset(size);
 }
 
 const std::string& MappedFile::name() const {
@@ -739,7 +735,7 @@ void MappedFile::reset(uint64_t size) {
 
 		if(m_fileBacked) {
 			if(!m_fileExists) {
-				if(!m_fileInited && !Util::exists(m_name)) {
+				if(!m_fileInited) {
 					std::filebuf fbuf;
 					fbuf.open(m_name, std::ios_base::in | std::ios_base::out | std::ios_base::trunc | std::ios_base::binary);
 					fbuf.pubseekoff(m_size - 1, std::ios_base::beg);
