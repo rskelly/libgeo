@@ -480,7 +480,21 @@ double geo::pc::Point::value() const {
 }
 
 geo::pc::Point::~Point() {
+	if(m_point)
+		delete m_point;
 }
+
+typedef struct {
+	size_t idx;
+	size_t nextLine;
+	size_t count;
+} MappedLine;
+
+typedef struct {
+	double x;
+	double y;
+	double z;
+} MappedPoint;
 
 class MemGrid {
 private:
@@ -490,95 +504,140 @@ private:
 	size_t m_currentLine;
 	size_t m_lineLength;
 	size_t m_totalLength;
-	std::unordered_map<size_t, std::vector<size_t> > m_lines;	///< The current position in the data for idx. May be spread across segments.
-	std::unordered_map<size_t, size_t> m_positions;				///< The start indices of the lines for an index. Modulus to get the line index.
+	std::string m_mapFile;
 
 	void resize(size_t size) {
+		std::cerr << "resize " << size << "\n";
 		m_mapped.reset(size);
 		m_totalLength = size;
 	}
 
+	// row structure: idx (size_t -> 8 bytes) | next line (size_t -> 8 bytes) | count (size_t -> 8 bytes) | points (3 * double * n)
+	// row length = 8 + 8 + 8 + (3 * 8) * n; n = m_lineCount
+	// if the count >= line count, the next row must be set.
+
 	void writePoint(size_t idx, double x, double y, double z) {
-		size_t line;
-		size_t pos;
-		if(m_positions.find(idx) == m_positions.end()) {
-			// If there's no entry for this pixel, start one.
-			pos = 0;
-			line = m_currentLine++;
-			m_lines[idx].push_back(line);
-			m_positions[idx] = pos;
+		char* data = (char*) m_mapped.data();
+		size_t offset = idx * m_lineLength;
+		MappedPoint mp = {x, y, z};
+		MappedLine ml;
+		std::memcpy(&ml, data + offset, sizeof(MappedLine));
+		if(ml.idx != idx) {
+			// There is no record in the points file; start one.
+			ml.idx = idx;
+			ml.count = 1;
+			ml.nextLine = 0;
+			std::memcpy(data + offset, &ml, sizeof(MappedLine));
+			std::memcpy(data + offset + sizeof(MappedLine), &mp, sizeof(MappedPoint));
 		} else {
-			pos = m_positions[idx];
-			size_t i = pos / m_lineCount;
-			std::vector<size_t>& lines = m_lines[idx];
-			if(i >= lines.size()) {
-				// If the current position is beyond the end of the
-				// last line, start a new one.
-				line = m_currentLine++;
-				lines.push_back(line);
+			// Get the current line start and try to add to it.
+			while(ml.nextLine) {
+				offset = ml.nextLine * m_lineLength;
+				std::memcpy(&ml, data + offset, sizeof(MappedLine));
+			}
+			if(ml.count == m_lineCount) {
+				// If the line is full, update the nextLine and start a new one.
+				ml.nextLine = m_currentLine++;
+				std::memcpy(data + offset, &ml, sizeof(MappedLine));
+				if(ml.nextLine * m_lineLength >= m_totalLength) {
+					resize(m_totalLength * 2);
+					data = (char*) m_mapped.data();
+				}
+				offset = ml.nextLine * m_lineLength;
+				ml.nextLine = 0;
+				ml.count = 1;
+				std::memcpy(data + offset, &ml, sizeof(MappedLine));
+				std::memcpy(data + offset + sizeof(MappedLine), &mp, sizeof(MappedPoint));
 			} else {
-				// Otherwise use the line corresponding to the position.
-				line = lines[i];
+				size_t count = ml.count++;
+				std::memcpy(data + offset, &ml, sizeof(MappedLine));
+				offset += sizeof(MappedLine) + count * sizeof(MappedPoint);
+				std::memcpy(data + offset, &mp, sizeof(MappedPoint));
 			}
 		}
-		// Skip to the line, then advance by the position.
-		size_t offset = line * m_lineCount + pos % m_lineCount;
-		// If the offset is beyond the end of the file, extend the buffer.
-		if(offset * sizeof(double) >= m_totalLength)
-			resize(m_totalLength * 2);
-		// Get the address at offset.
-		double* buf = ((double*) m_mapped.data()) + offset;
-		*buf = x;
-		*(buf + 1) = y;
-		*(buf + 2) = z;
-		m_positions[idx] = pos + 3;
 	}
 
 	size_t readPoints(size_t idx, std::vector<geo::pc::Point>& pts) {
-		if(m_lines.find(idx) == m_lines.end())
-			return 0;
-		double* data = (double*) m_mapped.data();
-		std::vector<size_t>& lines = m_lines[idx];
+		char* data = (char*) m_mapped.data();
+		size_t offset = idx * m_lineLength;
 		size_t count = 0;
-		size_t maxPos = m_positions[idx];
-		size_t pos = 0;
-		while(pos < maxPos) {
-			size_t offset = lines[pos / m_lineCount] * m_lineCount;
-			double* buf = data + offset;
-			for(size_t p = 0;p < m_lineCount && (pos + p) < maxPos; p += 3) {
-				pts.emplace_back(*buf, *(buf + 1), *(buf + 2));
-				buf += 3;
+		MappedLine ml;
+		MappedPoint mp;
+		do {
+			char* buf = data + offset;
+			std::memcpy(&ml, buf, sizeof(MappedLine));
+			if(ml.idx != idx)
+				break;
+			buf += sizeof(MappedLine);
+			for(size_t i = 0; i < ml.count; ++i) {
+				std::memcpy(&mp, buf, sizeof(MappedPoint));
+				pts.emplace_back(mp.x, mp.y, mp.z);
+				buf += sizeof(MappedPoint);
 				++count;
 			}
-			pos += m_lineCount;
-		}
+			offset = ml.nextLine * m_lineLength;
+		} while(ml.nextLine);
 		return count;
 	}
 
 public:
 
-	MemGrid(size_t cellCount, size_t lineCount = 512) :
-		m_lineCount(lineCount * 3),
-		m_cellCount(cellCount),
+	MemGrid() :
+		m_lineCount(0),
+		m_cellCount(0),
 		m_currentLine(0),
-		m_lineLength(m_lineCount * sizeof(double)),
-		m_totalLength(cellCount * m_lineLength) {
+		m_lineLength(0),
+		m_totalLength(0) {
+	}
+
+	MemGrid(size_t cellCount, size_t lineCount = 128) {
+		init(cellCount, lineCount);
+	}
+
+	MemGrid(const std::string& mapFile, size_t cellCount, size_t lineCount = 128) {
+		init(mapFile, cellCount, lineCount);
+	}
+
+	void init(const std::string& mapFile, size_t cellCount, size_t lineCount = 128) {
+		m_lineCount = lineCount;
+		m_cellCount = cellCount;
+		m_currentLine = cellCount;
+		m_lineLength = sizeof(size_t) * 3 + sizeof(double) * 3 * m_lineCount;
+		m_totalLength = cellCount * m_lineLength;
+		m_mapFile = mapFile;
+
+		if(mapFile.empty()) {
+			m_mapped.init(m_totalLength, true);
+		} else {
+			m_mapped.init(mapFile, m_totalLength, true);
+		}
+	}
+
+	void init(size_t cellCount, size_t lineCount = 128) {
+		m_cellCount = cellCount;
+		m_lineCount = lineCount;
+		m_currentLine = cellCount;
+		m_lineLength = sizeof(size_t) * 3 + sizeof(double) * 3 * m_lineCount;
+		m_totalLength = cellCount * m_lineLength;
 
 		m_mapped.init(m_totalLength, true);
 	}
 
-	void add(int col, int row, double x, double y, double z) {
-		size_t idx = ((size_t) row << 32) | col;
+	void add(size_t idx, double x, double y, double z) {
 		writePoint(idx, x, y, z);
 	}
 
-	size_t get(size_t col, size_t row, std::vector<geo::pc::Point>& out) {
-		size_t idx = (row << 32) | col;
+	size_t get(size_t idx, std::vector<geo::pc::Point>& out) {
 		return readPoints(idx, out);
 	}
 
+	void flush() {
+		m_mapped.flush();
+	}
+
 	~MemGrid() {
-		Util::rm(m_mapped.name());
+		if(m_mapFile.empty())
+			Util::rm(m_mapped.name());
 	}
 };
 
@@ -646,7 +705,8 @@ bool Rasterizer::filter(const geo::pc::Point& pt) const {
 }
 
 void Rasterizer::rasterize(const std::string& filename, const std::vector<std::string>& types,
-		double res,	double easting, double northing, double radius, int srid, int density, double ext) {
+		double res,	double easting, double northing, double radius, int srid, int density, double ext,
+		const std::string& mapFile) {
 
 	std::vector<std::unique_ptr<Computer> > computers;
 	for(const std::string& name : types)
@@ -684,38 +744,52 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	Raster rast(filename, props);
 
 	liblas::ReaderFactory fact;
-	MemGrid grid(cols * rows, density);
+	MemGrid grid;
 
-	// The squared radius for comparison.
-	double rad0 = radius * radius;
-	// The radius of the "box" of pixels to check for a claim on the current point.
-	int radpx = (int) std::ceil(radius / std::abs(props.resolutionX()));
-	int i = 0;
-	for(PCFile& file : m_files) {
-		std::cerr << "Reading file " << i++ << " of " << m_files.size() << ".\n";
-		for(const std::string& filename : file.filenames()) {
-			std::ifstream str(filename);
-			liblas::Reader rdr = fact.CreateWithStream(str);
-			while(rdr.ReadNextPoint()) {
-				const geo::pc::Point pt(rdr.GetPoint());
-				if(filter(pt)) { // TODO: Configurable.
-					double x = pt.x();
-					double y = pt.y();
-					double z = pt.z();
-					int col = props.toCol(x);
-					int row = props.toRow(y);
-					for(int r = row - radpx; r < row + radpx + 1; ++r) {
-						for(int c = col - radpx; c < col + radpx + 1; ++c) {
-							double cx = props.toX(c);
-							double cy = props.toY(r);
-							double dist = std::pow(cx - x, 2.0) + std::pow(cy - y, 2.0);
-							if(dist <= rad0)
-								grid.add(c, r, x, y, z);
+	if(mapFile.empty()) {
+		grid.init(cols * rows, density);
+
+		// The squared radius for comparison.
+		double rad0 = radius * radius;
+		// The radius of the "box" of pixels to check for a claim on the current point.
+		int radpx = (int) std::ceil(radius / std::abs(props.resolutionX()));
+		double xOffset = props.resolutionX() * 0.5;
+		double yOffset = props.resolutionY() * 0.5;
+		int i = 0;
+		for(PCFile& file : m_files) {
+			std::cerr << "Reading file " << i++ << " of " << m_files.size() << ".\n";
+			for(const std::string& filename : file.filenames()) {
+				std::ifstream str(filename);
+				liblas::Reader rdr = fact.CreateWithStream(str);
+				while(rdr.ReadNextPoint()) {
+					const geo::pc::Point pt(rdr.GetPoint());
+					if(filter(pt)) { // TODO: Configurable.
+						double x = pt.x();
+						double y = pt.y();
+						double z = pt.z();
+						int col = props.toCol(x);
+						int row = props.toRow(y);
+						if(radius == 0) {
+							grid.add(row * cols + col, x, y, z);
+						} else {
+							for(int r = row - radpx; r < row + radpx + 1; ++r) {
+								if(r < 0 || r >= rows) continue;
+								for(int c = col - radpx; c < col + radpx + 1; ++c) {
+									if(c < 0 || c >= cols) continue;
+									double cx = props.toX(c) + xOffset;
+									double cy = props.toY(r) + yOffset;
+									double dist = std::pow(cx - x, 2.0) + std::pow(cy - y, 2.0);
+									if(dist <= rad0)
+										grid.add(r * cols + c, x, y, z);
+								}
+							}
 						}
 					}
 				}
 			}
 		}
+	} else {
+		grid.init(mapFile, cols * rows, density);
 	}
 
 	std::vector<geo::pc::Point> values;
@@ -723,7 +797,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 		if(r % 100 == 0)
 			std::cerr << "Row " << r << " of " << rows << "\n";
 		for(size_t c = 0; c < (size_t) cols; ++c) {
-			size_t count = grid.get(c, r, values);
+			size_t count = grid.get(r * cols + c, values);
 			rast.setFloat((int) c, (int) r, count, 1);
 			if(count) {
 				double x = props.toX(c) + props.resolutionX();

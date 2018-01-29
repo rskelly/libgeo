@@ -20,7 +20,9 @@ void usage() {
 			<< "                 (defaults to nearest multiple of resolution).\n"
 			<< " -n <northing>   The top left corner vertical alignment\n"
 			<< "                 (defaults to nearest whole multiple of resolution).\n"
-			<< " -d <radius>     The search radius for finding points.\n"
+			<< " -d <radius>     The search radius for finding points. Set to zero"
+			<< "                 to use the rectangular cell bounds. Defaults to root"
+			<< "                 of 1/2 cell diagonal (a circle that touches the corners.\n"
 			<< " -s <srid>       The spatial reference ID. Default 0.\n"
 			<< " -m <methods>    Comma-separated list of statistics to compute; one on each \n"
 			<< "                 layer (see below.) Default mean.\n"
@@ -46,9 +48,10 @@ int main(int argc, char** argv) {
 	double res = 0;
 	double easting = 0;
 	double northing = 0;
-	double radius = 0;
+	double radius = -1;
 	int density = 64;
 	uint16_t srid = 0;
+	std::string mapFile;
 	std::vector<std::string> types;
 	std::vector<std::string> args;
 
@@ -57,6 +60,8 @@ int main(int argc, char** argv) {
 		if(v == "-m") {
 			std::string type = argv[++i];
 			Util::splitString(std::back_inserter(types), Util::lower(type), ",");
+		} else if(v == "-f") {
+			mapFile = argv[++i];
 		} else if(v == "-r") {
 			res = atof(argv[++i]);
 		} else if(v == "-i") {
@@ -84,6 +89,11 @@ int main(int argc, char** argv) {
 		return 1;
 	}
 
+	if(radius < 0)
+		radius = std::sqrt(std::pow(res / 2, 2) * 2);
+
+	std::cerr << "Radius: " << radius << "\n";
+
 	if(args.size() < 2) {
 		std::cerr << "Input and output filenames required.\n";
 		usage();
@@ -94,7 +104,7 @@ int main(int argc, char** argv) {
 
 	try {
 		geo::pc::Rasterizer r(infiles);
-		r.rasterize(args[0], types, res, easting, northing, radius, srid, density, 0);
+		r.rasterize(args[0], types, res, easting, northing, radius, srid, density, 0, mapFile);
 	} catch(const std::exception& ex) {
 		std::cerr << ex.what() << "\n";
 		usage();
