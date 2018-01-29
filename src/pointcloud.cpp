@@ -152,8 +152,8 @@ void PCWriter::deleteOnDestruct(bool dod) {
 
 void PCWriter::close() {
 	if(m_writer) {
-		m_header->SetMin(m_outBounds[0], m_outBounds[2], m_outBounds[4]);
-		m_header->SetMax(m_outBounds[1], m_outBounds[3], m_outBounds[5]);
+		m_header->SetMin(m_outBounds[0], m_outBounds[1], m_outBounds[4]);
+		m_header->SetMax(m_outBounds[2], m_outBounds[3], m_outBounds[5]);
 		for(int i = 0; i < 5; ++i)
 			m_header->SetPointRecordsByReturnCount(i, m_retNum[i]);
 		m_header->SetPointRecordsCount(m_returns);
@@ -662,7 +662,8 @@ const std::unordered_map<std::string, std::string> computerNames = {
 		{"mean", "The mean value"},
 		{"variance", "The variance with n-1"},
 		{"std-dev", "The standard deviation with n-1"},
-		{"rugosity-acr", "The arc-chord rugosity (DuPreez, 2004)"}
+		{"rugosity-acr", "The arc-chord rugosity (DuPreez, 2004)"},
+		{"idw-2", "Inverse distance weighting; coefficient 2"}
 };
 
 Computer* getComputer(const std::string& name) {
@@ -687,11 +688,13 @@ Computer* getComputer(const std::string& name) {
 	} else if(name == "variance") { 			return new VarianceComputer();
 	} else if(name == "std-dev") { 				return new StdDevComputer();
 	} else if(name == "rugosity-acr") { 		return new RugosityComputer();
+	} else if(name == "iwd-2") {				return new IDWComputer();
 	}
 	g_runerr("Unknown computer name: " << name);
 }
 
-Rasterizer::Rasterizer(const std::vector<std::string> filenames) {
+Rasterizer::Rasterizer(const std::vector<std::string> filenames) :
+	m_filter(nullptr) {
 	for(const std::string& filename : filenames)
 		m_files.emplace_back(filename);
 }
@@ -701,7 +704,11 @@ const std::unordered_map<std::string, std::string>& Rasterizer::availableCompute
 }
 
 bool Rasterizer::filter(const geo::pc::Point& pt) const {
-	return pt.classId() == 2;
+	if(m_filter) {
+		return m_filter->keep(pt);
+	} else {
+		return true;
+	}
 }
 
 void Rasterizer::rasterize(const std::string& filename, const std::vector<std::string>& types,
@@ -732,6 +739,9 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 
 	int cols = (int) ((bounds[2] - bounds[0]) / res) + 1;
 	int rows = (int) ((bounds[3] - bounds[1]) / res) + 1;
+
+	std::cerr << "cols " << cols << "; rows " << rows << "\n";
+	std::cerr << "bounds " << bounds[0] << ", " << bounds[1] << ", " << bounds[2] << ", " << bounds[3] << "\n";
 
 	GridProps props;
 	props.setTrans(easting, res, northing, -res);
@@ -815,5 +825,13 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	}
 }
 
+void Rasterizer::setFilter(const PCPointFilter& filter) {
+	if(m_filter)
+		delete m_filter;
+	m_filter = new PCPointFilter(filter);
+}
+
 Rasterizer::~Rasterizer() {
+	if(m_filter)
+		delete m_filter;
 }
