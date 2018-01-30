@@ -250,6 +250,9 @@ void Tiler::tile(const std::string& outdir, double size, double buffer, int srid
 
 	std::cerr << std::setprecision(12);
 
+	if(buffer < 0)
+		g_runerr("Negative buffer is not allowed. Use easting, northing and tile size to crop tiles.");
+
 	// Calculate the overall bounds of the file set.
 	double allBounds[6] = {9999999999., 9999999999., -9999999999., -9999999999., 999999999., -999999999.};
 	double fBounds[6];
@@ -267,16 +270,21 @@ void Tiler::tile(const std::string& outdir, double size, double buffer, int srid
 
 	// If the easting and northing aren't given, calculate as a
 	// multiple of size.
-	if(std::isnan(easting))
+	if(std::isnan(easting) || std::isnan(northing)) {
 		easting = ((int) (allBounds[0] / size)) * size - size;
-	if(std::isnan(northing))
 		northing = ((int) (allBounds[1] / size)) * size - size;
 
-	// Reset the bounds using easting, northing and multiples of size.
-	allBounds[0] = easting;
-	allBounds[1] = northing;
-	allBounds[2] = std::ceil(allBounds[2] / size) * size + size;
-	allBounds[3] = std::ceil(allBounds[3] / size) * size + size;
+		// Reset the bounds using easting, northing and multiples of size.
+		allBounds[0] = easting;
+		allBounds[1] = northing;
+		allBounds[2] = std::ceil(allBounds[2] / size) * size + size;
+		allBounds[3] = std::ceil(allBounds[3] / size) * size + size;
+	} else {
+		allBounds[0] = easting;
+		allBounds[1] = northing;
+		allBounds[2] = easting + size;
+		allBounds[3] = northing + size;
+	}
 
 	// Compute the number of columns and rows of tiles.
 	int cols = (int) (allBounds[2] - allBounds[0]) / size;
@@ -478,6 +486,23 @@ double geo::pc::Point::z() const {
 double geo::pc::Point::value() const {
 	return m_z;
 }
+
+double geo::pc::Point::intensity() const {
+	return m_point ? m_point->GetIntensity() : 0;
+}
+
+double geo::pc::Point::scanAngle() const {
+	return m_point ? m_point->GetScanAngleRank() : 0;
+}
+
+bool geo::pc::Point::isEdge() const {
+	return m_point ? m_point->GetFlightLineEdge() : false;
+}
+
+int geo::pc::Point::returnNum() const {
+	return m_point ? m_point->GetReturnNumber() : 0;
+}
+
 
 geo::pc::Point::~Point() {
 	if(m_point)

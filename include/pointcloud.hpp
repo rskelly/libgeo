@@ -397,7 +397,7 @@ public:
 	bool keep(const geo::pc::Point& pt) const {
 		if(pt.z() < minZ || pt.z() > maxZ ||
 				pt.intensity() < minIntensity || pt.intensity() > maxIntensity ||
-				pt.scanAngle() < minScanAngle || pt.scanAngle() > maxScanAngle() ||
+				pt.scanAngle() < minScanAngle || pt.scanAngle() > maxScanAngle ||
 				(pt.isEdge() && !keepEdges))
 			return false;
 		if(!classes.empty()) {
