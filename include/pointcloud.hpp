@@ -41,7 +41,9 @@ class PCFile {
 private:
 	double m_x;								///< Minimum corner x-coordinate.
 	double m_y;								///< Minimum corner y-coordinate.
-	double m_bounds[6];						///< The bounding box of the actual point cloud (may differ from tile bounds.)
+	double m_fileBounds[6];					///< The bounding box of the actual point cloud (may differ from tile bounds.)
+	double m_bounds[4];						///< The nominal bounding box.
+	double m_bufferedBounds[4];				///< The buffered bounding box.
 	std::vector<std::string> m_filenames;	///< The list of filenames of consituent files.
 
 public:
@@ -52,7 +54,7 @@ public:
 	 * @param x 		The minimum x-coordinate.
 	 * @param y 		The minimum y-coordinate.
 	 */
-	PCFile(const std::string& filename, double x = 0, double y = 0);
+	PCFile(const std::string& filename, double x = 0, double y = 0, double size = 0, double buffer = 0);
 
 	/**
 	 * Construct a PCFile object using the given filenames and corner coordinate.
@@ -60,7 +62,9 @@ public:
 	 * @param x 		The minimum x-coordinate.
 	 * @param y 		The minimum y-coordinate.
 	 */
-	PCFile(const std::vector<std::string>& filenames, double x = 0, double y = 0);
+	PCFile(const std::vector<std::string>& filenames, double x = 0, double y = 0, double size = 0, double buffer = 0);
+
+	void resize(double x, double y, double size, double buffer);
 
 	/**
 	 * Get the minimum x-coordinate.
@@ -79,12 +83,36 @@ public:
 	 * There are six elements.
 	 * @param bounds A six-element array of doubles, which is overwritten.
 	 */
+	void fileBounds(double* bounds) const;
+
+	/**
+	 * Populates the given array with the nominal bounds of this instance.
+	 * There are four elements.
+	 * @param bounds A four-element array of doubles, which is overwritten.
+	 */
 	void bounds(double* bounds) const;
+
+	/**
+	 * Populates the given array with the buffered nominal bounds of this instance.
+	 * There are four elements.
+	 * @param bounds A four-element array of doubles, which is overwritten.
+	 */
+	void bufferedBounds(double* bounds) const;
 
 	/**
 	 * Returns a reference to the filenames list.
 	 */
 	const std::vector<std::string>& filenames() const;
+
+	/**
+	 * Returns true if the point is within the unbuffered bounds of the tile.
+	 */
+	bool contains(double x, double y) const;
+
+	/**
+	 * Returns true if the point is within the buffered bounds of the tile.
+	 */
+	bool containsBuffered(double x, double y) const;
 
 	/**
 	 * Initialize the last file. Currently just computes its bounds. If
@@ -107,6 +135,8 @@ private:
 	int m_returns;							///< The number of returns (points) in the current file.
 	int m_retNum[5];						///< The number of points for each return in the current file.
 	long m_totalReturns;					///< The total count of returns across all files.
+	double m_bounds[4];						///< The bounding box of the point cloud (may differ from the tile's bounds).
+	double m_bufferedBounds[4];				///< The bounding box of the point cloud (may differ from the tile's bounds).
 	double m_outBounds[6];					///< The bounding box of the point cloud (may differ from the tile's bounds).
 	double m_x;								///< The minimum x-coordinate of the tile.
 	double m_y;								///< The minimum y-coordinate of the tile.
@@ -116,6 +146,8 @@ private:
 	liblas::Header* m_header;				///< The liblas {liblas::Header} instance.
 	std::ofstream m_str;					///< The current output stream.
 	bool m_dod;								///< Set to true if constituent files should be deleted on destruction.
+	double m_buffer;						///< The size of the buffer on all sides.
+	double m_size;
 
 	/**
 	 * Creates and returns the next filename in the series for this tile.
@@ -132,7 +164,9 @@ public:
 	 * @param x 		The minimum x-coordinate of the tile.
 	 * @param y 		The minimum y-coordinate of the tile.
 	 */
-	PCWriter(const std::string& filename, const liblas::Header& hdr, double x = 0, double y = 0);
+	PCWriter(const std::string& filename, const liblas::Header& hdr, double x, double y, double size, double buffer);
+
+	PCWriter(PCWriter&& other);
 
 	/**
 	 * Get the minimum x-coordinate.
@@ -147,9 +181,35 @@ public:
 	double y() const;
 
 	/**
+	 * Get the tile size for this writer.
+	 * @return The tile size.
+	 */
+	double size() const;
+
+	/**
+	 * The number of points written.
+	 * @return The number of points written.
+	 */
+	size_t count() const;
+
+	/**
 	 * Populates the given array with the bounds of this instance.
 	 * There are six elements.
 	 * @param bounds A six-element array of doubles, which is overwritten.
+	 */
+	void outBounds(double* bounds) const;
+
+	/**
+	 * Populates the given array with the buffered bounds of this instance.
+	 * There are six elements.
+	 * @param bounds A four-element array of doubles, which is overwritten.
+	 */
+	void bufferedBounds(double* bounds) const;
+
+	/**
+	 * Populates the given array with the nominal bounds of this instance.
+	 * There are six elements.
+	 * @param bounds A four-element array of doubles, which is overwritten.
 	 */
 	void bounds(double* bounds) const;
 
@@ -184,6 +244,24 @@ public:
 	void addPoint(const liblas::Point& pt);
 
 	/**
+	 * Returns true if the given coordinate is within the bounds of this tile's
+	 * geographic extent. "Within" means greater than or equal to the minimum
+	 * bound and less than the maximum.
+	 * @param x The x-coordinate.
+	 * @param y The y-coordinate.
+	 */
+	bool contains(double x, double y) const;
+
+	/**
+	 * Returns true if the given coordinate is within the bounds of this tile's
+	 * buffered extent. "Within" means greater than or equal to the minimum
+	 * bound and less than the maximum.
+	 * @param x The x-coordinate.
+	 * @param y The y-coordinate.
+	 */
+	bool containsBuffered(double x, double y) const;
+
+	/**
 	 * Destroy the writer. Will close any open files, and, if {dod} is set to
 	 * true, will delete constituent files.
 	 */
@@ -200,7 +278,7 @@ class Tile {
 private:
 	double m_bounds[4];						///< The geographic bounds of the tile.
 	double m_bufferedBounds[4];				///< The buffered extent of the tile.
-	std::unique_ptr<PCWriter> m_writer;	///< The PCWriter used for writing points.
+	std::unique_ptr<PCWriter> m_writer;		///< The PCWriter used for writing points.
 
 public:
 	/**

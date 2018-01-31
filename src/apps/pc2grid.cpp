@@ -30,7 +30,8 @@ void usage() {
 			<< "                 For percentile, use the form, 'percenile:n', where\n"
 			<< "                 n is the percentile (no % sign); 1 - 99.\n"
 			<< " -i <density>    The estimated number of points per cell underestimating this\n"
-			<< "                 saves disk space at the cost of efficiency.\n";
+			<< "                 saves disk space at the cost of efficiency.\n"
+			<< " -c <class(es)>  Comma-delimited list of classes to keep.\n";
 
 	std::cerr << " Available computers: \n";
 	for(auto& item : geo::pc::Rasterizer::availableComputers())
@@ -54,12 +55,19 @@ int main(int argc, char** argv) {
 	std::string mapFile;
 	std::vector<std::string> types;
 	std::vector<std::string> args;
+	geo::pc::PCPointFilter filter;
 
 	for(int i = 1; i < argc; ++i) {
 		std::string v = argv[i];
 		if(v == "-m") {
 			std::string type = argv[++i];
 			Util::splitString(std::back_inserter(types), Util::lower(type), ",");
+		} else if(v == "-c") {
+			std::vector<std::string> tmp;
+			std::string cls = argv[++i];
+			Util::splitString(std::back_inserter(tmp), cls);
+			for(const std::string& t : tmp)
+				filter.classes.push_back(atoi(t.c_str()));
 		} else if(v == "-f") {
 			mapFile = argv[++i];
 		} else if(v == "-r") {
@@ -104,6 +112,7 @@ int main(int argc, char** argv) {
 
 	try {
 		geo::pc::Rasterizer r(infiles);
+		r.setFilter(filter);
 		r.rasterize(args[0], types, res, easting, northing, radius, srid, density, 0, mapFile);
 	} catch(const std::exception& ex) {
 		std::cerr << ex.what() << "\n";

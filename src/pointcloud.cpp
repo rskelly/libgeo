@@ -28,17 +28,34 @@ using namespace geo::raster;
 using namespace geo::util;
 using namespace geo::pc;
 
-PCFile::PCFile(const std::string& filename, double x, double y) :
+PCFile::PCFile(const std::string& filename, double x, double y, double size, double buffer) :
 	m_x(x), m_y(y),
-	m_bounds{99999999., 99999999., -999999999., -99999999., 99999999., -99999999.} {
+	m_fileBounds{99999999., 99999999., -999999999., -99999999., 99999999., -99999999.},
+	m_bounds{x, y, x + size, y + size},
+	m_bufferedBounds{x - buffer, y - buffer, x + size + buffer, y + size + buffer} {
 
 	m_filenames.push_back(filename);
 }
 
-PCFile::PCFile(const std::vector<std::string>& filenames, double x, double y) :
+PCFile::PCFile(const std::vector<std::string>& filenames, double x, double y, double size, double buffer) :
 	m_x(x), m_y(y),
-	m_bounds{99999999., 99999999., -999999999., -99999999., 99999999., -99999999.},
+	m_fileBounds{99999999., 99999999., -999999999., -99999999., 99999999., -99999999.},
+	m_bounds{x, y, x + size, y + size},
+	m_bufferedBounds{x - buffer, y - buffer, x + size + buffer, y + size + buffer},
 	m_filenames(filenames) {
+}
+
+void PCFile::resize(double x, double y, double size, double buffer) {
+	m_x = x;
+	m_y = y;
+	m_bounds[0] = x;
+	m_bounds[1] = y;
+	m_bounds[2] = x + size;
+	m_bounds[3] = y + size;
+	m_bufferedBounds[0] = x - buffer;
+	m_bufferedBounds[1] = y - buffer;
+	m_bufferedBounds[2] = x + size + buffer;
+	m_bufferedBounds[3] = y + size + buffer;
 }
 
 double PCFile::x() const {
@@ -49,9 +66,19 @@ double PCFile::y() const {
 	return m_y;
 }
 
-void PCFile::bounds(double* bounds) const {
+void PCFile::fileBounds(double* bounds) const {
 	for(int i = 0; i < 6; ++i)
+		bounds[i] = m_fileBounds[i];
+}
+
+void PCFile::bounds(double* bounds) const {
+	for(int i = 0; i < 4; ++i)
 		bounds[i] = m_bounds[i];
+}
+
+void PCFile::bufferedBounds(double* bounds) const {
+	for(int i = 0; i < 4; ++i)
+		bounds[i] = m_bufferedBounds[i];
 }
 
 const std::vector<std::string>& PCFile::filenames() const {
@@ -71,27 +98,35 @@ void PCFile::init(bool useHeader) {
 			double maxx = hdr.GetMaxX();
 			double maxy = hdr.GetMaxY();
 			double maxz = hdr.GetMaxZ();
-			if(minx < m_bounds[0]) m_bounds[0] = minx;
-			if(miny < m_bounds[1]) m_bounds[1] = miny;
-			if(maxx > m_bounds[2]) m_bounds[2] = maxx;
-			if(maxy > m_bounds[3]) m_bounds[3] = maxy;
-			if(minz < m_bounds[4]) m_bounds[4] = minz;
-			if(maxz > m_bounds[5]) m_bounds[5] = maxz;
+			if(minx < m_fileBounds[0]) m_fileBounds[0] = minx;
+			if(miny < m_fileBounds[1]) m_fileBounds[1] = miny;
+			if(maxx > m_fileBounds[2]) m_fileBounds[2] = maxx;
+			if(maxy > m_fileBounds[3]) m_fileBounds[3] = maxy;
+			if(minz < m_fileBounds[4]) m_fileBounds[4] = minz;
+			if(maxz > m_fileBounds[5]) m_fileBounds[5] = maxz;
 		} else {
 			while(reader.ReadNextPoint()) {
 				const liblas::Point& pt = reader.GetPoint();
 				double x = pt.GetX();
 				double y = pt.GetY();
 				double z = pt.GetZ();
-				if(x < m_bounds[0]) m_bounds[0] = x;
-				if(y < m_bounds[1]) m_bounds[1] = y;
-				if(x > m_bounds[2]) m_bounds[2] = x;
-				if(y > m_bounds[3]) m_bounds[3] = y;
-				if(z < m_bounds[4]) m_bounds[4] = z;
-				if(z > m_bounds[5]) m_bounds[5] = z;
+				if(x < m_fileBounds[0]) m_fileBounds[0] = x;
+				if(y < m_fileBounds[1]) m_fileBounds[1] = y;
+				if(x > m_fileBounds[2]) m_fileBounds[2] = x;
+				if(y > m_fileBounds[3]) m_fileBounds[3] = y;
+				if(z < m_fileBounds[4]) m_fileBounds[4] = z;
+				if(z > m_fileBounds[5]) m_fileBounds[5] = z;
 			}
 		}
 	}
+}
+
+bool PCFile::contains(double x, double y) const {
+	return x >= m_bounds[0] && x < m_bounds[2]  && y >= m_bounds[1] && y < m_bounds[3];
+}
+
+bool PCFile::containsBuffered(double x, double y) const {
+	return x >= m_bufferedBounds[0] && x < m_bufferedBounds[2] && y >= m_bufferedBounds[1] && y < m_bufferedBounds[3];
 }
 
 PCFile::~PCFile() {}
@@ -99,20 +134,26 @@ PCFile::~PCFile() {}
 
 const long maxPoints = 20000000;
 
-PCWriter::PCWriter(const std::string& filename, const liblas::Header& hdr, double x, double y) :
+PCWriter::PCWriter(const std::string& filename, const liblas::Header& hdr, double x, double y, double size, double buffer) :
 	m_fileIdx(0),
 	m_returns(0), m_retNum{0,0,0,0,0},
 	m_totalReturns(0),
+	m_bounds{x, y, x + size, y + size},
+	m_bufferedBounds{x - buffer, y - buffer, x + size + buffer, y + size + buffer},
 	m_outBounds{99999999.0,99999999.0,-99999999.0,-99999999.0,99999999.0,-99999999.0},
 	m_x(x), m_y(y),
 	m_filename(filename),
 	m_writer(nullptr), m_header(nullptr),
-	m_dod(true) {
+	m_dod(true),
+	m_buffer(buffer),
+	m_size(size) {
 
 	m_header = new liblas::Header(hdr);
 
 	open();
 }
+
+PCWriter::PCWriter(PCWriter&& other) = default;
 
 double PCWriter::x() const {
 	return m_x;
@@ -122,9 +163,19 @@ double PCWriter::y() const {
 	return m_y;
 }
 
-void PCWriter::bounds(double* bounds) const {
+void PCWriter::outBounds(double* bounds) const {
 	for(int i = 0; i < 6; ++i)
 		bounds[i] = m_outBounds[i];
+}
+
+void PCWriter::bufferedBounds(double* bounds) const {
+	for(int i = 0; i < 4; ++i)
+		bounds[i] = m_bufferedBounds[i];
+}
+
+void PCWriter::bounds(double* bounds) const {
+	for(int i = 0; i < 4; ++i)
+		bounds[i] = m_bufferedBounds[i];
 }
 
 const std::vector<std::string>& PCWriter::filenames() const {
@@ -142,7 +193,8 @@ std::string PCWriter::nextFile() {
 void PCWriter::open() {
 	close();
 	std::string filename = nextFile();
-	m_str.open(filename, std::ios::out | std::ios::binary);
+	std::cerr << filename << "\n";
+	m_str.open(filename, std::ios::out | std::ios::binary | std::ios::trunc);
 	m_writer = new liblas::Writer(m_str, *m_header);
 }
 
@@ -191,6 +243,22 @@ void PCWriter::addPoint(const liblas::Point& pt) {
 	m_writer->WritePoint(pt);
 }
 
+size_t PCWriter::count() const {
+	return m_totalReturns;
+}
+
+double PCWriter::size() const {
+	return m_size;
+}
+
+bool PCWriter::contains(double x, double y) const {
+	return x >= m_bounds[0] && x < m_bounds[2]  && y >= m_bounds[1] && y < m_bounds[3];
+}
+
+bool PCWriter::containsBuffered(double x, double y) const {
+	return x >= m_bufferedBounds[0] && x < m_bufferedBounds[2] && y >= m_bufferedBounds[1] && y < m_bufferedBounds[3];
+}
+
 PCWriter::~PCWriter() {
 	close();
 	delete m_header;
@@ -206,37 +274,8 @@ int even(int num) {
 	return num;
 }
 
-geo::pc::Tile::Tile(double minx, double miny, double maxx, double maxy, double buffer) {
-	m_bounds[0] = minx;
-	m_bounds[1] = miny;
-	m_bounds[2] = maxx;
-	m_bounds[3] = maxy;
-	m_bufferedBounds[0] = m_bounds[0] - buffer;
-	m_bufferedBounds[1] = m_bounds[1] - buffer;
-	m_bufferedBounds[2] = m_bounds[2] + buffer;
-	m_bufferedBounds[3] = m_bounds[3] + buffer;
-}
-
-PCWriter* geo::pc::Tile::writer(bool release) {
-	if(release) {
-		return m_writer.release();
-	} else {
-		return m_writer.get();
-	}
-}
-
-void geo::pc::Tile::writer(PCWriter* wtr) {
-	m_writer.reset(wtr);
-}
-
-bool geo::pc::Tile::contains(double x, double y) {
-	return x >= m_bounds[0] && x < m_bounds[2] 
-		&& y >= m_bounds[1] && y < m_bounds[3];
-}
-
-bool geo::pc::Tile::containsBuffered(double x, double y) {
-	return x >= m_bufferedBounds[0] && x < m_bufferedBounds[2] 
-		&& y >= m_bufferedBounds[1] && y < m_bufferedBounds[3];
+bool intersects(double* a, double* b) {
+	return !(a[2] <= b[0] || a[0] >= b[2] || a[3] <= b[1] || a[1] >= b[3]);
 }
 
 
@@ -258,7 +297,7 @@ void Tiler::tile(const std::string& outdir, double size, double buffer, int srid
 	double fBounds[6];
 	for(PCFile& f : files) {
 		f.init();
-		f.bounds(fBounds);
+		f.fileBounds(fBounds);
 		std::cerr << "file bounds " << fBounds[0] << ", " << fBounds[1] << "; " << fBounds[2] << ", " << fBounds[3] << "\n";
 		if(fBounds[0] < allBounds[0]) allBounds[0] = fBounds[0];
 		if(fBounds[1] < allBounds[1]) allBounds[1] = fBounds[1];
@@ -301,14 +340,14 @@ void Tiler::tile(const std::string& outdir, double size, double buffer, int srid
 	}
 
 	liblas::ReaderFactory rfact;
-	std::vector<std::unique_ptr<Tile> > tiles;
+	std::vector<std::unique_ptr<PCWriter> > writers;
 
 	do {
 
 		std::cerr << "cols " << cols0 << "; rows " << rows0 << "; size " << size0 << "\n";
 		std::cerr << "bounds " << allBounds[0] << ", " << allBounds[1] << "; " << allBounds[2] << ", " << allBounds[3] << "\n";
 
-		if(!tiles.empty()) {
+		if(!writers.empty()) {
 			// This is run n>0, so we now read from the intermediate tiles.
 
 			// To prevent the previous set of tiles from getting deleted before
@@ -318,20 +357,24 @@ void Tiler::tile(const std::string& outdir, double size, double buffer, int srid
 			// Clear the readers list and rebuild with files from the previous
 			// level of tiles.
 			files.clear();
-			for(std::unique_ptr<Tile>& tile : tiles) {
-				PCWriter* wtr = tile->writer(true);
-				// Create and emplace a LASReader.
-				files.emplace_back(wtr->filenames(), wtr->x(), wtr->y());
-				// Close the PCWriter.
-				wtr->close();
-				// Add to tmpWriters to prevent immediate destruction.
-				tmpWriters.emplace_back(wtr);
+			for(std::unique_ptr<PCWriter>& writer : writers) {
+				writer->close();
+				//if(!writer->count()) {
+				//	for(const std::string& filename : writer->filenames())
+					//	Util::rm(filename);
+				//} else {
+					// Create and emplace a LASReader.
+					files.emplace_back(writer->filenames(), writer->x(), writer->y(), writer->size(), buffer);
+					// Close the PCWriter.
+					tmpWriters.emplace_back(writer.release());
+				//}
 			}
 
 			// Clear the tiles list to start rebuilding it with the next level.
-			tiles.clear();
+			writers.clear();
 
 			for(PCFile& file : files) {
+				file.init();
 				{
 					// Get a liblas::Header from the first file to use as a template
 					// for the PCWriters.
@@ -348,9 +391,7 @@ void Tiler::tile(const std::string& outdir, double size, double buffer, int srid
 							double y = file.y() + r * size0;
 							ss << "tile_" << (int) x << "_" << (int) y << "_" << size0;
 							std::string outfile = Util::pathJoin(outdir, ss.str());
-							std::unique_ptr<Tile> tile(new Tile(x, y, x + size0, y + size0, buffer));
-							tile->writer(new PCWriter(outfile, ihdr, x, y));
-							tiles.push_back(std::move(tile));
+							writers.emplace_back(new PCWriter(outfile, ihdr, x, y, size0, buffer));
 						}
 					}
 				}
@@ -361,9 +402,11 @@ void Tiler::tile(const std::string& outdir, double size, double buffer, int srid
 					liblas::Reader irdr = rfact.CreateWithStream(istr);
 					while(irdr.ReadNextPoint()) {
 						const liblas::Point& pt = irdr.GetPoint();
-						for(std::unique_ptr<Tile>& tile : tiles) {
-							if(tile->containsBuffered(pt.GetX(), pt.GetY()))
-								tile->writer()->addPoint(pt);
+						for(std::unique_ptr<PCWriter>& writer : writers) {
+							double x = pt.GetX();
+							double y = pt.GetY();
+							if(file.contains(x, y) && writer->containsBuffered(x, y))
+								writer->addPoint(pt);
 						}
 					}
 				}
@@ -391,23 +434,36 @@ void Tiler::tile(const std::string& outdir, double size, double buffer, int srid
 						double y = allBounds[1] + r * size0;
 						ss << "tile_" << (int) x << "_" << (int) y << "_" << size0;
 						std::string outfile = Util::pathJoin(outdir, ss.str());
-						std::unique_ptr<Tile> tile(new Tile(x, y, x + size0, y + size0, buffer));
-						tile->writer(new PCWriter(outfile, ihdr, x, y));
-						tiles.push_back(std::move(tile));
+						std::cerr << outfile << "\n";
+						writers.emplace_back(new PCWriter(outfile, ihdr, x, y, size0, buffer));
 					}
 				}
 			}
 
 			// Iterate over the files, filling the tiles.
 			for(PCFile& file : files) {
+
+				double fbounds[4];
+				file.fileBounds(fbounds);
+
+				double wbounds[4];
+				std::vector<PCWriter*> wtrs;
+				for(std::unique_ptr<PCWriter>& writer : writers) {
+					writer->bufferedBounds(wbounds);
+					if(intersects(fbounds, wbounds))
+						wtrs.push_back(writer.get());
+				}
+
 				for(const std::string& filename : file.filenames()) {
 					std::ifstream istr(filename, std::ios::in | std::ios::binary);
 					liblas::Reader irdr = rfact.CreateWithStream(istr);
 					while(irdr.ReadNextPoint()) {
 						const liblas::Point& pt = irdr.GetPoint();
-						for(std::unique_ptr<Tile>& tile : tiles) {
-							if(tile->containsBuffered(pt.GetX(), pt.GetY()))
-								tile->writer()->addPoint(pt);
+						for(PCWriter* writer : wtrs) {
+							double x = pt.GetX();
+							double y = pt.GetY();
+							if(writer->containsBuffered(x, y))
+								writer->addPoint(pt);
 						}
 					}
 				}
@@ -424,11 +480,11 @@ void Tiler::tile(const std::string& outdir, double size, double buffer, int srid
 
 	// We don't want to delete the last batch of tiles, so this is
 	// set to false.
-	for(std::unique_ptr<Tile>& tile : tiles)
-		tile->writer()->deleteOnDestruct(false);
+	for(std::unique_ptr<PCWriter>& writer : writers)
+		writer->deleteOnDestruct(false);
 
-	// Destroy the last batch of tiles.
-	tiles.clear();
+	// Destroy the last batch of writers.
+	writers.clear();
 }
 
 Tiler::~Tiler() {}
@@ -713,9 +769,9 @@ Computer* getComputer(const std::string& name) {
 	} else if(name == "variance") { 			return new VarianceComputer();
 	} else if(name == "std-dev") { 				return new StdDevComputer();
 	} else if(name == "rugosity-acr") { 		return new RugosityComputer();
-	} else if(name == "iwd-2") {				return new IDWComputer();
+	} else if(name == "idw-2") {				return new IDWComputer();
 	}
-	g_runerr("Unknown computer name: " << name);
+	g_runerr("Unknown computer name (" << name << ")");
 }
 
 Rasterizer::Rasterizer(const std::vector<std::string> filenames) :
@@ -749,7 +805,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 		double fBounds[6];
 		for(PCFile& f: m_files) {
 			f.init();
-			f.bounds(fBounds);
+			f.fileBounds(fBounds);
 			if(fBounds[0] < bounds[0]) bounds[0] = fBounds[0];
 			if(fBounds[1] < bounds[1]) bounds[1] = fBounds[1];
 			if(fBounds[2] > bounds[2]) bounds[2] = fBounds[2];
@@ -798,7 +854,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 				liblas::Reader rdr = fact.CreateWithStream(str);
 				while(rdr.ReadNextPoint()) {
 					const geo::pc::Point pt(rdr.GetPoint());
-					if(filter(pt)) { // TODO: Configurable.
+					if(filter(pt)) {
 						double x = pt.x();
 						double y = pt.y();
 						double z = pt.z();
