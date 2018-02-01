@@ -442,11 +442,15 @@ public:
 	/**
 		 * Compute and return the statistic for the points within the neighbourhood
 		 * defined by the lists of points.
-		 * @param type 	The statistic to compute.
-		 * @param pts 	The list of Points.
-		 * @return The value of the computed statistic.
+		 * @param type 	 The statistic to compute.
+		 * @param pts 	 The list of Points.
+		 * @param radius The neighbourhood to calculate within.
+		 * @param out    The output list.
+		 * @return The the number of bands computed.
 		 */
-		virtual double compute(double x, double y, const std::vector<Point>& pts, double radius) = 0;
+		virtual int compute(double x, double y, const std::vector<Point>& pts, double radius, std::vector<double>& out) = 0;
+
+		virtual int bandCount() const = 0;
 
 		virtual ~Computer() {}
 };
@@ -473,7 +477,8 @@ public:
 	}
 
 	bool keep(const geo::pc::Point& pt) const {
-		if(pt.z() < minZ || pt.z() > maxZ ||
+		double z = pt.z();
+		if(z < minZ || z > maxZ ||
 				pt.intensity() < minIntensity || pt.intensity() > maxIntensity ||
 				pt.scanAngle() < minScanAngle || pt.scanAngle() > maxScanAngle ||
 				(pt.isEdge() && !keepEdges))
@@ -490,6 +495,24 @@ public:
 	}
 
 };
+
+class Normalizer {
+private:
+	std::vector<std::string> m_filenames;
+	PCPointFilter* m_filter;
+
+public:
+
+	Normalizer(const std::vector<std::string> filenames);
+
+	void setFilter(const PCPointFilter& filter);
+
+	void normalize(const std::string& dtm, const std::string& outdir);
+
+	~Normalizer();
+
+};
+
 /**
  * Turns a set of point cloud files into a raster.
  */

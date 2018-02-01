@@ -24,13 +24,17 @@
 #include "ds/kdtree.hpp"
 #include "pc_computer.hpp"
 
+#define MIN_DBL std::numeric_limits<double>::lowest()
+#define MAX_DBL std::numeric_limits<double>::max()
+#define NODATA -9999.0
+
 using namespace geo::raster;
 using namespace geo::util;
 using namespace geo::pc;
 
 PCFile::PCFile(const std::string& filename, double x, double y, double size, double buffer) :
 	m_x(x), m_y(y),
-	m_fileBounds{99999999., 99999999., -999999999., -99999999., 99999999., -99999999.},
+	m_fileBounds{MAX_DBL, MAX_DBL, MIN_DBL, MIN_DBL, MAX_DBL, MIN_DBL},
 	m_bounds{x, y, x + size, y + size},
 	m_bufferedBounds{x - buffer, y - buffer, x + size + buffer, y + size + buffer} {
 
@@ -39,7 +43,7 @@ PCFile::PCFile(const std::string& filename, double x, double y, double size, dou
 
 PCFile::PCFile(const std::vector<std::string>& filenames, double x, double y, double size, double buffer) :
 	m_x(x), m_y(y),
-	m_fileBounds{99999999., 99999999., -999999999., -99999999., 99999999., -99999999.},
+	m_fileBounds{MAX_DBL, MAX_DBL, MIN_DBL, MIN_DBL, MAX_DBL, MIN_DBL},
 	m_bounds{x, y, x + size, y + size},
 	m_bufferedBounds{x - buffer, y - buffer, x + size + buffer, y + size + buffer},
 	m_filenames(filenames) {
@@ -140,7 +144,7 @@ PCWriter::PCWriter(const std::string& filename, const liblas::Header& hdr, doubl
 	m_totalReturns(0),
 	m_bounds{x, y, x + size, y + size},
 	m_bufferedBounds{x - buffer, y - buffer, x + size + buffer, y + size + buffer},
-	m_outBounds{99999999.0,99999999.0,-99999999.0,-99999999.0,99999999.0,-99999999.0},
+	m_outBounds{MAX_DBL, MAX_DBL, MIN_DBL, MIN_DBL, MAX_DBL, MIN_DBL},
 	m_x(x), m_y(y),
 	m_filename(filename),
 	m_writer(nullptr), m_header(nullptr),
@@ -293,7 +297,7 @@ void Tiler::tile(const std::string& outdir, double size, double buffer, int srid
 		g_runerr("Negative buffer is not allowed. Use easting, northing and tile size to crop tiles.");
 
 	// Calculate the overall bounds of the file set.
-	double allBounds[6] = {9999999999., 9999999999., -9999999999., -9999999999., 999999999., -999999999.};
+	double allBounds[6] = {MAX_DBL, MAX_DBL, MIN_DBL, MIN_DBL, MAX_DBL, MIN_DBL};
 	double fBounds[6];
 	for(PCFile& f : files) {
 		f.init();
@@ -744,7 +748,8 @@ const std::unordered_map<std::string, std::string> computerNames = {
 		{"variance", "The variance with n-1"},
 		{"std-dev", "The standard deviation with n-1"},
 		{"rugosity-acr", "The arc-chord rugosity (DuPreez, 2004)"},
-		{"idw-2", "Inverse distance weighting; coefficient 2"}
+		{"idw-2", "Inverse distance weighting; coefficient 2"},
+		{"hlrg-bio", "HLRG biometrics set"}
 };
 
 Computer* getComputer(const std::string& name) {
@@ -770,6 +775,7 @@ Computer* getComputer(const std::string& name) {
 	} else if(name == "std-dev") { 				return new StdDevComputer();
 	} else if(name == "rugosity-acr") { 		return new RugosityComputer();
 	} else if(name == "idw-2") {				return new IDWComputer();
+	} else if(name == "hlrg-bio") {				return new HLRGBiometricsComputer(20, 75, 2.0);
 	}
 	g_runerr("Unknown computer name (" << name << ")");
 }
@@ -800,7 +806,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	for(const std::string& name : types)
 		computers.emplace_back(getComputer(name));
 
-	double bounds[4] = {9999999999, 9999999999, -9999999999, -9999999999};
+	double bounds[4] = {MAX_DBL, MAX_DBL, MIN_DBL, MIN_DBL};
 	{
 		double fBounds[6];
 		for(PCFile& f: m_files) {
@@ -824,14 +830,18 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	std::cerr << "cols " << cols << "; rows " << rows << "\n";
 	std::cerr << "bounds " << bounds[0] << ", " << bounds[1] << ", " << bounds[2] << ", " << bounds[3] << "\n";
 
+	int bandCount = 0;
+	for(const std::unique_ptr<Computer>& comp : computers)
+		bandCount += comp->bandCount();
+
 	GridProps props;
 	props.setTrans(easting, res, northing, -res);
 	props.setSize(cols, rows);
-	props.setNoData(-9999.0);
+	props.setNoData(NODATA);
 	props.setDataType(DataType::Float32);
 	props.setSrid(srid);
 	props.setWritable(true);
-	props.setBands(computers.size() + 1);
+	props.setBands(bandCount + 1);
 	Raster rast(filename, props);
 
 	liblas::ReaderFactory fact;
@@ -884,6 +894,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	}
 
 	std::vector<geo::pc::Point> values;
+	std::vector<double> out;
 	for(size_t r = 0; r < (size_t) rows; ++r) {
 		if(r % 100 == 0)
 			std::cerr << "Row " << r << " of " << rows << "\n";
@@ -893,14 +904,17 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 			if(count) {
 				double x = props.toX(c) + props.resolutionX();
 				double y = props.toY(r) + props.resolutionY();
+				int band = 2;
 				for(size_t i = 0; i < computers.size(); ++i) {
-					double val = computers[i]->compute(x, y, values, radius);
-					rast.setFloat((int) c, (int) r, val, i + 2);
+					computers[i]->compute(x, y, values, radius, out);
+					for(double val : out)
+						rast.setFloat((int) c, (int) r, val == NODATA ? NODATA : val, band++);
+					out.clear();
 				}
 				values.clear();
 			} else {
-				for(size_t i = 0; i < computers.size(); ++i)
-					rast.setFloat((int) c, (int) r, -9999.0, i + 2);
+				//for(size_t i = 0; i < computers.size(); ++i)
+				//	rast.setFloat((int) c, (int) r, NODATA, i + 2);
 			}
 		}
 	}
@@ -915,4 +929,95 @@ void Rasterizer::setFilter(const PCPointFilter& filter) {
 Rasterizer::~Rasterizer() {
 	if(m_filter)
 		delete m_filter;
+}
+
+
+Normalizer::Normalizer(const std::vector<std::string> filenames) :
+		m_filenames(filenames),
+		m_filter(nullptr) {
+}
+
+void Normalizer::setFilter(const PCPointFilter& filter) {
+	m_filter = new PCPointFilter(filter);
+}
+
+Normalizer::~Normalizer() {
+	if(m_filter)
+		delete m_filter;
+}
+
+void Normalizer::normalize(const std::string& dtmpath, const std::string& outdir) {
+
+	Raster dtm(dtmpath);
+	const GridProps& props = dtm.props();
+	double nodata = props.nodata();
+
+	liblas::ReaderFactory fact;
+
+	for(const std::string& filename : m_filenames) {
+
+		std::string outfile = Util::pathJoin(outdir, Util::basename(filename) + ".las");
+
+		std::ifstream str(filename);
+		liblas::Reader rdr = fact.CreateWithStream(str);
+
+		std::cerr << outfile << "\n";
+
+		std::ofstream ostr(outfile, std::ios::binary | std::ios::trunc | std::ios::out);
+		liblas::Header hdr(rdr.GetHeader());
+		liblas::Writer wtr(ostr, hdr);
+
+		double minZ = DBL_MAX;
+		double maxZ = DBL_MIN;
+		double minX = DBL_MAX;
+		double maxX = DBL_MIN;
+		double minY = DBL_MAX;
+		double maxY = DBL_MIN;
+
+		while(rdr.ReadNextPoint()) {
+
+			const liblas::Point& pt = rdr.GetPoint();
+
+			if(m_filter && !m_filter->keep(pt))
+				continue;
+
+			double x = pt.GetX();
+			double y = pt.GetY();
+
+			int col = props.toCol(x);
+			int row = props.toRow(y);
+
+			if(col < 0 || col >= props.cols() || row < 0 || row >= props.rows()) {
+				std::cerr << x << ", " << y << "; " << props.toCol(x) << ", " << props.toRow(y) << "; " << props.cols() << "; " << props.rows() << "\n";
+				continue;
+			}
+
+			double t = dtm.getFloat(props.toCol(x), props.toRow(y));
+
+			if(t == nodata)
+				continue;
+
+			double z = pt.GetZ();
+			double z0 = z - t;
+
+			if(z0 < 0) z0 = 0;
+
+			if(z0 < minZ) minZ = z0;
+			if(z0 > maxZ) maxZ = z0;
+			if(x < minX) minX = x;
+			if(x > maxX) maxX = x;
+			if(y < minY) minY = y;
+			if(y > maxY) maxY = y;
+
+			liblas::Point npt(pt);
+			npt.SetZ(z0);
+			wtr.WritePoint(npt);
+		}
+
+		hdr.SetMin(minX, minY, minZ);
+		hdr.SetMax(maxX, maxY, maxZ);
+		wtr.SetHeader(hdr);
+
+	}
+
 }
