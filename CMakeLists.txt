@@ -100,5 +100,8 @@ target_link_libraries (pc2grid geo geoann geoutil georaster geopc)
 add_executable (pc2tile src/apps/pc2tile.cpp)
 target_link_libraries (pc2tile geo geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY} ${GEOS_LIBRARY})
 
+add_executable (pcnorm src/apps/pcnorm.cpp)
+target_link_libraries (pcnorm geo geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY} ${GEOS_LIBRARY})
+
 add_executable (info src/apps/info.cpp)
 target_link_libraries (info geo geoutil ${GDAL_LIBRARY} ${LIBLAS_LIBRARY} ${JSONCPP_LIBRARY})
