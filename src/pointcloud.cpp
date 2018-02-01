@@ -559,6 +559,14 @@ bool geo::pc::Point::isEdge() const {
 	return m_point ? m_point->GetFlightLineEdge() : false;
 }
 
+bool geo::pc::Point::isLast() const {
+	return m_point ? m_point->GetReturnNumber() == m_point->GetNumberOfReturns() : false;
+}
+
+bool geo::pc::Point::isFirst() const {
+	return m_point ? m_point->GetReturnNumber() == 1 : false;
+}
+
 int geo::pc::Point::returnNum() const {
 	return m_point ? m_point->GetReturnNumber() : 0;
 }

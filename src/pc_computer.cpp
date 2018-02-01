@@ -12,171 +12,419 @@
 #include "pointcloud.hpp"
 #include "pc_computer.hpp"
 
-IDWComputer::IDWComputer(double exponent) : exponent(exponent) {}
-
-double IDWComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
-	if(pts.empty())
-		return std::nan("");
-	double result = 0;
-	double div = 0;
-	for(const geo::pc::Point& pt : pts) {
-		double d = std::pow(x - pt.x(), 2.0) + std::pow(y - pt.y(), 2.0);
-		if(d == 0) {
-			result = pt.z();
-			div = 1;
-			break;
-		} else {
-			double w = std::pow(1 / d, exponent);
-			result += w * pt.z();
-			div += w;
-		}
-	}
-	return result / div;
+bool pointSort(const geo::pc::Point& a, const geo::pc::Point& b) {
+	return a.value() < b.value();
 }
 
-double MeanComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
+IDWComputer::IDWComputer(double exponent) : exponent(exponent) {}
+
+int IDWComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out) {
+	if(pts.empty()) {
+		out.push_back(std::nan(""));
+	} else {
+		double result = 0;
+		double div = 0;
+		for(const geo::pc::Point& pt : pts) {
+			double d = std::pow(x - pt.x(), 2.0) + std::pow(y - pt.y(), 2.0);
+			if(d == 0) {
+				result = pt.z();
+				div = 1;
+				break;
+			} else {
+				double w = std::pow(1 / d, exponent);
+				result += w * pt.z();
+				div += w;
+			}
+		}
+		out.push_back(result / div);
+	}
+	return 1;
+}
+
+int IDWComputer::bandCount() const {
+	return 1;
+}
+
+int MeanComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out) {
 	double sum = 0;
 	int count = 0;
 	for(const geo::pc::Point& pt : pts) {
 		sum += pt.value();
 		++count;
 	}
-	return count > 0 ? sum / count : std::nan("");
+	out.push_back(count > 0 ? sum / count : std::nan(""));
+	return 1;
 }
 
-VarianceComputer::VarianceComputer(double bias) : bias(bias) {}
+int MeanComputer::bandCount() const {
+	return 1;
+}
 
-double VarianceComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
-	double mean = MeanComputer::compute(x, y, pts, radius);
+VarianceComputer::VarianceComputer(double bias) : 
+	m_bias(bias) {}
+
+void VarianceComputer::setBias(double bias) {
+	m_bias = bias;
+}
+
+int VarianceComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out) {
+	std::vector<double> _out;
+	MeanComputer::compute(x, y, pts, radius, _out);
+	double mean = _out[0];
 	if(std::isnan(mean))
 		return mean;
 	double sum = 0;
 	for(const geo::pc::Point& pt : pts)
 		sum += std::pow(pt.value() - mean, 2.0);
-	return sum / pts.size();
+	out.push_back(sum / (pts.size() + m_bias));
+	return 1;
+}
+
+int VarianceComputer::bandCount() const {
+	return 1;
 }
 
 StdDevComputer::StdDevComputer(double bias) :
 		VarianceComputer(bias) {
 }
 
-double StdDevComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
-	double variance = VarianceComputer::compute(x, y, pts, radius);
-	if(std::isnan(variance))
-		return variance;
-	return std::sqrt(variance);
+void StdDevComputer::setBias(double bias) {
+	VarianceComputer::setBias(bias);
 }
 
-bool pointSort(const geo::pc::Point& a, const geo::pc::Point& b) {
-	return a.value() < b.value();
+int StdDevComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out) {
+	std::vector<double> _out;
+	VarianceComputer::compute(x, y, pts, radius, _out);
+	double variance = _out[0];
+	if(std::isnan(variance))
+		return variance;
+	out.push_back(std::sqrt(variance));
+	return 1;
+}
+
+int StdDevComputer::bandCount() const {
+	return 1;
 }
 
 PercentileComputer::PercentileComputer(double percentile) :
-	percentile(percentile) {
-	if(percentile <= 0 || percentile >= 100)
-		g_runerr("Percentile must be between 0 and 100.");
+	m_percentile(percentile) {
+	if(m_percentile <= 0 || m_percentile >= 1)
+		g_runerr("Percentile must be between 0 and 1.");
 }
 
-double PercentileComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
-	if(pts.empty())
-		return std::nan("");
-	std::vector<geo::pc::Point> _pts(pts.begin(), pts.end());
-	std::sort(_pts.begin(), _pts.end(), pointSort);
-	size_t size = _pts.size();
-	if(size % 2 == 0) {
-		size_t idx = (size_t) (size * percentile) - 1;
-		return (_pts[idx + 1].value() + _pts[idx].value()) / 2.0;
+void PercentileComputer::setPercentile(double percentile) {
+	m_percentile = percentile;
+}
+
+int PercentileComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out) {
+	if(pts.empty()) {
+		out.push_back(std::nan(""));
 	} else {
-		return _pts[(size_t) (size * percentile)].value();
+		std::vector<geo::pc::Point> _pts(pts.begin(), pts.end());
+		std::sort(_pts.begin(), _pts.end(), pointSort);
+		size_t size = _pts.size();
+		if(size % 2 == 0) {
+			size_t idx = (size_t) (size * m_percentile) - 1;
+			out.push_back((_pts[idx + 1].value() + _pts[idx].value()) / 2.0);
+		} else {
+			out.push_back(_pts[(size_t) (size * m_percentile)].value());
+		}
 	}
+	return 1;
 }
 
-double MaxComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
+int PercentileComputer::bandCount() const {
+	return 1;
+}
+
+int MaxComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out) {
 	double max = std::numeric_limits<double>::lowest();
 	for(const geo::pc::Point& pt : pts) {
 		if(pt.value() > max)
 			max = pt.value();
 	}
-	return max;
+	out.push_back(max);
+	return 1;
 }
 
-double MinComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
+int MaxComputer::bandCount() const {
+	return 1;
+}
+
+int MinComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out) {
 	double min = std::numeric_limits<double>::max();
 	for(const geo::pc::Point& pt : pts) {
 		if(pt.value() < min)
 			min = pt.value();
 	}
-	return min;
+	out.push_back(min);
+	return 1;
 }
 
-double DensityComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
-	double area = radius * radius * M_PI;
-	if(pts.empty())
-		return std::nan("");
-	return pts.size() / area;
+int MinComputer::bandCount() const {
+	return 1;
 }
 
-double CountComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
-	return (double) pts.size();
+int DensityComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out) {
+	if(pts.empty()) {
+		out.push_back(std::nan(""));
+	} else {
+		double area = radius * radius * M_PI;
+		out.push_back(pts.size() / area);
+	}
+	return 1;
+}
+
+int DensityComputer::bandCount() const {
+	return 1;
+}
+
+int CountComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out) {
+	out.push_back((double) pts.size());
+	return 1;
+}
+
+int CountComputer::bandCount() const {
+	return 1;
 }
 
 SkewComputer::SkewComputer(double bias) {
-	stdDevComp.bias = bias;
+	stdDevComp.setBias(bias);
 }
 
-double SkewComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
-	if(pts.empty())
-		return std::nan("");
-	// Fisher-Pearson
-	double mean = meanComp.compute(x, y, pts, radius);
-	if(std::isnan(mean))
-		return mean;
-	size_t count = pts.size();
-	double sum = 0.0;
-	for (const geo::pc::Point& pt : pts)
-		sum += std::pow(pt.value() - mean, 3.0) / count;
-	double sd = stdDevComp.compute(x, y, pts, radius);
-	double skew = sum / std::pow(sd, 3.0);
-	return skew;
+int SkewComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out) {
+	if(pts.empty()) {
+		out.push_back(std::nan(""));
+	} else {
+		// Fisher-Pearson
+		std::vector<double> _out;
+		meanComp.compute(x, y, pts, radius, _out);
+		double mean = _out[0];
+		_out.clear();
+
+		if(std::isnan(mean))
+			return mean;
+		size_t count = pts.size();
+		double sum = 0.0;
+		for (const geo::pc::Point& pt : pts)
+			sum += std::pow(pt.value() - mean, 3.0) / count;
+		stdDevComp.compute(x, y, pts, radius, _out);
+		double sd = _out[0];
+		double skew = sum / std::pow(sd, 3.0);
+		out.push_back(skew);
+	}
+	return 1;
+}
+
+int SkewComputer::bandCount() const {
+	return 1;
 }
 
 KurtosisComputer::KurtosisComputer(double bias) {
-	stdDevComp.bias = bias;
+	stdDevComp.setBias(bias);
 }
 
-double KurtosisComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
-	if(pts.empty())
-		return std::nan("");
-	// Fisher-Pearson
-	double mean = meanComp.compute(x, y, pts, radius);
-	if(std::isnan(mean))
-		return mean;
-	size_t count = pts.size();
-	double sum = 0.0;
-	for (const geo::pc::Point& pt : pts)
-		sum += std::pow(pt.value() - mean, 4.0) / count;
-	double sd = stdDevComp.compute(x, y, pts, radius);
-	double kurt = sum / std::pow(sd, 4.0) - 3.0;
-	return kurt;
+int KurtosisComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out) {
+	if(pts.empty()) {
+		out.push_back(std::nan(""));
+	} else {
+		// Fisher-Pearson
+		std::vector<double> _out;
+		meanComp.compute(x, y, pts, radius, _out);
+		double mean = _out[0];
+		_out.clear();
+
+		if(std::isnan(mean))
+			return mean;
+		size_t count = pts.size();
+		double sum = 0.0;
+		for (const geo::pc::Point& pt : pts)
+			sum += std::pow(pt.value() - mean, 4.0) / count;
+		stdDevComp.compute(x, y, pts, radius, _out);
+		double sd = _out[0];
+		double kurt = sum / std::pow(sd, 4.0) - 3.0;
+		out.push_back(kurt);
+	}
+	return 1;
 }
 
-double CoVComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
-	if(pts.empty())
-		return std::nan("");
-	// Fisher-Pearson
-	double mean = meanComp.compute(x, y, pts, radius);
-	if(std::isnan(mean))
-		return mean;
-	double sd = sampStdDevComp.compute(x, y, pts, radius);
-	double cov = mean != 0 ? sd / mean : std::nan("");
-	return cov;
+int KurtosisComputer::bandCount() const {
+	return 1;
 }
 
-double CanopyGapFractionComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
-	g_runerr("Not implemented.");
+int CoVComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out) {
+	if(pts.empty()) {
+		out.push_back(std::nan(""));
+	} else {
+		// Fisher-Pearson
+		std::vector<double> _out;
+		meanComp.compute(x, y, pts, radius, _out);
+		double mean = _out[0];
+		_out.clear();
+
+		if(std::isnan(mean))
+			return mean;
+		sampStdDevComp.compute(x, y, pts, radius, _out);
+		double sd = _out[0];
+		double cov = mean != 0 ? sd / mean : std::nan("");
+		out.push_back(cov);
+	}
+	return 1;
 }
 
-/*
+int CoVComputer::bandCount() const {
+	return 1;
+}
+
+int hlrgLHQ(const std::vector<geo::pc::Point>& pts, int bands, std::vector<double>& out) {
+	
+	if(pts.size() < 75) {
+		for(int b = 0; b <= bands; ++b)
+			out.push_back(std::nan(""));
+	} else {
+		out.push_back(pts[0].value());
+
+		for(int band = 1; band < bands; ++band) {
+			double rank = ((double) band / bands) * (pts.size() + 1);
+			int base = (int) std::floor(rank);
+			double diff = rank - base;
+			int rank1 = base - 1; if(rank1 < 0) rank1 = 0;
+			int rank2 = base;
+			out.push_back(((1.0 - diff) * pts[rank1].value()) + (diff * pts[rank2].value()));
+		}
+
+		out.push_back(pts[pts.size() - 1].value());
+	}
+
+	return bands + 1;
+
+}
+
+int getCCFCount(const std::vector<geo::pc::Point>& pts, double thresh) {
+	int count = 0;
+	for(const geo::pc::Point& pt : pts) {
+		if(pt.value() > thresh)
+			++count;
+	}
+	return count;
+}
+
+int hlrgCCF(const std::vector<geo::pc::Point>& pts, int bands, double threshold, std::vector<double>& out) {
+
+	if(pts.size() < 75) {
+		for(int b = 0; b <= bands; ++b)
+			out.push_back(std::nan(""));
+	} else {
+		double htIncrement = (pts[pts.size() - 1].value() - threshold) / bands;
+		double curHeight = threshold;
+
+		for(int band = 0; band <= bands; ++band) {
+			int ccfCount = getCCFCount(pts, curHeight);
+			double ccfPercent = (double) ccfCount / pts.size();
+			out.push_back(ccfPercent);
+			curHeight += htIncrement;
+		}
+	}
+	return bands + 1;
+}
+
+int hlrgLMoments(const std::vector<geo::pc::Point>& pts, std::vector<double>& out) {
+
+	size_t n = pts.size();
+
+	double l1 = 0;
+	double l2 = 0;
+	double l3 = 0;
+	double l4 = 0;
+
+	for(size_t i = 0; i < n; ++i) {
+		double v = i + 1;
+		double cl1 = v - 1;
+		double cl2 = cl1 * (v - 2) / 2.0;
+		double cl3 = cl2 * (v - 3) / 3.0;
+		double cr1 = n - v;
+		double cr2 = cr1 * (n - v - 1) / 2.0;
+		double cr3 = cr2 * (n - v - 2) / 3.0;
+		double z = pts[i].value();
+		l1 +=  z;
+		l2 += (cl1 - cr1) * z;
+		l3 += (cl2 - 2 * cl1 * cr1 + cr2) * z;
+		l4 += (cl3 - 3 * cl2 * cr1 + 3 * cl1 * cr2 - cr3) * z;
+	}
+
+	double c2 = n * (n - 1) / 2.0;
+	double c3 = c2 * (n - 2) / 3.0;
+	double c4 = c3 * (n - 3) / 4.0;
+	l1 /= n;
+	l2 /= c2 / 2.0;
+	l3 /= c3 / 3.0;
+	l4 /= c4 / 4.0;
+
+	double lmean = l1;
+	double lcov = l2 / l1;
+	double lskew = l3 / l2;
+	double lkurt = l4 / l2; // TODO: Should be l3?
+
+	out.push_back(lmean);
+	out.push_back(lcov);
+	out.push_back(lskew);
+	out.push_back(lkurt);
+
+	return 4;
+}
+
+HLRGBiometricsComputer::HLRGBiometricsComputer(int bands, int minCount, double threshold) :
+		m_bands(bands),
+		m_minCount(minCount),
+		m_threshold(threshold) {
+	m_stdDev.setBias(-1);
+	m_perc.setPercentile(.85);
+}
+
+int HLRGBiometricsComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out) {
+
+	if(pts.size() < (size_t) m_minCount) {
+		for(int i = 0; i < bandCount(); ++i)
+			out.push_back(std::nan(""));
+	} else {
+
+		std::vector<geo::pc::Point> _pts(pts.begin(), pts.end());
+		std::sort(_pts.begin(), _pts.end(), pointSort);
+
+		int numThresh = 0;
+		for(const geo::pc::Point& pt : _pts) {
+			if(pt.value() > m_threshold)
+				++numThresh;
+		}
+
+		m_stdDev.compute(x, y, _pts, radius, out);
+		//hlrgRugosity(pts, out, &count);
+		
+		out.push_back(1.0 - ((double) numThresh / _pts.size()));
+		//hlrgGap(pts, iter, &count);
+		
+		m_perc.compute(x, y, _pts, radius, out);
+		//hlrgPercentile(pts, 0.85, iter, &count);
+
+		hlrgLMoments(_pts, out);
+		//hlrgLMoments(pts, &count);
+
+		hlrgLHQ(_pts, m_bands, out);
+		hlrgCCF(_pts, m_bands, m_threshold, out);
+
+	}
+	return bandCount();
+}
+
+int HLRGBiometricsComputer::bandCount() const {
+	return (m_bands + 1) * 2 + 7;
+}
+
+
+
+/*	if(zValues.empty() || zValues.size() == pts.size())
+		g_warn("To calculate CCF, points must have both veg (1) and ground classes (2).")
+
  * void fcLidarBLa(const std::list<std::unique_ptr<LiDARPoint> > &values, double *result) {
 	double gnd = 0.0;
 	double all = 0.0;
@@ -396,46 +644,55 @@ double polyArea(const std::list<Point_3> &hull, const Plane_3 &plane,
 }
 
 
-double RugosityComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius) {
-	if(pts.size() < 3)
-		return std::nan("");
+int RugosityComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out) {
+	
+	if(pts.size() < 3) {
+		out.push_back(std::nan(""));
+	} else {
 
-	double area = radius * radius * M_PI;
-	double density = pts.size() / area;
+		double area = radius * radius * M_PI;
+		double density = pts.size() / area;
 
-	std::list<Point_3> verts;
-	for (const geo::pc::Point& pt : pts)
-		verts.emplace_back(pt.x(), pt.y(), pt.value());
+		std::list<Point_3> verts;
+		for (const geo::pc::Point& pt : pts)
+			verts.emplace_back(pt.x(), pt.y(), pt.value());
 
-	// Convex hull and POBF
-	std::list<Point_3> hull;
-	Plane_3 plane;
-	Point_3 centroid;
-	CGAL::convex_hull_2(verts.begin(), verts.end(), std::back_inserter(hull), Gt());
-	CGAL::linear_least_squares_fitting_3(hull.begin(), hull.end(), plane, centroid, CGAL::Dimension_tag<0>());
+		// Convex hull and POBF
+		std::list<Point_3> hull;
+		Plane_3 plane;
+		Point_3 centroid;
+		CGAL::convex_hull_2(verts.begin(), verts.end(), std::back_inserter(hull), Gt());
+		CGAL::linear_least_squares_fitting_3(hull.begin(), hull.end(), plane, centroid, CGAL::Dimension_tag<0>());
 
-	// POBF surface area.
-	double parea = polyArea(hull, plane, centroid);
+		// POBF surface area.
+		double parea = polyArea(hull, plane, centroid);
 
-	// If the poly area is zero, quit.
-	if(parea <= 0)
-		return std::nan("");
+		// If the poly area is zero, quit.
+		if(parea <= 0) {
+			out.push_back(std::nan(""));
+		} else {
 
-	// Delaunay 3D surface area.
-	double tarea = 0.0;
-	Delaunay dt(verts.begin(), verts.end());
-	for (Finite_faces_iterator it = dt.finite_faces_begin(); it != dt.finite_faces_end(); ++it)
-		tarea += computeFArea(*it);
+			// Delaunay 3D surface area.
+			double tarea = 0.0;
+			Delaunay dt(verts.begin(), verts.end());
+			for (Finite_faces_iterator it = dt.finite_faces_begin(); it != dt.finite_faces_end(); ++it)
+				tarea += computeFArea(*it);
 
-	// TODO: This is an attempt at modelling the relationship between the ACR and
-	// density. The fractal dimension is involved. Should be redone and documented.
-	double densityFactor = 1.0 / (2.49127261 + 9.01659384 * std::sqrt(density * 32.65748276));
+			// TODO: This is an attempt at modelling the relationship between the ACR and
+			// density. The fractal dimension is involved. Should be redone and documented.
+			double densityFactor = 1.0 / (2.49127261 + 9.01659384 * std::sqrt(density * 32.65748276));
 
-	double acr = (tarea / parea) * densityFactor;
+			double acr = (tarea / parea) * densityFactor;
 
-	return acr;
+			out.push_back(acr);
+		}
+	}
+	return 1;
 }
 
+int RugosityComputer::bandCount() const {
+	return 1;
+}
 
 /*
  *         namespace pointstats_config {

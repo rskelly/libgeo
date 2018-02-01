@@ -394,6 +394,9 @@ public:
 
 	Point();
 
+	bool isLast() const;
+	bool isFirst() const;
+
 	/**
 	 * Returns the class ID of this point. If no liblas::Point
 	 * or other was provided, this returns zero.
@@ -465,6 +468,8 @@ public:
 	double maxZ;
 	double minIntensity;
 	double maxIntensity;
+	bool lastOnly;
+	bool firstOnly;
 
 	PCPointFilter() :
 		minScanAngle(-90),
@@ -473,11 +478,17 @@ public:
 		minZ(std::numeric_limits<double>::lowest()),
 		maxZ(std::numeric_limits<double>::max()),
 		minIntensity(std::numeric_limits<double>::lowest()),
-		maxIntensity(std::numeric_limits<double>::max()) {
+		maxIntensity(std::numeric_limits<double>::max()),
+		lastOnly(false),
+		firstOnly(false) {
 	}
 
 	bool keep(const geo::pc::Point& pt) const {
 		double z = pt.z();
+		if(lastOnly && !pt.isLast())
+			return false;
+		if(firstOnly && !pt.isFirst())
+			return false;
 		if(z < minZ || z > maxZ ||
 				pt.intensity() < minIntensity || pt.intensity() > maxIntensity ||
 				pt.scanAngle() < minScanAngle || pt.scanAngle() > maxScanAngle ||

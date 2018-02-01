@@ -31,7 +31,11 @@ void usage() {
 			<< "                 n is the percentile (no % sign); 1 - 99.\n"
 			<< " -i <density>    The estimated number of points per cell underestimating this\n"
 			<< "                 saves disk space at the cost of efficiency.\n"
-			<< " -c <class(es)>  Comma-delimited list of classes to keep.\n";
+			<< " Point filtering parameters:\n"
+			<< " -c <class(es)>  Comma-delimited list of classes to keep.\n"
+			<< " -t <threshold>  The minimum height threshold.\n"
+			<< " -f              First returns only\n"
+			<< " -l              Last returns only\n";
 
 	std::cerr << " Available computers: \n";
 	for(auto& item : geo::pc::Rasterizer::availableComputers())
@@ -68,7 +72,11 @@ int main(int argc, char** argv) {
 			Util::splitString(std::back_inserter(tmp), cls);
 			for(const std::string& t : tmp)
 				filter.classes.push_back(atoi(t.c_str()));
+		} else if(v == "-l") {
+			filter.lastOnly = true;
 		} else if(v == "-f") {
+			filter.firstOnly = true;
+		} else if(v == "-mf") {
 			mapFile = argv[++i];
 		} else if(v == "-r") {
 			res = atof(argv[++i]);
@@ -82,6 +90,8 @@ int main(int argc, char** argv) {
 			easting = atof(argv[++i]);
 		} else if(v == "-n") {
 			northing = atof(argv[++i]);
+		} else if(v == "-t") {
+			filter.minZ = atof(argv[++i]);
 		} else {
 			args.push_back(argv[i]);
 		}
