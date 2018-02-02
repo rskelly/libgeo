@@ -25,6 +25,9 @@
 #include "raster.hpp"
 #include "ds/kdtree.hpp"
 
+#define DBL_MAX std::numeric_limits<double>::max()
+#define DBL_MIN std::numeric_limits<double>::lowest()
+
 using namespace geo::util;
 using namespace geo::ds;
 
@@ -535,10 +538,10 @@ public:
 		minScanAngle(-90),
 		maxScanAngle(90),
 		keepEdges(false),
-		minZ(std::numeric_limits<double>::lowest()),
-		maxZ(std::numeric_limits<double>::max()),
-		minIntensity(std::numeric_limits<double>::lowest()),
-		maxIntensity(std::numeric_limits<double>::max()),
+		minZ(DBL_MIN),
+		maxZ(DBL_MAX),
+		minIntensity(DBL_MIN),
+		maxIntensity(DBL_MAX),
 		lastOnly(false),
 		firstOnly(false) {
 	}
