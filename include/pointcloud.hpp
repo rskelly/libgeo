@@ -381,6 +381,12 @@ private:
 	double m_x; 			///< The x-coordinate.
 	double m_y; 			///< The y-coordinate.
 	double m_z; 			///< The z-coordinate.
+	double m_intensity;
+	double m_angle;
+	int m_cls;
+	int m_returnNum;
+	int m_numReturns;
+	bool m_isEdge;
 	liblas::Point* m_point;	///< The (optional) liblas::Point instance. Deleted on destruction.
 
 public:
@@ -400,6 +406,14 @@ public:
 	 * @param z The z-coordinate.
 	 */
 	Point(double x, double y, double z);
+
+	/**
+	 * Construct a point using the three raw coordinates.
+	 * @param x The x-coordinate.
+	 * @param y The y-coordinate.
+	 * @param z The z-coordinate.
+	 */
+	Point(double x, double y, double z, double intensity, double angle, int cls, int returnNum, int numReturns, bool isEdge);
 
 	/**
 	 * Construct an empty point.
@@ -469,6 +483,8 @@ public:
 	 */
 	int returnNum() const;
 
+	int numReturns() const;
+
 	/**
 	 * Return true if the point is marked as a flight line edge.
 	 * @return True if the point is marked as a flight line edge.
@@ -488,6 +504,8 @@ public:
 
 };
 
+class PCPointFilter;
+
 /**
  * Used by Rasterizer to compute cell values from the points found
  * in the neighbourhood of a cell.
@@ -504,7 +522,7 @@ public:
 		 * @param out    The output list.
 		 * @return The the number of bands computed.
 		 */
-		virtual int compute(double x, double y, const std::vector<Point>& pts, double radius, std::vector<double>& out) = 0;
+		virtual int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter = nullptr) = 0;
 
 		/**
 		 * Return the number of bands that should be returned by the computer.
@@ -620,13 +638,6 @@ class Rasterizer {
 private:
 	std::vector<PCFile> m_files;		///< A list of PCFile instances.
 	PCPointFilter* m_filter;
-
-	/**
-	 * Returns true if the given point should be processed.
-	 * @param pt A geo::pc::Point.
-	 * @return True if the given point should be processed.
-	 */
-	bool filter(const geo::pc::Point& pt) const;
 
 public:
 

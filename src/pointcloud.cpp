@@ -494,24 +494,49 @@ void Tiler::tile(const std::string& outdir, double size, double buffer, int srid
 Tiler::~Tiler() {}
 
 
-geo::pc::Point::Point(const liblas::Point& pt) :
-	m_x(pt.GetX()),
-	m_y(pt.GetY()),
-	m_z(pt.GetZ()),
-	m_point(new liblas::Point(pt)) {
-}
-
-geo::pc::Point::Point(double x, double y, double z) :
+geo::pc::Point::Point(double x, double y, double z, double intensity, double angle, int cls, int returnNum, int numReturns, bool isEdge) :
 	m_x(x),
 	m_y(y),
 	m_z(z),
+	m_intensity(intensity),
+	m_angle(angle),
+	m_cls(cls),
+	m_returnNum(returnNum),
+	m_numReturns(numReturns),
+	m_isEdge(isEdge),
 	m_point(nullptr) {
+}
+
+geo::pc::Point::Point(const liblas::Point& pt) :
+	geo::pc::Point(pt.GetX(), pt.GetY(), pt.GetZ(),
+			pt.GetIntensity(),
+			pt.GetScanAngleRank(),
+			pt.GetClassification().GetClass(),
+			pt.GetReturnNumber(),
+			pt.GetNumberOfReturns(),
+			pt.GetFlightLineEdge()) {
+
+	m_point = new liblas::Point(pt);
+}
+
+geo::pc::Point::Point(double x, double y, double z) :
+	geo::pc::Point() {
+
+	m_x = x;
+	m_y = y;
+	m_z = z;
 }
 
 geo::pc::Point::Point() :
 	m_x(0),
 	m_y(0),
 	m_z(0),
+	m_intensity(0),
+	m_angle(0),
+	m_cls(0),
+	m_returnNum(0),
+	m_numReturns(0),
+	m_isEdge(false),
 	m_point(nullptr) {
 }
 
@@ -548,29 +573,32 @@ double geo::pc::Point::value() const {
 }
 
 double geo::pc::Point::intensity() const {
-	return m_point ? m_point->GetIntensity() : 0;
+	return m_intensity;
 }
 
 double geo::pc::Point::scanAngle() const {
-	return m_point ? m_point->GetScanAngleRank() : 0;
+	return m_angle;
 }
 
 bool geo::pc::Point::isEdge() const {
-	return m_point ? m_point->GetFlightLineEdge() : false;
+	return m_isEdge;
 }
 
 bool geo::pc::Point::isLast() const {
-	return m_point ? m_point->GetReturnNumber() == m_point->GetNumberOfReturns() : false;
+	return m_returnNum == m_numReturns;
 }
 
 bool geo::pc::Point::isFirst() const {
-	return m_point ? m_point->GetReturnNumber() == 1 : false;
+	return m_returnNum == 1;
 }
 
 int geo::pc::Point::returnNum() const {
-	return m_point ? m_point->GetReturnNumber() : 0;
+	return m_returnNum;
 }
 
+int geo::pc::Point::numReturns() const {
+	return m_numReturns;
+}
 
 geo::pc::Point::~Point() {
 	if(m_point)
@@ -584,9 +612,15 @@ typedef struct {
 } MappedLine;
 
 typedef struct {
-	double x;
-	double y;
-	double z;
+	float x;
+	float y;
+	float z;
+	float intensity;
+	float angle;
+	int cls;
+	int retNum;
+	int numRets;
+	int edge;
 } MappedPoint;
 
 class MemGrid {
@@ -609,10 +643,10 @@ private:
 	// row length = 8 + 8 + 8 + (3 * 8) * n; n = m_lineCount
 	// if the count >= line count, the next row must be set.
 
-	void writePoint(size_t idx, double x, double y, double z) {
+	void writePoint(size_t idx, float x, float y, float z, float intensity, float angle, int cls, int retNum, int numRets, int edge) {
 		char* data = (char*) m_mapped.data();
 		size_t offset = idx * m_lineLength;
-		MappedPoint mp = {x, y, z};
+		MappedPoint mp = {x, y, z, intensity, angle, cls, retNum, numRets, edge};
 		MappedLine ml;
 		std::memcpy(&ml, data + offset, sizeof(MappedLine));
 		if(ml.idx != idx) {
@@ -664,7 +698,7 @@ private:
 			buf += sizeof(MappedLine);
 			for(size_t i = 0; i < ml.count; ++i) {
 				std::memcpy(&mp, buf, sizeof(MappedPoint));
-				pts.emplace_back(mp.x, mp.y, mp.z);
+				pts.emplace_back(mp.x, mp.y, mp.z, mp.intensity, mp.angle, mp.cls, mp.retNum, mp.numRets, mp.edge);
 				buf += sizeof(MappedPoint);
 				++count;
 			}
@@ -695,7 +729,7 @@ public:
 		m_lineCount = lineCount;
 		m_cellCount = cellCount;
 		m_currentLine = cellCount;
-		m_lineLength = sizeof(size_t) * 3 + sizeof(double) * 3 * m_lineCount;
+		m_lineLength = sizeof(MappedLine) + sizeof(MappedPoint) * m_lineCount;
 		m_totalLength = cellCount * m_lineLength;
 		m_mapFile = mapFile;
 
@@ -707,17 +741,11 @@ public:
 	}
 
 	void init(size_t cellCount, size_t lineCount = 128) {
-		m_cellCount = cellCount;
-		m_lineCount = lineCount;
-		m_currentLine = cellCount;
-		m_lineLength = sizeof(size_t) * 3 + sizeof(double) * 3 * m_lineCount;
-		m_totalLength = cellCount * m_lineLength;
-
-		m_mapped.init(m_totalLength, true);
+		init("", cellCount, lineCount);
 	}
 
-	void add(size_t idx, double x, double y, double z) {
-		writePoint(idx, x, y, z);
+	void add(size_t idx, double x, double y, double z, double intensity, double angle, int cls, int retNum, int numRets, int edge) {
+		writePoint(idx, x, y, z, intensity, angle, cls, retNum, numRets, edge);
 	}
 
 	size_t get(size_t idx, std::vector<geo::pc::Point>& out) {
@@ -798,14 +826,6 @@ const std::unordered_map<std::string, std::string>& Rasterizer::availableCompute
 	return computerNames;
 }
 
-bool Rasterizer::filter(const geo::pc::Point& pt) const {
-	if(m_filter) {
-		return m_filter->keep(pt);
-	} else {
-		return true;
-	}
-}
-
 void Rasterizer::rasterize(const std::string& filename, const std::vector<std::string>& types,
 		double res,	double easting, double northing, double radius, int srid, int density, double ext,
 		const std::string& mapFile) {
@@ -872,25 +892,23 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 				liblas::Reader rdr = fact.CreateWithStream(str);
 				while(rdr.ReadNextPoint()) {
 					const geo::pc::Point pt(rdr.GetPoint());
-					if(filter(pt)) {
-						double x = pt.x();
-						double y = pt.y();
-						double z = pt.z();
-						int col = props.toCol(x);
-						int row = props.toRow(y);
-						if(radius == 0) {
-							grid.add(row * cols + col, x, y, z);
-						} else {
-							for(int r = row - radpx; r < row + radpx + 1; ++r) {
-								if(r < 0 || r >= rows) continue;
-								for(int c = col - radpx; c < col + radpx + 1; ++c) {
-									if(c < 0 || c >= cols) continue;
-									double cx = props.toX(c) + xOffset;
-									double cy = props.toY(r) + yOffset;
-									double dist = std::pow(cx - x, 2.0) + std::pow(cy - y, 2.0);
-									if(dist <= rad0)
-										grid.add(r * cols + c, x, y, z);
-								}
+					double x = pt.x();
+					double y = pt.y();
+					double z = pt.z();
+					int col = props.toCol(x);
+					int row = props.toRow(y);
+					if(radius == 0) {
+						grid.add(row * cols + col, x, y, z, pt.intensity(), pt.scanAngle(), pt.classId(), pt.returnNum(), pt.numReturns(), pt.isEdge());
+					} else {
+						for(int r = row - radpx; r < row + radpx + 1; ++r) {
+							if(r < 0 || r >= rows) continue;
+							for(int c = col - radpx; c < col + radpx + 1; ++c) {
+								if(c < 0 || c >= cols) continue;
+								double cx = props.toX(c) + xOffset;
+								double cy = props.toY(r) + yOffset;
+								double dist = std::pow(cx - x, 2.0) + std::pow(cy - y, 2.0);
+								if(dist <= rad0)
+									grid.add(r * cols + c, x, y, z, pt.intensity(), pt.scanAngle(), pt.classId(), pt.returnNum(), pt.numReturns(), pt.isEdge());
 							}
 						}
 					}
@@ -914,7 +932,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 				double x = props.toX(c) + props.resolutionX();
 				double y = props.toY(r) + props.resolutionY();
 				for(size_t i = 0; i < computers.size(); ++i) {
-					computers[i]->compute(x, y, values, radius, out);
+					computers[i]->compute(x, y, values, radius, out, m_filter);
 					for(double val : out)
 						rast.setFloat((int) c, (int) r, std::isnan(val) ? NODATA : val, band++);
 					out.clear();

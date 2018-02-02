@@ -14,13 +14,13 @@ class IDWComputer : public geo::pc::Computer {
 public:
 	double exponent;
 	IDWComputer(double exponent = 2);
-	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out);
+	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter = nullptr);
 	int bandCount() const;
 };
 
 class MeanComputer : public geo::pc::Computer {
 public:
-	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out);
+	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter = nullptr);
 	int bandCount() const;
 };
 
@@ -30,7 +30,7 @@ private:
 public:
 	VarianceComputer(double bias = -1);
 	void setBias(double bias);
-	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out);
+	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter = nullptr);
 	int bandCount() const;
 };
 
@@ -38,7 +38,7 @@ class StdDevComputer : public VarianceComputer {
 public:
 	StdDevComputer(double bias = -1);
 	void setBias(double bias);
-	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out);
+	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter = nullptr);
 	int bandCount() const;
 };
 
@@ -48,31 +48,31 @@ private:
 public:
 	PercentileComputer(double percentile = .5);
 	void setPercentile(double percentile);
-	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out);
+	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter = nullptr);
 	int bandCount() const;
 };
 
 class MaxComputer : public geo::pc::Computer {
 public:
-	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out);
+	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter = nullptr);
 	int bandCount() const;
 };
 
 class MinComputer : public geo::pc::Computer {
 public:
-	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out);
+	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter = nullptr);
 	int bandCount() const;
 };
 
 class DensityComputer : public geo::pc::Computer {
 public:
-	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out);
+	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter = nullptr);
 	int bandCount() const;
 };
 
 class CountComputer : public geo::pc::Computer {
 public:
-	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out);
+	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter = nullptr);
 	int bandCount() const;
 };
 
@@ -81,7 +81,7 @@ public:
 	MeanComputer meanComp;
 	StdDevComputer stdDevComp;
 	SkewComputer(double bias = -1);
-	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out);
+	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter = nullptr);
 	int bandCount() const;
 };
 
@@ -90,7 +90,7 @@ public:
 	MeanComputer meanComp;
 	StdDevComputer stdDevComp;
 	KurtosisComputer(double bias = -1);
-	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out);
+	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter = nullptr);
 	int bandCount() const;
 };
 
@@ -100,7 +100,7 @@ public:
 	StdDevComputer sampStdDevComp;
 	double bias;
 	CoVComputer(double bias = -1);
-	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out);
+	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter = nullptr);
 	int bandCount() const;
 };
 
@@ -109,7 +109,7 @@ public:
 	MeanComputer meanComp;
 	StdDevComputer sampStdDevComp;
 	CanopyGapFractionComputer(double bias = -1);
-	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out);
+	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter = nullptr);
 	int bandCount() const;
 };
 
@@ -122,7 +122,7 @@ private:
 	double m_threshold;
 public:
 	HLRGBiometricsComputer(int bands, int minCount, double threshold);
-	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out);
+	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter = nullptr);
 	int bandCount() const;
 };
 
@@ -293,7 +293,7 @@ void CellGapFraction::compute(double x, double y,
 
 class RugosityComputer : public geo::pc::Computer {
 public:
-	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out);
+	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter = nullptr);
 	int bandCount() const;
 };
 
