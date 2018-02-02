@@ -122,6 +122,9 @@ public:
 	 */
 	void init(bool useHeader = true);
 
+	/**
+	 * Destroy the PCFile.
+	 */
 	~PCFile();
 
 };
@@ -352,12 +355,15 @@ public:
 	 * @param northing  		The minimum y-coordinate of the tile grid. If nan is given, will round
 	 *							the minimum cordinate of the data extent down to a multiple of the tile size.
 	 *							Default NaN.
-	 * @param maxFileHandles 	The maximum number of output files that can be open at once. 
-	 *							Default 64.
+	 * @param maxFileHandles 	The maximum number of output files that can be open at once. This determines
+	 *                          the number of intermediate tiles that will be produced. Default 64.
 	 */
 	void tile(const std::string& outdir, double size, double buffer = 0, int srid = 0, 
 		double easting = std::nan(""), double northing = std::nan(""), int maxFileHandles = 64);
 
+	/**
+	 * Destroy the Tiler.
+	 */
 	~Tiler();
 
 };
@@ -392,10 +398,23 @@ public:
 	 */
 	Point(double x, double y, double z);
 
+	/**
+	 * Construct an empty point.
+	 */
 	Point();
 
+	/**
+	 * Returns true if the point is a last return.
+	 * @return True if the point is a last return.
+	 */
 	bool isLast() const;
+
+	/**
+	 * Returns true if the point is a first return.
+	 * @return True if the point is a first return.
+	 */
 	bool isFirst() const;
+
 
 	/**
 	 * Returns the class ID of this point. If no liblas::Point
@@ -411,18 +430,46 @@ public:
 	 */
 	double operator[](int idx) const;
 
+	/**
+	 * Return the x-coordinate.
+	 * @return The x-coordinate.
+	 */
 	double x() const;
 
+	/**
+	 * Return the y-coordinate.
+	 * @return The y-coordinate.
+	 */
 	double y() const;
 
+	/**
+	 * Return the z-coordinate.
+	 * @return The z-coordinate.
+	 */
 	double z() const;
 
+	/**
+	 * Return the intensity.
+	 * @return The intensity.
+	 */
 	double intensity() const;
 
+	/**
+	 * Return the scan angle.
+	 * @return The scane angle.
+	 */
 	double scanAngle() const;
 
+	/**
+	 * Return the return number.
+	 * @return The return number.
+	 */
 	int returnNum() const;
 
+	/**
+	 * Return true if the point is marked as a flight line edge.
+	 * @return True if the point is marked as a flight line edge.
+	 */
 	bool isEdge() const;
 
 	/**
@@ -431,6 +478,9 @@ public:
 	 */
 	double value() const;
 
+	/**
+	 * Destroy the point.
+	 */
 	~Point();
 
 };
@@ -453,23 +503,33 @@ public:
 		 */
 		virtual int compute(double x, double y, const std::vector<Point>& pts, double radius, std::vector<double>& out) = 0;
 
+		/**
+		 * Return the number of bands that should be returned by the computer.
+		 * @return The number of bands that should be returned by the computer.
+		 */
 		virtual int bandCount() const = 0;
 
+		/**
+		 * Destroy the computer.
+		 */
 		virtual ~Computer() {}
 };
 
+/**
+ * A configurable filter for point clouds.
+ */
 class PCPointFilter {
 public:
-	std::vector<int> classes;
-	double minScanAngle;
-	double maxScanAngle;
-	bool keepEdges;
-	double minZ;
-	double maxZ;
-	double minIntensity;
-	double maxIntensity;
-	bool lastOnly;
-	bool firstOnly;
+	std::vector<int> classes;	///< A list of classes to keep. If this list is empty, all classes are kept. Default empty.
+	double minScanAngle;		///< The minimum scan angle. Default -90.
+	double maxScanAngle;		///< The maximum scan angle. Default 90.
+	bool keepEdges;				///< Keep the points marked as flight line edges. Default false.
+	double minZ;				///< The maximum elevation to keep. Default minimum double value.
+	double maxZ;				///< The minimum elevation to keep. Default maximum double value.
+	double minIntensity;		///< The minimum intensity to keep. Default minimum double value.
+	double maxIntensity;		///< The maximum intensity to keep.	Default maximum double value.
+	bool lastOnly;				///< Only keep the last returns. Default false.
+	bool firstOnly;				///< Only keep the first returns. Default false.
 
 	PCPointFilter() :
 		minScanAngle(-90),
@@ -483,12 +543,17 @@ public:
 		firstOnly(false) {
 	}
 
+	/**
+	 * Returns true if the point satisfied the filter conditions.
+	 * @param pt A Point instance.
+	 * @return True if the point should be kept.
+	 */
 	bool keep(const geo::pc::Point& pt) const {
-		double z = pt.z();
 		if(lastOnly && !pt.isLast())
 			return false;
 		if(firstOnly && !pt.isFirst())
 			return false;
+		double z = pt.z();
 		if(z < minZ || z > maxZ ||
 				pt.intensity() < minIntensity || pt.intensity() > maxIntensity ||
 				pt.scanAngle() < minScanAngle || pt.scanAngle() > maxScanAngle ||
@@ -507,19 +572,40 @@ public:
 
 };
 
+/**
+ * Given a terrain model, normalizes a point cloud so that all point
+ * elevations are relative to zero.
+ */
 class Normalizer {
 private:
-	std::vector<std::string> m_filenames;
-	PCPointFilter* m_filter;
+	std::vector<std::string> m_filenames;	///< A list of input point cloud files.
+	PCPointFilter* m_filter;				///< A point cloud filter instance.
 
 public:
 
+	/**
+	 * Create a Normalizer with a list of input files.
+	 * @param filenames A list of input files.
+	 */
 	Normalizer(const std::vector<std::string> filenames);
 
+	/**
+	 * Set the PCPointFilter instance. The Normalizer copies the instance.
+	 * @param filter A PCPointFilter instance.
+	 */
 	void setFilter(const PCPointFilter& filter);
 
-	void normalize(const std::string& dtm, const std::string& outdir);
+	/**
+	 * Normalize the point cloud.
+	 * @param dtm 		The filename of a digital terrain model.
+	 * @param outdir 	The output directory for normalized point cloud files.
+	 * @param band		The DTM raster band to use for normalization.
+	 */
+	void normalize(const std::string& dtm, const std::string& outdir, int band = 1);
 
+	/**
+	 * Destroy the normalizer.
+	 */
 	~Normalizer();
 
 };

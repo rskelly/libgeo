@@ -954,7 +954,7 @@ Normalizer::~Normalizer() {
 		delete m_filter;
 }
 
-void Normalizer::normalize(const std::string& dtmpath, const std::string& outdir) {
+void Normalizer::normalize(const std::string& dtmpath, const std::string& outdir, int band) {
 
 	Raster dtm(dtmpath);
 	const GridProps& props = dtm.props();
@@ -1000,7 +1000,7 @@ void Normalizer::normalize(const std::string& dtmpath, const std::string& outdir
 				continue;
 			}
 
-			double t = dtm.getFloat(props.toCol(x), props.toRow(y));
+			double t = dtm.getFloat(props.toCol(x), props.toRow(y), band);
 
 			if(t == nodata)
 				continue;

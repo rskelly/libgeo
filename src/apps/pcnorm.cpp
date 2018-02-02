@@ -29,6 +29,7 @@ int main(int argc, char** argv) {
 
 	std::vector<std::string> args;
 	geo::pc::PCPointFilter filter;
+	int band = 1;
 
 	for(int i = 1; i < argc; ++i) {
 		std::string v = argv[i];
@@ -40,6 +41,8 @@ int main(int argc, char** argv) {
 				filter.classes.push_back(atoi(t.c_str()));
 		} else if(v == "-t") {
 			filter.minZ = atof(argv[++i]);
+		} else if(v == "-b") {
+			band = atoi(argv[++i]);
 		} else {
 			args.push_back(argv[i]);
 		}
@@ -56,7 +59,7 @@ int main(int argc, char** argv) {
 	try {
 		geo::pc::Normalizer n(infiles);
 		n.setFilter(filter);
-		n.normalize(args[1], args[0]);
+		n.normalize(args[1], args[0], band);
 	} catch(const std::exception& ex) {
 		std::cerr << ex.what() << "\n";
 		usage();
