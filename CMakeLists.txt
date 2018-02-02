@@ -105,3 +105,6 @@ target_link_libraries (pcnorm geo geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBR
 
 add_executable (info src/apps/info.cpp)
 target_link_libraries (info geo geoutil ${GDAL_LIBRARY} ${LIBLAS_LIBRARY} ${JSONCPP_LIBRARY})
+
+add_executable (voidfill src/apps/voidfill.cpp)
+target_link_libraries (voidfill geo geoutil georaster ${GDAL_LIBRARY} )

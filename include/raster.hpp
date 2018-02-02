@@ -850,12 +850,16 @@ namespace geo {
              * can be rational. When determining which cells to
              * include in the calculation, any cell which partially
              * falls in the radius will be included.
-             * @param radius The search radius.
-             * @param count  The number of pixels to use for calculations.
-             * @param exp    The exponent.
-             * @param band   The target band.
+             * @param filename 	The output filename.
+             * @param radius 	The search radius.
+             * @param count  	The number of pixels to use for calculations.
+             * @param exp    	The exponent.
+             * @param band   	The source band.
+             * @param mask		A raster to use as a mask; invalid pixels will be ignored.
+             * @param maskBand  The band to use in the mask.
 			 */
-            void voidFillIDW(double radius, int count = 4, double exp = 2.0, int band = 1);
+            void voidFillIDW(const std::string& filename, double radius, int count = 4, double exp = 2.0, int band = 1,
+            		const std::string& mask = "", int maskBand = 1);
 
 
             // TODO: Document me.

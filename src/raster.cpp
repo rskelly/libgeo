@@ -615,7 +615,8 @@ void Grid::convert(Grid &g, int srcBand, int dstBand) {
 	}
 }
 
-void Grid::voidFillIDW(double radius, int count, double exp, int band) {
+void Grid::voidFillIDW(const std::string& filename, double radius, int count, double exp, int band,
+		const std::string& mask, int maskBand) {
 
 	if(!props().isFloat())
 		g_runerr("IDW fill only implemented for float rasters.");
@@ -629,48 +630,66 @@ void Grid::voidFillIDW(double radius, int count, double exp, int band) {
 	if (exp <= 0.0)
 		throw std::invalid_argument("Exponent must be larger than 0.");
 
-	MemRaster tmp(props());
+	GridProps oprops(props());
+	oprops.setBands(1);
+	oprops.setWritable(true);
+	Raster output(filename, oprops);
+
+	double maxDist = 100;
+
 	double nodata = props().nodata();
+	double v, d;
 	int rows = props().rows();
 	int cols = props().cols();
 	for (int r = 0; r < rows; ++r) {
 		for (int c = 0; c < cols; ++c) {
-			if (getFloat(c, r) != nodata)
-				continue;
-			double rad = radius;
-			bool found = false;
-			do {
-				double d = g_sq(rad);
-				double a = 0.0;
-				double b = 0.0;
+			if ((v = getFloat(c, r, band)) != nodata) {
+				output.setFloat(c, r, v);
+			} else {
+				double a = 0, b = 0;
 				int cnt = 0;
-				for (int r0 = (int) g_max(0, r - rad); r0 < (int) g_min(rows, r + rad + 1); ++r0) {
-					for (int c0 = (int) g_max(0, c - rad); c0 < (int) g_min(cols, c + rad + 1); ++c0) {
-						double d0 = g_sq((double) c0 - c) + g_sq((double) r0 - r);
-						if (d0 <= d && getFloat(c0, r0, band) != nodata) {
-							double dp = 1.0 / std::pow(d0, exp);
-							a += dp * getFloat(c0, r0, band);
-							b += dp;
-							++cnt;
-						}
+				for(int c0 = c - 1; c0 >= 0; --c0) {
+					if((d = g_sq((double) c0 - c)) <= maxDist && (v = getFloat(c0, r, band)) != nodata) {
+						double dp = 1.0 / std::pow(d, exp);
+						a += dp * v;
+						b += dp;
+						++cnt;
+						break;
+					}
+				}
+				for(int c0 = c + 1; c0 < cols; ++c0) {
+					if((d = g_sq((double) c0 - c)) <= maxDist && (v = getFloat(c0, r, band)) != nodata) {
+						double dp = 1.0 / std::pow(d, exp);
+						a += dp * v;
+						b += dp;
+						++cnt;
+						break;
+					}
+				}
+				for(int r0 = r - 1; r0 >= 0; --r0) {
+					if((d = g_sq((double) r0 - r)) <= maxDist && (v = getFloat(c, r0, band)) != nodata) {
+						double dp = 1.0 / std::pow(d, exp);
+						a += dp * v;
+						b += dp;
+						++cnt;
+						break;
+					}
+				}
+				for(int r0 = r + 1; r0 < rows; ++r0) {
+					if((d = g_sq((double) r0 - r)) <= maxDist && (v = getFloat(c, r0, band)) != nodata) {
+						double dp = 1.0 / std::pow(d, exp);
+						a += dp * v;
+						b += dp;
+						++cnt;
+						break;
 					}
 				}
 
-				if (cnt >= count) {
-					tmp.setFloat(c, r, (a / b), band);
-					found = true;
-					break;
-				}
-
-				rad += 1.0;
-
-			} while (rad < g_min(cols, rows));
-
-			if (!found)
-				g_warn("Pixel not filled at " << c << "," << r << ". Consider larger radius or smaller count.");
+				output.setFloat(c, r, cnt ? (a / b) : nodata);
+			}
 		}
 	}
-	writeTo(tmp);
+
 }
 
 using namespace geo::raster::util;
