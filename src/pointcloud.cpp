@@ -909,21 +909,23 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 		for(size_t c = 0; c < (size_t) cols; ++c) {
 			size_t count = grid.get(r * cols + c, values);
 			rast.setFloat((int) c, (int) r, count, 1);
+			int band = 2;
 			if(count) {
 				double x = props.toX(c) + props.resolutionX();
 				double y = props.toY(r) + props.resolutionY();
-				int band = 2;
 				for(size_t i = 0; i < computers.size(); ++i) {
 					computers[i]->compute(x, y, values, radius, out);
 					for(double val : out)
-						rast.setFloat((int) c, (int) r, val == NODATA ? NODATA : val, band++);
+						rast.setFloat((int) c, (int) r, std::isnan(val) ? NODATA : val, band++);
 					out.clear();
 				}
-				values.clear();
 			} else {
-				//for(size_t i = 0; i < computers.size(); ++i)
-				//	rast.setFloat((int) c, (int) r, NODATA, i + 2);
+				for(size_t i = 0; i < computers.size(); ++i) {
+					for(int j = 0; j < computers[i]->bandCount(); ++j)
+						rast.setFloat((int) c, (int) r, NODATA, band++);
+				}
 			}
+			values.clear();
 		}
 	}
 }
