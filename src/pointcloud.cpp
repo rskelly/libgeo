@@ -135,6 +135,94 @@ bool PCFile::containsBuffered(double x, double y) const {
 
 PCFile::~PCFile() {}
 
+PCPointFilter::PCPointFilter() :
+	minScanAngle(-90),
+	maxScanAngle(90),
+	keepEdges(false),
+	minZ(DBL_MIN),
+	maxZ(DBL_MAX),
+	minIntensity(DBL_MIN),
+	maxIntensity(DBL_MAX),
+	lastOnly(false),
+	firstOnly(false) {
+}
+
+void PCPointFilter::printHelp(std::ostream& str) {
+	str << " Point filtering parameters:\n"
+		<< " -p:c <class(es)>     Comma-delimited list of classes to keep.\n"
+		<< " -p:minz <z>          The minimum height threshold.\n"
+		<< " -p:maxz <z>          The maximum height threshold.\n"
+		<< " -p:mini <intensity>  The minimum intensity.\n"
+		<< " -p:maxi <intensity>  The maximum intensity.\n"
+		<< " -p:mina <angle>      The minimum scan angle.\n"
+		<< " -p:maxa <angle>      The maximum scan angle.\n"
+		<< " -p:f                 First returns only\n"
+		<< " -p:l                 Last returns only\n";
+}
+
+bool PCPointFilter::parseArgs(int& idx, char** argv) {
+	std::string v = argv[idx];
+	bool found = false;
+	if(v == "-p:c") {
+		std::vector<std::string> tmp;
+		std::string cls = argv[++idx];
+		Util::splitString(std::back_inserter(tmp), cls);
+		for(const std::string& t : tmp)
+			classes.push_back(atoi(t.c_str()));
+		found = true;
+	} else if(v == "-p:l") {
+		lastOnly = true;
+		found = true;
+	} else if(v == "-p:f") {
+		firstOnly = true;
+		found = true;
+	} else if(v == "-p:minz") {
+		minZ = atof(argv[++idx]);
+		found = true;
+	} else if(v == "-p:maxz") {
+		maxZ = atof(argv[++idx]);
+		found = true;
+	} else if(v == "-p:mini") {
+		minIntensity = atof(argv[++idx]);
+		found = true;
+	} else if(v == "-p:maxi") {
+		maxIntensity = atof(argv[++idx]);
+		found = true;
+	} else if(v == "-p:mina") {
+		minScanAngle = atof(argv[++idx]);
+		found = true;
+	} else if(v == "-p:maxa") {
+		maxScanAngle = atof(argv[++idx]);
+		found = true;
+	} else if(v == "-p:e") {
+		keepEdges = true;
+		found = true;
+	}
+	return found;
+}
+
+bool PCPointFilter::keep(const geo::pc::Point& pt) const {
+	if(lastOnly && !pt.isLast())
+		return false;
+	if(firstOnly && !pt.isFirst())
+		return false;
+	double z = pt.z();
+	if(z < minZ || z > maxZ ||
+			pt.intensity() < minIntensity || pt.intensity() > maxIntensity ||
+			pt.scanAngle() < minScanAngle || pt.scanAngle() > maxScanAngle ||
+			(pt.isEdge() && !keepEdges))
+		return false;
+	if(!classes.empty()) {
+		int cls = pt.classId();
+		for(size_t i = 0; i < classes.size(); ++i) {
+			if(cls == classes[i])
+				return true;
+		}
+		return false;
+	}
+	return true;
+}
+
 
 const long maxPoints = 20000000;
 

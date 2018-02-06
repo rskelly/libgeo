@@ -552,44 +552,37 @@ public:
 	bool lastOnly;				///< Only keep the last returns. Default false.
 	bool firstOnly;				///< Only keep the first returns. Default false.
 
-	PCPointFilter() :
-		minScanAngle(-90),
-		maxScanAngle(90),
-		keepEdges(false),
-		minZ(DBL_MIN),
-		maxZ(DBL_MAX),
-		minIntensity(DBL_MIN),
-		maxIntensity(DBL_MAX),
-		lastOnly(false),
-		firstOnly(false) {
-	}
+	/**
+	 * Construct a PCPointFilter.
+	 */
+	PCPointFilter();
+
+	/**
+	 * Print the command-line parameters that can be used to
+	 * configure a PCPointFilter.
+	 * @param str An output stream.
+	 */
+	static void printHelp(std::ostream& str);
+
+	/**
+	 * Configure this object by reading the arguments from the command line.
+	 * Use PCPointFilter::printHelp to print the expected arguments.
+	 * If the argument at the current index is relevant to this item,
+	 * return true to notify the caller. Updates the index if
+	 * more than one item is read. The caller is responsible for
+	 * incrementing the index before the next item.
+	 * @param idx  The index of the current argument.
+	 * @param argv The array of arguments.
+	 * @return True, if the current argument was consumed.
+	 */
+	bool parseArgs(int& idx, char** argv);
 
 	/**
 	 * Returns true if the point satisfied the filter conditions.
 	 * @param pt A Point instance.
 	 * @return True if the point should be kept.
 	 */
-	bool keep(const geo::pc::Point& pt) const {
-		if(lastOnly && !pt.isLast())
-			return false;
-		if(firstOnly && !pt.isFirst())
-			return false;
-		double z = pt.z();
-		if(z < minZ || z > maxZ ||
-				pt.intensity() < minIntensity || pt.intensity() > maxIntensity ||
-				pt.scanAngle() < minScanAngle || pt.scanAngle() > maxScanAngle ||
-				(pt.isEdge() && !keepEdges))
-			return false;
-		if(!classes.empty()) {
-			int cls = pt.classId();
-			for(size_t i = 0; i < classes.size(); ++i) {
-				if(cls == classes[i])
-					return true;
-			}
-			return false;
-		}
-		return true;
-	}
+	bool keep(const geo::pc::Point& pt) const;
 
 };
 

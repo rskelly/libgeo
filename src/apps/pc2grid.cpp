@@ -5,13 +5,16 @@
  *      Author: rob
  */
 
-#include <pointcloud.hpp>
 #include <fstream>
 #include <vector>
 #include <unordered_set>
 #include <iostream>
 
+#include <pointcloud.hpp>
+
 #include "pointcloud.hpp"
+
+using namespace geo::pc;
 
 void usage() {
 	std::cerr << "Usage: pc2grid [options] <output raster> <input las [*]>\n"
@@ -30,14 +33,11 @@ void usage() {
 			<< "                 For percentile, use the form, 'percenile:n', where\n"
 			<< "                 n is the percentile (no % sign); 1 - 99.\n"
 			<< " -i <density>    The estimated number of points per cell underestimating this\n"
-			<< "                 saves disk space at the cost of efficiency.\n"
-			<< " Point filtering parameters:\n"
-			<< " -c <class(es)>  Comma-delimited list of classes to keep.\n"
-			<< " -t <threshold>  The minimum height threshold.\n"
-			<< " -f              First returns only\n"
-			<< " -l              Last returns only\n";
+			<< "                 saves disk space at the cost of efficiency.\n\n";
 
-	std::cerr << " Available computers: \n";
+	PCPointFilter::printHelp(std::cerr);
+
+	std::cerr << "\n Available computers: \n";
 	for(auto& item : geo::pc::Rasterizer::availableComputers())
 		std::cerr << " - " << item.first << ": " << item.second << ".\n";
 
@@ -59,23 +59,15 @@ int main(int argc, char** argv) {
 	std::string mapFile;
 	std::vector<std::string> types;
 	std::vector<std::string> args;
-	geo::pc::PCPointFilter filter;
+	PCPointFilter filter;
 
 	for(int i = 1; i < argc; ++i) {
+		if(filter.parseArgs(i, argv))
+			continue;
 		std::string v = argv[i];
 		if(v == "-m") {
 			std::string type = argv[++i];
 			Util::splitString(std::back_inserter(types), Util::lower(type), ",");
-		} else if(v == "-c") {
-			std::vector<std::string> tmp;
-			std::string cls = argv[++i];
-			Util::splitString(std::back_inserter(tmp), cls);
-			for(const std::string& t : tmp)
-				filter.classes.push_back(atoi(t.c_str()));
-		} else if(v == "-l") {
-			filter.lastOnly = true;
-		} else if(v == "-f") {
-			filter.firstOnly = true;
 		} else if(v == "-mf") {
 			mapFile = argv[++i];
 		} else if(v == "-r") {
@@ -121,7 +113,7 @@ int main(int argc, char** argv) {
 	std::vector<std::string> infiles(args.begin() + 1, args.end());
 
 	try {
-		geo::pc::Rasterizer r(infiles);
+		Rasterizer r(infiles);
 		r.setFilter(filter);
 		r.rasterize(args[0], types, res, easting, northing, radius, srid, density, 0, mapFile);
 	} catch(const std::exception& ex) {
