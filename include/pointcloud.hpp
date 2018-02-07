@@ -47,6 +47,8 @@ private:
 	double m_fileBounds[6];					///< The bounding box of the actual point cloud (may differ from tile bounds.)
 	double m_bounds[4];						///< The nominal bounding box.
 	double m_bufferedBounds[4];				///< The buffered bounding box.
+	size_t m_pointCount;					///< The number of points in the file set.
+	bool m_inited;                          ///< True if the PCFile has already been initialized.
 	std::vector<std::string> m_filenames;	///< The list of filenames of consituent files.
 
 public:
@@ -116,6 +118,12 @@ public:
 	 * Returns true if the point is within the buffered bounds of the tile.
 	 */
 	bool containsBuffered(double x, double y) const;
+
+	/**
+	 * Returns the point count.
+	 * @return The point count.
+	 */
+	size_t pointCount() const;
 
 	/**
 	 * Initialize the last file. Currently just computes its bounds. If
@@ -667,6 +675,14 @@ public:
 	void rasterize(const std::string& filename, const std::vector<std::string>& types, double res,
 		double easting, double northing, double radius, int srid, int density = 32, double ext = 0,
 		const std::string& mapFile = "");
+
+	/**
+	 * Esitmate the point density (per cell) given the source files, resolution and search radius.
+	 * @param The grid resolution.
+	 * @param The search radius. Set to zero to use the cell bounds.
+	 * @return The estimated point density per cell.
+	 */
+	double density(double resolution, double radius);
 
 	/**
 	 * Set a point filter to use for filtering points. Removes the old filter.

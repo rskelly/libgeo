@@ -36,7 +36,9 @@ PCFile::PCFile(const std::string& filename, double x, double y, double size, dou
 	m_x(x), m_y(y),
 	m_fileBounds{MAX_DBL, MAX_DBL, MIN_DBL, MIN_DBL, MAX_DBL, MIN_DBL},
 	m_bounds{x, y, x + size, y + size},
-	m_bufferedBounds{x - buffer, y - buffer, x + size + buffer, y + size + buffer} {
+	m_bufferedBounds{x - buffer, y - buffer, x + size + buffer, y + size + buffer},
+	m_pointCount(0),
+	m_inited(false) {
 
 	m_filenames.push_back(filename);
 }
@@ -46,6 +48,8 @@ PCFile::PCFile(const std::vector<std::string>& filenames, double x, double y, do
 	m_fileBounds{MAX_DBL, MAX_DBL, MIN_DBL, MIN_DBL, MAX_DBL, MIN_DBL},
 	m_bounds{x, y, x + size, y + size},
 	m_bufferedBounds{x - buffer, y - buffer, x + size + buffer, y + size + buffer},
+	m_pointCount(0),
+	m_inited(false),
 	m_filenames(filenames) {
 }
 
@@ -70,6 +74,10 @@ double PCFile::y() const {
 	return m_y;
 }
 
+size_t PCFile::pointCount() const {
+	return m_pointCount;
+}
+
 void PCFile::fileBounds(double* bounds) const {
 	for(int i = 0; i < 6; ++i)
 		bounds[i] = m_fileBounds[i];
@@ -90,6 +98,9 @@ const std::vector<std::string>& PCFile::filenames() const {
 }
 
 void PCFile::init(bool useHeader) {
+	if(m_inited)
+		return;
+	m_pointCount = 0;
 	liblas::ReaderFactory f;
 	for(const std::string& filename : m_filenames) {
 		std::ifstream str(filename, std::ios::in | std::ios::binary);
@@ -108,6 +119,7 @@ void PCFile::init(bool useHeader) {
 			if(maxy > m_fileBounds[3]) m_fileBounds[3] = maxy;
 			if(minz < m_fileBounds[4]) m_fileBounds[4] = minz;
 			if(maxz > m_fileBounds[5]) m_fileBounds[5] = maxz;
+			m_pointCount += hdr.GetPointRecordsCount();
 		} else {
 			while(reader.ReadNextPoint()) {
 				const liblas::Point& pt = reader.GetPoint();
@@ -120,9 +132,11 @@ void PCFile::init(bool useHeader) {
 				if(y > m_fileBounds[3]) m_fileBounds[3] = y;
 				if(z < m_fileBounds[4]) m_fileBounds[4] = z;
 				if(z > m_fileBounds[5]) m_fileBounds[5] = z;
+				++m_pointCount;
 			}
 		}
 	}
+	m_inited = true;
 }
 
 bool PCFile::contains(double x, double y) const {
@@ -736,6 +750,7 @@ private:
 		size_t offset = idx * m_lineLength;
 		MappedPoint mp = {x, y, z, intensity, angle, cls, retNum, numRets, edge};
 		MappedLine ml;
+		// Retrieve the line header at the offset.
 		std::memcpy(&ml, data + offset, sizeof(MappedLine));
 		if(ml.idx != idx) {
 			// There is no record in the points file; start one.
@@ -755,7 +770,7 @@ private:
 				ml.nextLine = m_currentLine++;
 				std::memcpy(data + offset, &ml, sizeof(MappedLine));
 				if(ml.nextLine * m_lineLength >= m_totalLength) {
-					resize(m_totalLength * 2);
+					resize(m_totalLength + std::max(m_lineLength, (size_t) (m_totalLength * 0.25)));
 					data = (char*) m_mapped.data();
 				}
 				offset = ml.nextLine * m_lineLength;
@@ -912,6 +927,30 @@ Rasterizer::Rasterizer(const std::vector<std::string> filenames) :
 
 const std::unordered_map<std::string, std::string>& Rasterizer::availableComputers() {
 	return computerNames;
+}
+
+double Rasterizer::density(double resolution, double radius) {
+	size_t count = 0;
+	double w, h, cells, sum = 0;
+	double fBounds[6];
+	for(PCFile& f: m_files) {
+		f.init();
+		f.fileBounds(fBounds);
+		w = fBounds[2] - fBounds[0];
+		h = fBounds[3] - fBounds[1];
+		cells = (w * h) / (resolution * resolution);
+		if(cells > 0) {
+			sum += f.pointCount() / cells;
+			++count;
+		}
+	}
+	std::cerr << sum << ", " << count << "\n";
+	if(radius == 0) {
+		return (sum / count) * 3;
+	} else {
+		double cell = (M_PI * radius * radius) / (resolution * resolution);
+		return (sum / count) * 3 * cell;
+	}
 }
 
 void Rasterizer::rasterize(const std::string& filename, const std::vector<std::string>& types,

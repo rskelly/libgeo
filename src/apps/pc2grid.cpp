@@ -33,7 +33,8 @@ void usage() {
 			<< "                 For percentile, use the form, 'percenile:n', where\n"
 			<< "                 n is the percentile (no % sign); 1 - 99.\n"
 			<< " -i <density>    The estimated number of points per cell underestimating this\n"
-			<< "                 saves disk space at the cost of efficiency.\n\n";
+			<< "                 saves disk space at the cost of efficiency.\n"
+			<< " -t              Estimate the per-cell point density. Do nothing else\n\n";
 
 	PCPointFilter::printHelp(std::cerr);
 
@@ -55,6 +56,7 @@ int main(int argc, char** argv) {
 	double northing = 0;
 	double radius = -1;
 	int density = 64;
+	bool estimate = false;
 	uint16_t srid = 0;
 	std::string mapFile;
 	std::vector<std::string> types;
@@ -68,8 +70,6 @@ int main(int argc, char** argv) {
 		if(v == "-m") {
 			std::string type = argv[++i];
 			Util::splitString(std::back_inserter(types), Util::lower(type), ",");
-		} else if(v == "-mf") {
-			mapFile = argv[++i];
 		} else if(v == "-r") {
 			res = atof(argv[++i]);
 		} else if(v == "-i") {
@@ -83,7 +83,7 @@ int main(int argc, char** argv) {
 		} else if(v == "-n") {
 			northing = atof(argv[++i]);
 		} else if(v == "-t") {
-			filter.minZ = atof(argv[++i]);
+			estimate = true;
 		} else {
 			args.push_back(argv[i]);
 		}
@@ -115,6 +115,12 @@ int main(int argc, char** argv) {
 	try {
 		Rasterizer r(infiles);
 		r.setFilter(filter);
+		if(estimate) {
+			density = (int) std::ceil(r.density(res, radius));
+			std::cerr << "Estimated point density: " << density << "\n";
+		} else {
+			std::cerr << "Point density: " << density << "\n";
+		}
 		r.rasterize(args[0], types, res, easting, northing, radius, srid, density, 0, mapFile);
 	} catch(const std::exception& ex) {
 		std::cerr << ex.what() << "\n";
