@@ -630,10 +630,16 @@ void Grid::voidFillIDW(const std::string& filename, double radius, int count, do
 	if (exp <= 0.0)
 		throw std::invalid_argument("Exponent must be larger than 0.");
 
+	GridProps iprops(props());
+	iprops.setBands(1);
+	iprops.setWritable(true);
+	MemRaster input(iprops);
+	writeTo(input, iprops.cols(), iprops.rows(), 0, 0, 0, 0, band);
+
 	GridProps oprops(props());
 	oprops.setBands(1);
 	oprops.setWritable(true);
-	Raster output(filename, oprops);
+	MemRaster output(oprops);
 
 	double maxDist = 100;
 
@@ -642,14 +648,16 @@ void Grid::voidFillIDW(const std::string& filename, double radius, int count, do
 	int rows = props().rows();
 	int cols = props().cols();
 	for (int r = 0; r < rows; ++r) {
+		if(r % 10 == 0)
+			std::cerr << "Row " << r << " of " << rows << "\n";
 		for (int c = 0; c < cols; ++c) {
-			if ((v = getFloat(c, r, band)) != nodata) {
+			if ((v = input.getFloat(c, r)) != nodata) {
 				output.setFloat(c, r, v);
 			} else {
 				double a = 0, b = 0;
 				int cnt = 0;
 				for(int c0 = c - 1; c0 >= 0; --c0) {
-					if((d = g_sq((double) c0 - c)) <= maxDist && (v = getFloat(c0, r, band)) != nodata) {
+					if((d = g_sq((double) c0 - c)) <= maxDist && (v = input.getFloat(c0, r)) != nodata) {
 						double dp = 1.0 / std::pow(d, exp);
 						a += dp * v;
 						b += dp;
@@ -658,7 +666,7 @@ void Grid::voidFillIDW(const std::string& filename, double radius, int count, do
 					}
 				}
 				for(int c0 = c + 1; c0 < cols; ++c0) {
-					if((d = g_sq((double) c0 - c)) <= maxDist && (v = getFloat(c0, r, band)) != nodata) {
+					if((d = g_sq((double) c0 - c)) <= maxDist && (v = input.getFloat(c0, r)) != nodata) {
 						double dp = 1.0 / std::pow(d, exp);
 						a += dp * v;
 						b += dp;
@@ -667,7 +675,7 @@ void Grid::voidFillIDW(const std::string& filename, double radius, int count, do
 					}
 				}
 				for(int r0 = r - 1; r0 >= 0; --r0) {
-					if((d = g_sq((double) r0 - r)) <= maxDist && (v = getFloat(c, r0, band)) != nodata) {
+					if((d = g_sq((double) r0 - r)) <= maxDist && (v = input.getFloat(c, r0)) != nodata) {
 						double dp = 1.0 / std::pow(d, exp);
 						a += dp * v;
 						b += dp;
@@ -676,7 +684,7 @@ void Grid::voidFillIDW(const std::string& filename, double radius, int count, do
 					}
 				}
 				for(int r0 = r + 1; r0 < rows; ++r0) {
-					if((d = g_sq((double) r0 - r)) <= maxDist && (v = getFloat(c, r0, band)) != nodata) {
+					if((d = g_sq((double) r0 - r)) <= maxDist && (v = input.getFloat(c, r0)) != nodata) {
 						double dp = 1.0 / std::pow(d, exp);
 						a += dp * v;
 						b += dp;
@@ -689,6 +697,9 @@ void Grid::voidFillIDW(const std::string& filename, double radius, int count, do
 			}
 		}
 	}
+
+	Raster routput(filename, oprops);
+	output.writeTo(routput);
 
 }
 
