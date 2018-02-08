@@ -68,8 +68,6 @@ int main(int argc, char** argv) {
 		if(v == "-m") {
 			std::string type = argv[++i];
 			Util::splitString(std::back_inserter(types), Util::lower(type), ",");
-		} else if(v == "-mf") {
-			mapFile = argv[++i];
 		} else if(v == "-r") {
 			res = atof(argv[++i]);
 		} else if(v == "-i") {
@@ -82,8 +80,6 @@ int main(int argc, char** argv) {
 			easting = atof(argv[++i]);
 		} else if(v == "-n") {
 			northing = atof(argv[++i]);
-		} else if(v == "-t") {
-			filter.minZ = atof(argv[++i]);
 		} else {
 			args.push_back(argv[i]);
 		}
