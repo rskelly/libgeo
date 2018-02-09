@@ -655,7 +655,8 @@ void Grid::voidFillIDW(const std::string& filename, double radius, int count, do
     int outminc, outminr, outmaxc, outmaxr;
 
     for (int r = 0; r < rows; ++r) {
-
+    	if(r % 100 == 0)
+    		std::cerr << "Row " << r << " of " << rows << "\n";
 		for (int c = 0; c < cols; ++c) {
 
 			v = input.getFloat(c, r);
