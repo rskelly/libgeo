@@ -969,14 +969,15 @@ namespace geo {
             bool m_sint, m_dint;
             T m_target;
             U m_fill;
+            int m_band;
         public:
-            TargetFillOperator(Grid* src, Grid* dst, T target, U fill) :
-                m_src(src), m_dst(dst), m_target(target), m_fill(fill) {
+            TargetFillOperator(Grid* src, Grid* dst, T target, U fill, int band = 1) :
+                m_src(src), m_dst(dst), m_target(target), m_fill(fill), m_band(band) {
                     m_sint = m_src->props().isInt();
                     m_dint = m_dst->props().isInt();
             }
-            TargetFillOperator(Grid* grd, T target, U fill) :
-                m_src(grd), m_dst(grd), m_target(target), m_fill(fill) {
+            TargetFillOperator(Grid* grd, T target, U fill, int band = 1) :
+                m_src(grd), m_dst(grd), m_target(target), m_fill(fill), m_band(band) {
                     m_sint = m_src->props().isInt();
                     m_dint = m_dst->props().isInt();
             }
@@ -988,16 +989,16 @@ namespace geo {
             }
             bool shouldFill(int col, int row) const {
                 if(m_sint) {
-                    return m_src->getInt(col, row) == m_target;
+                    return m_src->getInt(col, row, m_band) == m_target;
                 } else {
-                    return m_src->getFloat(col, row) == m_target;
+                    return m_src->getFloat(col, row, m_band) == m_target;
                 }
             }
             void fill(int col, int row) const {
                 if(m_dint) {
-                    m_dst->setInt(col, row, (int) m_fill);
+                    m_dst->setInt(col, row, (int) m_fill, m_band);
                 } else {
-                    m_dst->setFloat(col, row, (double) m_fill);
+                    m_dst->setFloat(col, row, (double) m_fill, m_band);
                 }
             }
             ~TargetFillOperator() {}

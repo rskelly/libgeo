@@ -642,58 +642,98 @@ void Grid::voidFillIDW(const std::string& filename, double radius, int count, do
 	MemRaster output(oprops);
 
 	double maxDist = 100;
+	bool holesOnly = true;
 
 	double nodata = props().nodata();
 	double v, d;
 	int rows = props().rows();
 	int cols = props().cols();
-	for (int r = 0; r < rows; ++r) {
-		if(r % 10 == 0)
-			std::cerr << "Row " << r << " of " << rows << "\n";
+
+    TargetFillOperator<double, double> op1(&input, nodata, 99999);
+    TargetFillOperator<double, double> op2(&input, &output, 99999, nodata);
+    TargetFillOperator<double, double> op3(&input, 99999, 99998);
+    int outminc, outminr, outmaxc, outmaxr;
+
+    for (int r = 0; r < rows; ++r) {
+    	if(r % 100 == 0)
+    		std::cerr << "Row " << r << " of " << rows << "\n";
 		for (int c = 0; c < cols; ++c) {
-			if ((v = input.getFloat(c, r)) != nodata) {
+
+			v = input.getFloat(c, r);
+			if(v == 99998) {
+
+				//output.setFloat(c, r, nodata);
+
+			} else if (v != nodata) {
+
 				output.setFloat(c, r, v);
-			} else {
-				double a = 0, b = 0;
+
+			} else if(!holesOnly) {
+
+				double dp, a = 0, b = 0;
 				int cnt = 0;
-				for(int c0 = c - 1; c0 >= 0; --c0) {
-					if((d = g_sq((double) c0 - c)) <= maxDist && (v = input.getFloat(c0, r)) != nodata) {
-						double dp = 1.0 / std::pow(d, exp);
+				for(int r0 = g_max(0, r - maxDist); r0 < g_min(rows, r + maxDist + 1); ++r0) {
+					for(int c0 = g_max(0, c - maxDist); c0 < g_min(cols, c + maxDist + 1); ++c0) {
+						if((c0 == c && r0 == r) || (d = g_sq(c0 - c) + g_sq(r0 - r)) > maxDist || (v = input.getFloat(c0, r0)) == nodata)
+							continue;
+						dp = 1.0 / std::pow(d, exp);
 						a += dp * v;
 						b += dp;
 						++cnt;
-						break;
 					}
 				}
-				for(int c0 = c + 1; c0 < cols; ++c0) {
-					if((d = g_sq((double) c0 - c)) <= maxDist && (v = input.getFloat(c0, r)) != nodata) {
-						double dp = 1.0 / std::pow(d, exp);
-						a += dp * v;
-						b += dp;
-						++cnt;
-						break;
-					}
-				}
-				for(int r0 = r - 1; r0 >= 0; --r0) {
-					if((d = g_sq((double) r0 - r)) <= maxDist && (v = input.getFloat(c, r0)) != nodata) {
-						double dp = 1.0 / std::pow(d, exp);
-						a += dp * v;
-						b += dp;
-						++cnt;
-						break;
-					}
-				}
-				for(int r0 = r + 1; r0 < rows; ++r0) {
-					if((d = g_sq((double) r0 - r)) <= maxDist && (v = input.getFloat(c, r0)) != nodata) {
-						double dp = 1.0 / std::pow(d, exp);
-						a += dp * v;
-						b += dp;
-						++cnt;
-						break;
+				output.setFloat(c, r, cnt ? (a / b) : nodata);
+
+			} else {
+
+				// Fill the hole with a unique value.
+	            input.floodFill(c, r, op1, false, &outminc, &outminr, &outmaxc, &outmaxr);
+
+	            // If it touches the edges, re-fill with nodata and continue.
+	            if(outminc == 0 || outmaxc == cols - 1 || outminr == 0 || outmaxr == rows - 1) {
+	            	output.floodFill(c, r, op2, false);
+					input.floodFill(c, r, op3, false);
+	            	continue;
+	            }
+
+	            // Find all the pixels which were filled
+	            std::vector<std::tuple<int, int, double> > vpx;
+	            std::vector<std::tuple<int, int> > npx;
+				for(int r0 = g_max(0, outminr - 1); r0 < g_min(rows, outmaxr + 2); ++r0) {
+					for(int c0 = g_max(0, outminc - 1); c0 < g_min(cols, outmaxc + 2); ++c0) {
+						v = input.getFloat(c0, r0);
+						if(v == 99999) {
+							npx.push_back(std::make_tuple(c0, r0));
+						} else if(v != nodata && v != 99998) {
+							vpx.push_back(std::make_tuple(c0, r0, v));
+						}
 					}
 				}
 
-				output.setFloat(c, r, cnt ? (a / b) : nodata);
+	            // Fill voids using the surrounding pixel values.
+				int pc, pr, nc, nr, cnt;
+				double dp, pv, a, b;
+				for(auto& np : npx) {
+					nc = std::get<0>(np);
+					nr = std::get<1>(np);
+					cnt = 0;
+					a = 0;
+					b = 0;
+					for(auto& vp : vpx) {
+						pc = std::get<0>(vp);
+						pr = std::get<1>(vp);
+						pv = std::get<2>(vp);
+						d = g_sq(pc - nc) + g_sq(pr - nr);
+						dp = 1.0 / std::pow(d, exp);
+						a += dp * pv;
+						b += dp;
+						++cnt;
+					}
+					output.setFloat(nc, nr, cnt ? (a / b) : nodata);
+				}
+
+				// Fill again with a different value so it will be ignored.
+				input.floodFill(c, r, op3, false);
 			}
 		}
 	}
