@@ -18,41 +18,58 @@
 #define VECTOR 2
 #define POINT_CLOUD 3
 
+bool projectBounds(double* bounds, double* gbounds, const char* proj) {
+	OGRSpatialReference osr(proj);
+	OGRSpatialReference gsr;
+	gsr.importFromEPSG(4326);
+	OGRCoordinateTransformation* trans = OGRCreateCoordinateTransformation(&osr, &gsr);
+	if(trans) {
+		for(int i = 0; i < 4; ++i)
+			gbounds[i] = bounds[i];
+		trans->Transform(1, &gbounds[0], &gbounds[1]);
+		trans->Transform(1, &gbounds[2], &gbounds[3]);
+		return true;
+	}
+	return false;
+}
+
 Json::Value asGeom(double* bounds) {
 	Json::Value node(Json::objectValue);
 	Json::Value geom(Json::objectValue);
 	Json::Value coords(Json::arrayValue);
+	Json::Value ring(Json::arrayValue);
 	{
 		Json::Value coord(Json::arrayValue);
 		coord.append(bounds[0]);
 		coord.append(bounds[1]);
-		coords.append(coord);
+		ring.append(coord);
 	}
 	{
 		Json::Value coord(Json::arrayValue);
 		coord.append(bounds[2]);
 		coord.append(bounds[1]);
-		coords.append(coord);
+		ring.append(coord);
 	}
 	{
 		Json::Value coord(Json::arrayValue);
 		coord.append(bounds[2]);
 		coord.append(bounds[3]);
-		coords.append(coord);
+		ring.append(coord);
 	}
 	{
 		Json::Value coord(Json::arrayValue);
 		coord.append(bounds[0]);
 		coord.append(bounds[3]);
-		coords.append(coord);
+		ring.append(coord);
 	}
 	{
 		Json::Value coord(Json::arrayValue);
 		coord.append(bounds[0]);
 		coord.append(bounds[1]);
-		coords.append(coord);
+		ring.append(coord);
 	}
-	geom["type"] = "polygon";
+	coords.append(ring);
+	geom["type"] = "Polygon";
 	geom["coordinates"] = coords;
 	node["geometry"] = geom;
 	return node;
@@ -82,10 +99,14 @@ public:
 	}
 
 	virtual Json::Value asJSON() {
+		double gbounds[4];
+
 		Json::Value node(Json::objectValue);
 		node["type"] = type;
 		node["projection"] = projection;
 		node["bounds"] = asGeom(bounds);
+		if(projectBounds(bounds, gbounds, projection.c_str()))
+			node["geog_bounds"] = asGeom(gbounds);
 		Json::Value jfiles(Json::arrayValue);
 		for(const std::string& file : files)
 			jfiles.append(file);
@@ -201,10 +222,12 @@ public:
 	int geomType;
 	std::string name;
 	double bounds[4];
+	std::string projection;
 
-	VectorLayer(OGRLayer* layer) :
+	VectorLayer(OGRLayer* layer, const std::string& projection) :
 		geomType(layer->GetGeomType()),
-		name(layer->GetName()) {
+		name(layer->GetName()),
+		projection(projection) {
 
 		OGREnvelope env;
 		if(OGRERR_FAILURE != layer->GetExtent(&env, true)) {
@@ -216,10 +239,14 @@ public:
 	}
 
 	Json::Value asJSON() {
+		double gbounds[4];
+
 		Json::Value node(Json::objectValue);
 		node["geomType"] = geomType;
 		node["name"] = name;
 		node["bounds"] = asGeom(bounds);
+		if(projectBounds(bounds, gbounds, projection.c_str()))
+			node["geog_bounds"] = asGeom(gbounds);
 		return node;
 	}
 
@@ -235,7 +262,7 @@ public:
 		files = charToVector(ds->GetFileList());
 
 		for(int i = 0; i < ds->GetLayerCount(); ++i) {
-			layers.push_back(VectorLayer(ds->GetLayer(i)));
+			layers.emplace_back(ds->GetLayer(i), projection);
 			VectorLayer& lyr = layers[i];
 			if(lyr.bounds[0] < bounds[0]) bounds[0] = lyr.bounds[0];
 			if(lyr.bounds[1] < bounds[1]) bounds[1] = lyr.bounds[1];
@@ -330,6 +357,7 @@ bool tryLAS(const std::string& filename, std::unique_ptr<Dataset>& ds) {
 int handleFile(const std::string& filename) {
 
 	std::unique_ptr<Dataset> ds;
+	int ret = 0;
 
 	if(!tryGDAL(filename, ds)) {
 		if(!tryLAS(filename, ds)) {
@@ -344,12 +372,13 @@ int handleFile(const std::string& filename) {
 	} else {
 		node = Json::Value(Json::objectValue);
 		node["error"] = "Failed to understand file.";
+		ret = 1;
 	}
 
 	Json::StreamWriterBuilder wb;
 	std::cout << Json::writeString(wb, node);
 
-	return 0;
+	return ret;
 
 }
 
