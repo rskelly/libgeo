@@ -218,6 +218,17 @@ void GridProps::unsetNodata() {
 	m_nodataSet = false;
 }
 
+void GridProps::bounds(double* bounds) const {
+	double x0 = m_trans[0];
+	double y0 = m_trans[3];
+	double x1 = x0 + m_trans[1] * m_cols;
+	double y1 = y0 + m_trans[5] * m_rows;
+	bounds[0] = g_min(x0, x1);
+	bounds[1] = g_min(y0, y1);
+	bounds[2] = g_max(x0, x1);
+	bounds[3] = g_max(y0, y1);
+}
+
 Bounds GridProps::bounds() const {
 	double x0 = m_trans[0];
 	double y0 = m_trans[3];

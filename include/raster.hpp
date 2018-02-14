@@ -77,6 +77,13 @@ namespace geo {
     		Bounds bounds() const;
 
     		/**
+    		 * Populate an (at least) 4-element double array with the bounding
+    		 * box of this object.
+    		 * @param bounds A four-element double array.
+    		 */
+    		void bounds(double* bounds) const;
+
+    		/**
     		 * Return the name of the GDAL driver used by the raster.
     		 * Only relevant for file-based rasters.
     		 */
