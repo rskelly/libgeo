@@ -381,7 +381,9 @@ int even(int num) {
 }
 
 bool intersects(double* a, double* b) {
-	return !(a[2] <= b[0] || a[0] >= b[2] || a[3] <= b[1] || a[1] >= b[3]);
+	double aa[4] {g_min(a[0], a[2]), g_min(a[1], a[3]), g_max(a[0], a[2]), g_max(a[1], a[3])};
+	double bb[4] {g_min(b[0], b[2]), g_min(b[1], b[3]), g_max(b[0], b[2]), g_max(b[1], b[3])};
+	return !(aa[2] <= bb[0] || aa[0] >= bb[2] || aa[3] <= bb[1] || aa[1] >= bb[3]);
 }
 
 
@@ -707,12 +709,18 @@ geo::pc::Point::~Point() {
 		delete m_point;
 }
 
+/**
+ * Struct used to store the line headers in the point cloud cache file.
+ */
 typedef struct {
-	size_t idx;
-	size_t nextLine;
-	size_t count;
+	size_t idx;			// The index of the cell: row * cols + col
+	size_t nextLine;	// The address in the mapped memory of the next row containing data for this cell.
+	size_t count;		// The number of points in the cell.
 } MappedLine;
 
+/**
+ * Struct used to store point in the point cache file.
+ */
 typedef struct {
 	float x;
 	float y;
@@ -730,10 +738,13 @@ private:
 	geo::util::MappedFile m_mapped;
 	size_t m_lineCount;
 	size_t m_cellCount;
-	size_t m_currentLine;
 	size_t m_lineLength;
 	size_t m_totalLength;
 	std::string m_mapFile;
+
+	size_t m_currentLine;						// The next available line index.
+	std::list<size_t> m_finalized; 				// The line offsets of finalized cells available for re-use.
+	std::unordered_map<size_t, size_t> m_map;   // Maps cell indices to line indices.
 
 	void resize(size_t size) {
 		std::cerr << "resize " << size << "\n";
@@ -746,50 +757,110 @@ private:
 	// if the count >= line count, the next row must be set.
 
 	void writePoint(size_t idx, float x, float y, float z, float intensity, float angle, int cls, int retNum, int numRets, int edge) {
+
 		char* data = (char*) m_mapped.data();
-		size_t offset = idx * m_lineLength;
+		size_t offset;
+		bool newLine;
+
+		if(m_map.find(idx) != m_map.end()) {
+			offset = m_map[idx];
+			newLine = false;
+		} else {
+			if(!m_finalized.empty()) {
+				offset = m_finalized.front();
+				m_finalized.pop_front();
+			} else {
+				offset = m_currentLine++;
+			}
+			m_map[idx] = offset;
+			newLine = true;
+		}
+		offset *= m_lineLength;
+
+		if(offset + m_lineLength >= m_totalLength) {
+			resize(m_totalLength + std::max(m_lineLength, (size_t) (m_totalLength * 0.25)));
+			data = (char*) m_mapped.data();
+		}
+
 		MappedPoint mp = {x, y, z, intensity, angle, cls, retNum, numRets, edge};
-		MappedLine ml;
-		// Retrieve the line header at the offset.
-		std::memcpy(&ml, data + offset, sizeof(MappedLine));
-		if(ml.idx != idx) {
+		MappedLine ml = {0, 0, 0};
+
+		if(newLine) {
+
 			// There is no record in the points file; start one.
 			ml.idx = idx;
 			ml.count = 1;
 			ml.nextLine = 0;
 			std::memcpy(data + offset, &ml, sizeof(MappedLine));
 			std::memcpy(data + offset + sizeof(MappedLine), &mp, sizeof(MappedPoint));
+
 		} else {
-			// Get the current line start and try to add to it.
+
+			// Retrieve the line header at the offset.
+			std::memcpy(&ml, data + offset, sizeof(MappedLine));
+
+			// Find the last line for this cell.
 			while(ml.nextLine) {
 				offset = ml.nextLine * m_lineLength;
 				std::memcpy(&ml, data + offset, sizeof(MappedLine));
 			}
+
+			// If the line is full, update the nextLine and grab a finalized one or start a new one.
 			if(ml.count == m_lineCount) {
-				// If the line is full, update the nextLine and start a new one.
-				ml.nextLine = m_currentLine++;
-				std::memcpy(data + offset, &ml, sizeof(MappedLine));
-				if(ml.nextLine * m_lineLength >= m_totalLength) {
+
+				if(!m_finalized.empty()) {
+					ml.nextLine = m_finalized.front();
+					m_finalized.pop_front();
+				} else {
+					ml.nextLine = m_currentLine++;
+				}
+
+				// If the new offset is too far, resize the memory.
+				if(ml.nextLine * m_lineLength + m_lineLength >= m_totalLength) {
 					resize(m_totalLength + std::max(m_lineLength, (size_t) (m_totalLength * 0.25)));
 					data = (char*) m_mapped.data();
 				}
+
+				// Copy the line header to the previous line
+				std::memcpy(data + offset, &ml, sizeof(MappedLine));
+
+				// Create the new line.
 				offset = ml.nextLine * m_lineLength;
 				ml.nextLine = 0;
 				ml.count = 1;
 				std::memcpy(data + offset, &ml, sizeof(MappedLine));
 				std::memcpy(data + offset + sizeof(MappedLine), &mp, sizeof(MappedPoint));
+
 			} else {
+
+				// Add the point toe the line.
 				size_t count = ml.count++;
 				std::memcpy(data + offset, &ml, sizeof(MappedLine));
 				offset += sizeof(MappedLine) + count * sizeof(MappedPoint);
 				std::memcpy(data + offset, &mp, sizeof(MappedPoint));
+
 			}
 		}
 	}
 
-	size_t readPoints(size_t idx, std::vector<geo::pc::Point>& pts) {
+	void finalize(size_t idx) {
+		size_t offset = m_map[idx];
+		m_finalized.push_back(offset);
 		char* data = (char*) m_mapped.data();
-		size_t offset = idx * m_lineLength;
+		MappedLine ml = {0, 0, 0};
+		std::memcpy(&ml, data + offset * m_lineLength, sizeof(MappedLine));
+		while(ml.nextLine) {
+			m_finalized.push_back(ml.nextLine);
+			std::memcpy(&ml, data + ml.nextLine * m_lineLength, sizeof(MappedLine));
+		}
+		m_map.erase(idx);
+	}
+
+	size_t readPoints(size_t idx, std::vector<geo::pc::Point>& pts) {
+		if(!hasUnread(idx))
+			return 0; //g_runerr("No unread pixel for that index.");
+		char* data = (char*) m_mapped.data();
+		size_t offset = m_map[idx] * m_lineLength;
 		size_t count = 0;
 		MappedLine ml;
 		MappedPoint mp;
@@ -807,6 +878,7 @@ private:
 			}
 			offset = ml.nextLine * m_lineLength;
 		} while(ml.nextLine);
+		finalize(idx);
 		return count;
 	}
 
@@ -815,26 +887,27 @@ public:
 	MemGrid() :
 		m_lineCount(0),
 		m_cellCount(0),
-		m_currentLine(0),
 		m_lineLength(0),
-		m_totalLength(0) {
+		m_totalLength(0),
+		m_currentLine(0) {
 	}
 
-	MemGrid(size_t cellCount, size_t lineCount = 128) {
+	MemGrid(size_t cellCount, size_t lineCount) :
+		MemGrid() {
 		init(cellCount, lineCount);
 	}
 
-	MemGrid(const std::string& mapFile, size_t cellCount, size_t lineCount = 128) {
-		init(mapFile, cellCount, lineCount);
-	}
-
-	void init(const std::string& mapFile, size_t cellCount, size_t lineCount = 128) {
-		m_lineCount = lineCount;
+	/**
+	 * If the line count is zero, will calculate the line count to fit in a page.
+	 */
+	void init(const std::string& mapFile, size_t cellCount, size_t lineCount) {
+		m_lineCount = lineCount == 0 ? (sysconf(_SC_PAGESIZE) - sizeof(MappedLine)) / sizeof(MappedPoint) : lineCount;
 		m_cellCount = cellCount;
-		m_currentLine = cellCount;
 		m_lineLength = sizeof(MappedLine) + sizeof(MappedPoint) * m_lineCount;
 		m_totalLength = cellCount * m_lineLength;
 		m_mapFile = mapFile;
+
+		std::cerr << "MemGrid: cells: " << cellCount << "; line count: " << lineCount << "; total size: " << m_totalLength << "; line length: " << m_lineLength << "\n";
 
 		if(mapFile.empty()) {
 			m_mapped.init(m_totalLength, true);
@@ -843,8 +916,16 @@ public:
 		}
 	}
 
-	void init(size_t cellCount, size_t lineCount = 128) {
+	void init(size_t cellCount, size_t lineCount) {
 		init("", cellCount, lineCount);
+	}
+
+	bool hasUnread(size_t idx) {
+		return m_map.find(idx) != m_map.end();
+	}
+
+	const std::unordered_map<size_t, size_t>& indexMap() const {
+		return m_map;
 	}
 
 	void add(size_t idx, double x, double y, double z, double intensity, double angle, int cls, int retNum, int numRets, int edge) {
@@ -945,17 +1026,12 @@ double Rasterizer::density(double resolution, double radius) {
 		}
 	}
 	std::cerr << sum << ", " << count << "\n";
-	if(radius == 0) {
-		return (sum / count) * 3;
-	} else {
-		double cell = (M_PI * radius * radius) / (resolution * resolution);
-		return (sum / count) * 3 * cell;
-	}
+	double cell = radius > 0 ? (M_PI * radius * radius) / (resolution * resolution) : 1;
+	return (sum / count) * 1.5 * cell;
 }
 
 void Rasterizer::rasterize(const std::string& filename, const std::vector<std::string>& types,
-		double res,	double easting, double northing, double radius, int srid, int density, double ext,
-		const std::string& mapFile) {
+		double res,	double easting, double northing, double radius, int srid, int density, double ext) {
 
 	std::vector<std::unique_ptr<Computer> > computers;
 	for(const std::string& name : types)
@@ -998,81 +1074,139 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	props.setWritable(true);
 	props.setBands(bandCount + 1);
 	Raster rast(filename, props);
+	rast.fillFloat(0, 1);
+	rast.fillFloat(NODATA, 2);
 
 	liblas::ReaderFactory fact;
 	MemGrid grid;
 
-	if(mapFile.empty()) {
-		grid.init(cols * rows, density);
+	// The squared radius for comparison.
+	double rad0 = radius * radius;
+	// The radius of the "box" of pixels to check for a claim on the current point.
+	int radpx = (int) std::ceil(radius / std::abs(props.resolutionX()));
+	int i = 0;
 
-		// The squared radius for comparison.
-		double rad0 = radius * radius;
-		// The radius of the "box" of pixels to check for a claim on the current point.
-		int radpx = (int) std::ceil(radius / std::abs(props.resolutionX()));
-		double xOffset = props.resolutionX() * 0.5;
-		double yOffset = props.resolutionY() * 0.5;
-		int i = 0;
-		for(PCFile& file : m_files) {
-			std::cerr << "Reading file " << i++ << " of " << m_files.size() << ".\n";
-			for(const std::string& filename : file.filenames()) {
-				std::ifstream str(filename);
-				liblas::Reader rdr = fact.CreateWithStream(str);
-				while(rdr.ReadNextPoint()) {
-					const geo::pc::Point pt(rdr.GetPoint());
-					double x = pt.x();
-					double y = pt.y();
-					double z = pt.z();
-					int col = props.toCol(x);
-					int row = props.toRow(y);
-					if(radius == 0) {
-						grid.add(row * cols + col, x, y, z, pt.intensity(), pt.scanAngle(), pt.classId(), pt.returnNum(), pt.numReturns(), pt.isEdge());
-					} else {
-						for(int r = row - radpx; r < row + radpx + 1; ++r) {
-							if(r < 0 || r >= rows) continue;
-							for(int c = col - radpx; c < col + radpx + 1; ++c) {
-								if(c < 0 || c >= cols) continue;
-								double cx = props.toX(c) + xOffset;
-								double cy = props.toY(r) + yOffset;
-								double dist = std::pow(cx - x, 2.0) + std::pow(cy - y, 2.0);
-								if(dist <= rad0)
-									grid.add(r * cols + c, x, y, z, pt.intensity(), pt.scanAngle(), pt.classId(), pt.returnNum(), pt.numReturns(), pt.isEdge());
-							}
+	// Initialize the grid with some starting slots.
+	grid.init(100000, 0);
+
+	// As we go through the m_files list, we'll remove pointers from
+	// this list and use it to calculate bounds for finalizing cells.
+	std::unordered_set<PCFile*> files;
+	for(PCFile& file : m_files)
+		files.insert(&file);
+
+	std::vector<geo::pc::Point> values;
+	std::vector<double> out;
+
+	for(PCFile& file : m_files) {
+		std::cerr << "Reading file " << i++ << " of " << m_files.size() << ".\n";
+		for(const std::string& filename : file.filenames()) {
+			std::ifstream str(filename);
+			liblas::Reader rdr = fact.CreateWithStream(str);
+			while(rdr.ReadNextPoint()) {
+				const geo::pc::Point pt(rdr.GetPoint());
+				double x = pt.x();
+				double y = pt.y();
+				double z = pt.z();
+				int col = props.toCol(x);
+				int row = props.toRow(y);
+				if(radius == 0) {
+					grid.add(row * cols + col, x, y, z, pt.intensity(), pt.scanAngle(), pt.classId(), pt.returnNum(), pt.numReturns(), pt.isEdge());
+				} else {
+					for(int r = g_max(0, row - radpx); r < g_min(rows, row + radpx + 1); ++r) {
+						for(int c = g_max(0, col - radpx); c < g_min(cols, col + radpx + 1); ++c) {
+							double cx = props.toCentroidX(c);
+							double cy = props.toCentroidY(r);
+							double dist = std::pow(cx - x, 2.0) + std::pow(cy - y, 2.0);
+							if(dist <= rad0)
+								grid.add(r * cols + c, x, y, z, pt.intensity(), pt.scanAngle(), pt.classId(), pt.returnNum(), pt.numReturns(), pt.isEdge());
 						}
 					}
 				}
 			}
 		}
-	} else {
-		grid.init(mapFile, cols * rows, density);
-	}
 
-	std::vector<geo::pc::Point> values;
-	std::vector<double> out;
-	for(size_t r = 0; r < (size_t) rows; ++r) {
-		if(r % 100 == 0)
-			std::cerr << "Row " << r << " of " << rows << "\n";
-		for(size_t c = 0; c < (size_t) cols; ++c) {
-			size_t count = grid.get(r * cols + c, values);
-			rast.setFloat((int) c, (int) r, count, 1);
-			int band = 2;
-			if(count) {
-				double x = props.toX(c) + props.resolutionX();
-				double y = props.toY(r) + props.resolutionY();
-				for(size_t i = 0; i < computers.size(); ++i) {
-					computers[i]->compute(x, y, values, radius, out, m_filter);
-					for(double val : out)
-						rast.setFloat((int) c, (int) r, std::isnan(val) ? NODATA : val, band++);
-					out.clear();
+		// Get the bounds of the finished file and then remove it
+		// from the set.
+		double fbounds[4];
+		file.fileBounds(fbounds);
+		files.erase(&file);
+
+		int r0 = props.toRow(fbounds[1]);
+		int r1 = props.toRow(fbounds[3]);
+		int c0 = props.toCol(fbounds[0]);
+		int c1 = props.toCol(fbounds[2]);
+		double tbounds[6], cbounds[4];
+		double resX = radius > 0 ? radius : props.resolutionX() * 0.5;
+		double resY = radius > 0 ? radius : props.resolutionY() * 0.5;
+		for(int r = g_max(0, g_min(r0, r1) - 1); r < g_min(rows, g_max(r0, r1) + 1); ++r) {
+			for(int c = g_max(0, g_min(c0, c1) - 1); c < g_min(cols, g_max(c0, c1) + 1); ++c) {
+				bool final = true;
+				if(!files.empty()) {
+					double x = props.toCentroidX(c);
+					double y = props.toCentroidY(r);
+					cbounds[0] = x - resX;
+					cbounds[1] = y - resY;
+					cbounds[2] = x + resX;
+					cbounds[3] = y + resY;
+					for(PCFile* f : files) {
+						f->fileBounds(tbounds);
+						if(intersects(tbounds, cbounds)) {
+							final = false;
+							break;
+						}
+					}
 				}
-			} else {
-				for(size_t i = 0; i < computers.size(); ++i) {
-					for(int j = 0; j < computers[i]->bandCount(); ++j)
-						rast.setFloat((int) c, (int) r, NODATA, band++);
+				if(final) {
+					size_t count = grid.get(r * cols + c, values);
+					rast.setFloat((int) c, (int) r, count, 1);
+					int band = 2;
+					if(count) {
+						double x = props.toCentroidX(c);
+						double y = props.toCentroidY(r);
+						for(size_t i = 0; i < computers.size(); ++i) {
+							computers[i]->compute(x, y, values, radius, out, m_filter);
+							for(double val : out)
+								rast.setFloat((int) c, (int) r, std::isnan(val) ? NODATA : val, band++);
+							out.clear();
+						}
+					} else {
+						for(size_t i = 0; i < computers.size(); ++i) {
+							for(int j = 0; j < computers[i]->bandCount(); ++j)
+								rast.setFloat((int) c, (int) r, NODATA, band++);
+						}
+					}
+					values.clear();
 				}
 			}
-			values.clear();
 		}
 	}
+
+	std::unordered_map<size_t, size_t> mp(grid.indexMap()); // Copy to avoid invalidating the iterator.
+	for(const auto& item : mp) {
+		int r = item.first / cols;
+		int c = item.first % cols;
+		size_t count = grid.get(r * cols + c, values);
+		rast.setFloat((int) c, (int) r, count, 1);
+		int band = 2;
+		if(count) {
+			double x = props.toCentroidX(c);
+			double y = props.toCentroidY(r);
+			for(size_t i = 0; i < computers.size(); ++i) {
+				computers[i]->compute(x, y, values, radius, out, m_filter);
+				for(double val : out)
+					rast.setFloat((int) c, (int) r, std::isnan(val) ? NODATA : val, band++);
+				out.clear();
+			}
+		} else {
+			for(size_t i = 0; i < computers.size(); ++i) {
+				for(int j = 0; j < computers[i]->bandCount(); ++j)
+					rast.setFloat((int) c, (int) r, NODATA, band++);
+			}
+		}
+		values.clear();
+	}
+
 }
 
 void Rasterizer::setFilter(const PCPointFilter& filter) {

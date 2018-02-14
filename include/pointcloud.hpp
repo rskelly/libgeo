@@ -666,15 +666,9 @@ public:
 	 * @param srid 		The spatial reference ID of the output.
 	 * @param density   The estimated number of points per cell; used for reserving mapped memory. Default 32.
 	 * @param ext 		An extra filter value. For example, for percentiles, this is the cutoff value.
-	 * @param mapFile   An existing point-map file that can be loaded. When this is given, and
-	 *                  it exists, the point file loading is skipped and the file is not deleted
-	 *                  at completion. If it does not exist, it is created and used for loading points
-	 *                  and not deleted. If it is not given, a temporary file is mapped and deleted
-	 *                  on completion.
 	 */
 	void rasterize(const std::string& filename, const std::vector<std::string>& types, double res,
-		double easting, double northing, double radius, int srid, int density = 32, double ext = 0,
-		const std::string& mapFile = "");
+		double easting, double northing, double radius, int srid, int density = 32, double ext = 0);
 
 	/**
 	 * Esitmate the point density (per cell) given the source files, resolution and search radius.
