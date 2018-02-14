@@ -50,6 +50,7 @@ find_library (LIBLAS_LIBRARY las PATHS /usr/lib)
 find_library (JSONCPP_LIBRARY jsoncpp PATHS /usr/lib/x86_64-linux-gnu)
 find_library (CRYPTO_LIB crypto)
 find_library (GEOS_LIBRARY geos PATHS /opt/lib NO_DEFAULT_PATH) # To use 3.6.2, which has a different API than 3.5.x
+find_library (PROJ_LIBRARY proj PATHS /usr/lib/x86_64-linux-gnu NO_DEFAULT_PATH)
 
 if(OPENMP_FOUND)
 	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_C_FLAGS} -fopenmp")
@@ -107,4 +108,7 @@ add_executable (geoinfo src/apps/geoinfo.cpp)
 target_link_libraries (geoinfo geo geoutil ${GDAL_LIBRARY} ${LIBLAS_LIBRARY} ${JSONCPP_LIBRARY})
 
 add_executable (voidfill src/apps/voidfill.cpp)
-target_link_libraries (voidfill geo geoutil georaster ${GDAL_LIBRARY} )
+target_link_libraries (voidfill geo geoutil georaster ${GDAL_LIBRARY})
+
+add_executable (datumshift src/apps/datumshift.cpp)
+target_link_libraries (datumshift geo geoutil georaster ${GDAL_LIBRARY} ${PROJ_LIBRARY})
