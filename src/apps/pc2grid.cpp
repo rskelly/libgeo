@@ -58,7 +58,6 @@ int main(int argc, char** argv) {
 	int density = 64;
 	bool estimate = false;
 	uint16_t srid = 0;
-	std::string mapFile;
 	std::vector<std::string> types;
 	std::vector<std::string> args;
 	PCPointFilter filter;
@@ -121,7 +120,7 @@ int main(int argc, char** argv) {
 		} else {
 			std::cerr << "Point density: " << density << "\n";
 		}
-		r.rasterize(args[0], types, res, easting, northing, radius, srid, density, 0, mapFile);
+		r.rasterize(args[0], types, res, easting, northing, radius, srid, density, 0);
 	} catch(const std::exception& ex) {
 		std::cerr << ex.what() << "\n";
 		usage();
