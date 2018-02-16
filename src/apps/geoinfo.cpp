@@ -287,6 +287,8 @@ public:
 
 	PointCloud(liblas::Reader* reader) : Dataset(POINT_CLOUD) {
 		const liblas::Header& hdr = reader->GetHeader();
+		const liblas::SpatialReference& sr = hdr.GetSRS();
+		projection = sr.GetWKT(liblas::SpatialReference::WKTModeFlag::eCompoundOK);
 		bounds[0] = hdr.GetMinX();
 		bounds[1] = hdr.GetMinY();
 		bounds[2] = hdr.GetMaxX();
