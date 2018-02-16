@@ -112,3 +112,6 @@ target_link_libraries (voidfill geo geoutil georaster ${GDAL_LIBRARY})
 
 add_executable (datumshift src/apps/datumshift.cpp)
 target_link_libraries (datumshift geo geoutil georaster ${GDAL_LIBRARY} ${PROJ_LIBRARY})
+
+add_executable (sbet2csv src/apps/sbet2csv.cpp)
+target_link_libraries (sbet2csv geo geoutil ${PROJ_LIBRARY})
