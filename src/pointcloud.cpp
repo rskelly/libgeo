@@ -740,11 +740,14 @@ private:
 	size_t m_cellCount;
 	size_t m_lineLength;
 	size_t m_totalLength;
+	size_t m_pointCount;
+
 	std::string m_mapFile;
 
 	size_t m_currentLine;						// The next available line index.
 	std::list<size_t> m_finalized; 				// The line offsets of finalized cells available for re-use.
 	std::unordered_map<size_t, size_t> m_map;   // Maps cell indices to line indices.
+
 
 	void resize(size_t size) {
 		std::cerr << "resize " << size << "\n";
@@ -793,6 +796,7 @@ private:
 			ml.nextLine = 0;
 			std::memcpy(data + offset, &ml, sizeof(MappedLine));
 			std::memcpy(data + offset + sizeof(MappedLine), &mp, sizeof(MappedPoint));
+			++m_pointCount;
 
 		} else {
 
@@ -830,6 +834,7 @@ private:
 				ml.count = 1;
 				std::memcpy(data + offset, &ml, sizeof(MappedLine));
 				std::memcpy(data + offset + sizeof(MappedLine), &mp, sizeof(MappedPoint));
+				++m_pointCount;
 
 			} else {
 
@@ -838,6 +843,7 @@ private:
 				std::memcpy(data + offset, &ml, sizeof(MappedLine));
 				offset += sizeof(MappedLine) + count * sizeof(MappedPoint);
 				std::memcpy(data + offset, &mp, sizeof(MappedPoint));
+				++m_pointCount;
 
 			}
 		}
@@ -856,7 +862,7 @@ private:
 		m_map.erase(idx);
 	}
 
-	size_t readPoints(size_t idx, std::vector<geo::pc::Point>& pts) {
+	size_t readPoints(size_t idx, std::vector<geo::pc::Point>& pts, bool final) {
 		if(!hasUnread(idx))
 			return 0; //g_runerr("No unread pixel for that index.");
 		char* data = (char*) m_mapped.data();
@@ -867,8 +873,6 @@ private:
 		do {
 			char* buf = data + offset;
 			std::memcpy(&ml, buf, sizeof(MappedLine));
-			if(ml.idx != idx)
-				break;
 			buf += sizeof(MappedLine);
 			for(size_t i = 0; i < ml.count; ++i) {
 				std::memcpy(&mp, buf, sizeof(MappedPoint));
@@ -878,7 +882,9 @@ private:
 			}
 			offset = ml.nextLine * m_lineLength;
 		} while(ml.nextLine);
-		finalize(idx);
+		if(final)
+			finalize(idx);
+		m_pointCount -= count;
 		return count;
 	}
 
@@ -889,7 +895,8 @@ public:
 		m_cellCount(0),
 		m_lineLength(0),
 		m_totalLength(0),
-		m_currentLine(0) {
+		m_currentLine(0),
+		m_pointCount(0) {
 	}
 
 	MemGrid(size_t cellCount, size_t lineCount) :
@@ -916,6 +923,10 @@ public:
 		}
 	}
 
+	size_t pointCount() const {
+		return m_pointCount;
+	}
+
 	void init(size_t cellCount, size_t lineCount) {
 		init("", cellCount, lineCount);
 	}
@@ -932,8 +943,8 @@ public:
 		writePoint(idx, x, y, z, intensity, angle, cls, retNum, numRets, edge);
 	}
 
-	size_t get(size_t idx, std::vector<geo::pc::Point>& out) {
-		return readPoints(idx, out);
+	size_t get(size_t idx, std::vector<geo::pc::Point>& out, bool final = true) {
+		return readPoints(idx, out, final);
 	}
 
 	void flush() {
