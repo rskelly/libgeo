@@ -738,11 +738,9 @@ private:
 	size_t m_cellCount;
 	size_t m_lineLength;
 	size_t m_totalLength;
-	size_t m_pointCount;
-
-	std::string m_mapFile;
-
 	size_t m_currentLine;						// The next available line index.
+	size_t m_pointCount;
+	std::string m_mapFile;
 	std::list<size_t> m_finalized; 				// The line offsets of finalized cells available for re-use.
 	std::unordered_map<size_t, size_t> m_map;   // Maps cell indices to line indices.
 
@@ -1039,11 +1037,71 @@ double Rasterizer::density(double resolution, double radius) {
 	return (sum / count) * 1.5 * cell;
 }
 
+void fixBounds(double* bounds, double resX, double resY, double* easting, double* northing) {
+
+	double aresX = std::abs(resX);
+	double aresY = std::abs(resY);
+
+	{
+		int a = 0, b = 2;
+		if(resX < 0)
+			a = 2, b = 0;
+		bounds[a] = std::floor(bounds[a] / resX) * resX;
+		bounds[b] = std::ceil(bounds[b] / resX) * resX;
+		a = 1, b = 3;
+		if(resY < 0)
+			a = 3, b = 1;
+		bounds[a] = std::floor(bounds[a] / resY) * resY;
+		bounds[b] = std::ceil(bounds[b] / resY) * resY;
+	}
+
+	if(!std::isnan(*easting)) {
+		if((resX > 0 && *easting < bounds[0]) || (resX < 0 && *easting > bounds[2]))
+			g_argerr("The easting is within the data boundary.");
+		double w = bounds[2] - bounds[0];
+		if(resX > 0) {
+			while(*easting + w < bounds[2])
+				w += resX;
+			bounds[0] = *easting;
+			bounds[2] = *easting + w;
+		} else {
+			while(*easting - w > bounds[1])
+				w += aresX;
+			bounds[2] = *easting;
+			bounds[0] = *easting - w;
+		}
+	} else {
+		*easting = bounds[resX > 0 ? 0 : 2];
+	}
+
+	if(!std::isnan(*northing)) {
+		if((resY > 0 && *northing < bounds[1]) || (resY < 0 && *northing > bounds[3]))
+			g_argerr("The *northing is within the data boundary.");
+		double h = bounds[3] - bounds[1];
+		if(resY > 0) {
+			while(*northing + h < bounds[3])
+				h += resY;
+			bounds[1] = *northing;
+			bounds[3] = *northing + h;
+		} else {
+			while(*northing - h > bounds[1])
+				h += aresY;
+			bounds[3] = *northing;
+			bounds[1] = *northing - h;
+		}
+	} else {
+		*northing = bounds[resY > 0 ? 1 : 3];
+	}
+}
+
 void Rasterizer::rasterize(const std::string& filename, const std::vector<std::string>& _types,
 		double resX, double resY, double easting, double northing, double radius, int srid, int density, double ext) {
 
 	if(std::isnan(resX) || std::isnan(resY))
 		g_runerr("Resolution not valid.");
+
+	if(radius < 0)
+		radius = std::sqrt(std::pow(resX / 2, 2) * 2);
 
 	std::vector<std::string> types(_types);
 	if(types.empty()) {
@@ -1068,16 +1126,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 		}
 	}
 
-	if(std::isnan(easting))
-		easting = ((int) ((resX > 0 ? bounds[0] : bounds[2]) / resX)) * resX;
-	if(std::isnan(northing))
-		northing = ((int) ((resY > 0 ? bounds[1] : bounds[3]) / resY)) * resY;
-
-	bounds[resX > 0 ? 0 : 2] = easting;
-	bounds[resY > 0 ? 1 : 3] = northing;
-
-	if(radius < 0)
-		radius = std::sqrt(std::pow(resX / 2, 2) * 2);
+	fixBounds(bounds, resX, resY, &easting, &northing);
 
 	int cols = (int) ((bounds[2] - bounds[0]) / std::abs(resX)) + 1;
 	int rows = (int) ((bounds[3] - bounds[1]) / std::abs(resY)) + 1;
@@ -1106,6 +1155,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 
 	// The squared radius for comparison.
 	double rad0 = radius * radius;
+
 	// The radius of the "box" of pixels to check for a claim on the current point.
 	int radpx = (int) std::ceil(radius / std::abs(props.resolutionX()));
 	int i = 0;
@@ -1163,8 +1213,8 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 		double tbounds[6], cbounds[4];
 		double rX = radius > 0 ? radius : std::abs(resX) * 0.5;
 		double rY = radius > 0 ? radius : std::abs(resY) * 0.5;
-		for(int r = g_max(0, g_min(r0, r1) - 1); r < g_min(rows, g_max(r0, r1) + 2); ++r) {
-			for(int c = g_max(0, g_min(c0, c1) - 1); c < g_min(cols, g_max(c0, c1) + 2); ++c) {
+		for(int r = std::min(r0, r1); r <= std::max(r0, r1); ++r) {
+			for(int c = std::min(c0, c1); c <= std::max(c0, c1); ++c) {
 				bool final = true;
 				if(!files.empty()) {
 					double x = props.toCentroidX(c);
@@ -1204,6 +1254,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 				}
 			}
 		}
+
 	}
 
 	std::unordered_map<size_t, size_t> mp(grid.indexMap()); // Copy to avoid invalidating the iterator.
