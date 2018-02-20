@@ -46,7 +46,7 @@ find_package (Boost 1.58 COMPONENTS system filesystem date_time thread REQUIRED)
 find_package (GDAL 2.2 REQUIRED)
 find_package (CGAL REQUIRED COMPONENTS Core)
 
-find_library (LIBLAS_LIBRARY las PATHS /usr/lib)
+find_library (LIBLAS_LIBRARY las PATHS /usr/local/lib)
 find_library (JSONCPP_LIBRARY jsoncpp PATHS /usr/lib/x86_64-linux-gnu)
 find_library (CRYPTO_LIB crypto)
 find_library (GEOS_LIBRARY geos PATHS /opt/lib NO_DEFAULT_PATH) # To use 3.6.2, which has a different API than 3.5.x

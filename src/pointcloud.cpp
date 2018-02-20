@@ -946,7 +946,7 @@ public:
 
 const std::unordered_map<std::string, std::string> computerNames = {
 		{"min", "The minimum value"},
-		{"min", "The maximum value"},
+		{"max", "The maximum value"},
 		{"percentile-5", "The 5th percentile"},
 		{"decile-1", "The 1st decile"},
 		{"decile-2", "The 2nd decile"},
