@@ -645,9 +645,7 @@ geo::pc::Point::Point() :
 }
 
 int geo::pc::Point::classId() const {
-	if(m_point)
-		return m_point->GetClassification().GetClass();
-	return 0;
+	return m_cls;
 }
 
 double geo::pc::Point::operator[](int idx) const {
@@ -1041,8 +1039,17 @@ double Rasterizer::density(double resolution, double radius) {
 	return (sum / count) * 1.5 * cell;
 }
 
-void Rasterizer::rasterize(const std::string& filename, const std::vector<std::string>& types,
-		double res,	double easting, double northing, double radius, int srid, int density, double ext) {
+void Rasterizer::rasterize(const std::string& filename, const std::vector<std::string>& _types,
+		double resX, double resY, double easting, double northing, double radius, int srid, int density, double ext) {
+
+	if(std::isnan(resX) || std::isnan(resY))
+		g_runerr("Resolution not valid.");
+
+	std::vector<std::string> types(_types);
+	if(types.empty()) {
+		g_warn("No methods given; defaulting to mean.");
+		types.push_back("mean");
+	}
 
 	std::vector<std::unique_ptr<Computer> > computers;
 	for(const std::string& name : types)
@@ -1061,13 +1068,19 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 		}
 	}
 
-	if(easting <= 0)
-		easting = ((int) (bounds[0] / res)) * res;
-	if(northing <= 0)
-		northing = ((int) (bounds[3] / res)) * res;
+	if(std::isnan(easting))
+		easting = ((int) ((resX > 0 ? bounds[0] : bounds[2]) / resX)) * resX;
+	if(std::isnan(northing))
+		northing = ((int) ((resY > 0 ? bounds[1] : bounds[3]) / resY)) * resY;
 
-	int cols = (int) ((bounds[2] - bounds[0]) / res) + 1;
-	int rows = (int) ((bounds[3] - bounds[1]) / res) + 1;
+	bounds[resX > 0 ? 0 : 2] = easting;
+	bounds[resY > 0 ? 1 : 3] = northing;
+
+	if(radius < 0)
+		radius = std::sqrt(std::pow(resX / 2, 2) * 2);
+
+	int cols = (int) ((bounds[2] - bounds[0]) / std::abs(resX)) + 1;
+	int rows = (int) ((bounds[3] - bounds[1]) / std::abs(resY)) + 1;
 
 	std::cerr << "cols " << cols << "; rows " << rows << "\n";
 	std::cerr << "bounds " << bounds[0] << ", " << bounds[1] << ", " << bounds[2] << ", " << bounds[3] << "\n";
@@ -1077,7 +1090,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 		bandCount += comp->bandCount();
 
 	GridProps props;
-	props.setTrans(easting, res, northing, -res);
+	props.setTrans(easting, resX, northing, resY);
 	props.setSize(cols, rows);
 	props.setNoData(NODATA);
 	props.setDataType(DataType::Float32);
@@ -1148,18 +1161,18 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 		int c0 = props.toCol(fbounds[0]);
 		int c1 = props.toCol(fbounds[2]);
 		double tbounds[6], cbounds[4];
-		double resX = radius > 0 ? radius : props.resolutionX() * 0.5;
-		double resY = radius > 0 ? radius : props.resolutionY() * 0.5;
-		for(int r = g_max(0, g_min(r0, r1) - 1); r < g_min(rows, g_max(r0, r1) + 1); ++r) {
-			for(int c = g_max(0, g_min(c0, c1) - 1); c < g_min(cols, g_max(c0, c1) + 1); ++c) {
+		double rX = radius > 0 ? radius : std::abs(resX) * 0.5;
+		double rY = radius > 0 ? radius : std::abs(resY) * 0.5;
+		for(int r = g_max(0, g_min(r0, r1) - 1); r < g_min(rows, g_max(r0, r1) + 2); ++r) {
+			for(int c = g_max(0, g_min(c0, c1) - 1); c < g_min(cols, g_max(c0, c1) + 2); ++c) {
 				bool final = true;
 				if(!files.empty()) {
 					double x = props.toCentroidX(c);
 					double y = props.toCentroidY(r);
-					cbounds[0] = x - resX;
-					cbounds[1] = y - resY;
-					cbounds[2] = x + resX;
-					cbounds[3] = y + resY;
+					cbounds[0] = x - rX;
+					cbounds[1] = y - rY;
+					cbounds[2] = x + rX;
+					cbounds[3] = y + rY;
 					for(PCFile* f : files) {
 						f->fileBounds(tbounds);
 						if(intersects(tbounds, cbounds)) {
@@ -1198,7 +1211,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 		int r = item.first / cols;
 		int c = item.first % cols;
 		size_t count = grid.get(r * cols + c, values);
-		rast.setFloat((int) c, (int) r, count, 1);
+		rast.setFloat(c, r, count, 1);
 		int band = 2;
 		if(count) {
 			double x = props.toCentroidX(c);
@@ -1206,13 +1219,13 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 			for(size_t i = 0; i < computers.size(); ++i) {
 				computers[i]->compute(x, y, values, radius, out, m_filter);
 				for(double val : out)
-					rast.setFloat((int) c, (int) r, std::isnan(val) ? NODATA : val, band++);
+					rast.setFloat(c, r, std::isnan(val) ? NODATA : val, band++);
 				out.clear();
 			}
 		} else {
 			for(size_t i = 0; i < computers.size(); ++i) {
 				for(int j = 0; j < computers[i]->bandCount(); ++j)
-					rast.setFloat((int) c, (int) r, NODATA, band++);
+					rast.setFloat(c, r, NODATA, band++);
 			}
 		}
 		values.clear();
