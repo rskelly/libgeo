@@ -1149,7 +1149,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	Raster rast(filename, props);
 	rast.fillFloat(0, 1);
 	for(int band = 2; band < bandCount + 1; ++band)
-		rast.fillFloat(NODATA, 0);
+		rast.fillFloat(NODATA, band);
 
 	liblas::ReaderFactory fact;
 	MemGrid grid;
