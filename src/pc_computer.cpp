@@ -468,7 +468,7 @@ int HLRGBiometricsComputer::compute(double x, double y, const std::vector<geo::p
 }
 
 int HLRGBiometricsComputer::bandCount() const {
-	return (m_bands + 1) * 2 + 4 + 7;
+	return 49;
 }
 
 
