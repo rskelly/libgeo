@@ -18,23 +18,24 @@ using namespace geo::pc;
 
 void usage() {
 	std::cerr << "Usage: pc2grid [options] <output raster> <input las [*]>\n"
-			<< " -r <resolution> The output resolution in map units.\n"
-			<< " -e <easting>    The top left corner horizontal alignment\n"
-			<< "                 (defaults to nearest multiple of resolution).\n"
-			<< " -n <northing>   The top left corner vertical alignment\n"
-			<< "                 (defaults to nearest whole multiple of resolution).\n"
-			<< " -d <radius>     The search radius for finding points. Set to zero\n"
-			<< "                 to use the rectangular cell bounds. Defaults to root\n"
-			<< "                 of 1/2 cell diagonal (a circle that touches the corners.\n"
-			<< " -s <srid>       The spatial reference ID. Default 0.\n"
-			<< " -m <methods>    Comma-separated list of statistics to compute; one on each \n"
-			<< "                 layer (see below.) Default mean.\n"
-			<< "                 rugosity, variance, std. deviation and percentile.\n"
-			<< "                 For percentile, use the form, 'percenile:n', where\n"
-			<< "                 n is the percentile (no % sign); 1 - 99.\n"
-			<< " -i <density>    The estimated number of points per cell underestimating this\n"
-			<< "                 saves disk space at the cost of efficiency.\n"
-			<< " -t              Estimate the per-cell point density. Do nothing else\n\n";
+			<< " -rx <resolution> The output x resolution in map units.\n"
+			<< " -ry <resolution> The output y resolution in map units.\n"
+			<< " -e <easting>     The top left corner horizontal alignment\n"
+			<< "                  (defaults to nearest multiple of resolution).\n"
+			<< " -n <northing>    The top left corner vertical alignment\n"
+			<< "                  (defaults to nearest whole multiple of resolution).\n"
+			<< " -d <radius>      The search radius for finding points. Set to zero\n"
+			<< "                  to use the rectangular cell bounds. Defaults to root\n"
+			<< "                  of 1/2 cell diagonal (a circle that touches the corners.\n"
+			<< " -s <srid>        The spatial reference ID. Default 0.\n"
+			<< " -m <methods>     Comma-separated list of statistics to compute; one on each \n"
+			<< "                  layer (see below.) Default mean.\n"
+			<< "                  rugosity, variance, std. deviation and percentile.\n"
+			<< "                  For percentile, use the form, 'percenile:n', where\n"
+			<< "                  n is the percentile (no % sign); 1 - 99.\n"
+			<< " -i <density>     The estimated number of points per cell underestimating this\n"
+			<< "                  saves disk space at the cost of efficiency.\n"
+			<< " -t               Estimate the per-cell point density. Do nothing else\n\n";
 
 	PCPointFilter::printHelp(std::cerr);
 
@@ -51,9 +52,10 @@ int main(int argc, char** argv) {
 		return 1;
 	}
 
-	double res = 0;
-	double easting = 0;
-	double northing = 0;
+	double resX = std::nan("");
+	double resY = std::nan("");
+	double easting = std::nan("");
+	double northing = std::nan("");
 	double radius = -1;
 	int density = 64;
 	bool estimate = false;
@@ -69,8 +71,10 @@ int main(int argc, char** argv) {
 		if(v == "-m") {
 			std::string type = argv[++i];
 			Util::splitString(std::back_inserter(types), Util::lower(type), ",");
-		} else if(v == "-r") {
-			res = atof(argv[++i]);
+		} else if(v == "-rx") {
+			resX = atof(argv[++i]);
+		} else if(v == "-ry") {
+			resY = atof(argv[++i]);
 		} else if(v == "-i") {
 			density = atoi(argv[++i]);
 		} else if(v == "-d") {
@@ -88,21 +92,6 @@ int main(int argc, char** argv) {
 		}
 	}
 
-	if(types.empty()) {
-		std::cerr << "No methods given; defaulting to mean.\n";
-		types.push_back("mean");
-	}
-	if(res <= 0) {
-		std::cerr << "Resolution must be >0.\n";
-		usage();
-		return 1;
-	}
-
-	if(radius < 0)
-		radius = std::sqrt(std::pow(res / 2, 2) * 2);
-
-	std::cerr << "Radius: " << radius << "\n";
-
 	if(args.size() < 2) {
 		std::cerr << "Input and output filenames required.\n";
 		usage();
@@ -115,12 +104,12 @@ int main(int argc, char** argv) {
 		Rasterizer r(infiles);
 		r.setFilter(filter);
 		if(estimate) {
-			density = (int) std::ceil(r.density(res, radius));
+			density = (int) std::ceil(r.density(resX, radius));
 			std::cerr << "Estimated point density: " << density << "\n";
 		} else {
 			std::cerr << "Point density: " << density << "\n";
 		}
-		r.rasterize(args[0], types, res, easting, northing, radius, srid, density, 0);
+		r.rasterize(args[0], types, resX, resY, easting, northing, radius, srid, density, 0);
 	} catch(const std::exception& ex) {
 		std::cerr << ex.what() << "\n";
 		usage();

@@ -667,7 +667,7 @@ public:
 	 * @param density   The estimated number of points per cell; used for reserving mapped memory. Default 32.
 	 * @param ext 		An extra filter value. For example, for percentiles, this is the cutoff value.
 	 */
-	void rasterize(const std::string& filename, const std::vector<std::string>& types, double res,
+	void rasterize(const std::string& filename, const std::vector<std::string>& types, double resX, double resY,
 		double easting, double northing, double radius, int srid, int density = 32, double ext = 0);
 
 	/**
