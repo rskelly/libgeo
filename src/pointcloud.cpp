@@ -237,6 +237,19 @@ bool PCPointFilter::keep(const geo::pc::Point& pt) const {
 	return true;
 }
 
+template <class T, class U>
+int PCPointFilter::filter(T begin, T end, U iter) const {
+	int i = 0;
+	while(begin != end) {
+		if(keep(*begin)) {
+			iter = *begin;
+			++i;
+		}
+		++begin;
+	}
+	return i;
+}
+
 
 const long maxPoints = 20000000;
 
@@ -1153,6 +1166,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 
 	liblas::ReaderFactory fact;
 	MemGrid grid;
+	CountComputer countComp;
 
 	// The squared radius for comparison.
 	double rad0 = radius * radius;
@@ -1171,6 +1185,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 		files.insert(&file);
 
 	std::vector<geo::pc::Point> values;
+	std::vector<geo::pc::Point> filtered;
 	std::vector<double> out;
 
 	for(PCFile& file : m_files) {
@@ -1234,24 +1249,27 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 				}
 				if(final) {
 					size_t count = grid.get(r * cols + c, values);
-					rast.setFloat((int) c, (int) r, count, 1);
+					if(count)
+						count = m_filter->filter(values.begin(), values.end(), std::back_inserter(filtered));
+					rast.setFloat(c, r, count, 1);
 					int band = 2;
 					if(count) {
 						double x = props.toCentroidX(c);
 						double y = props.toCentroidY(r);
 						for(size_t i = 0; i < computers.size(); ++i) {
-							computers[i]->compute(x, y, values, radius, out, m_filter);
+							computers[i]->compute(x, y, values, filtered, radius, out);
 							for(double val : out)
-								rast.setFloat((int) c, (int) r, std::isnan(val) ? NODATA : val, band++);
+								rast.setFloat(c, r, std::isnan(val) ? NODATA : val, band++);
 							out.clear();
 						}
 					} else {
 						for(size_t i = 0; i < computers.size(); ++i) {
 							for(int j = 0; j < computers[i]->bandCount(); ++j)
-								rast.setFloat((int) c, (int) r, NODATA, band++);
+								rast.setFloat(c, r, NODATA, band++);
 						}
 					}
 					values.clear();
+					filtered.clear();
 				}
 			}
 		}
@@ -1263,13 +1281,15 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 		int r = item.first / cols;
 		int c = item.first % cols;
 		size_t count = grid.get(r * cols + c, values);
+		if(count)
+			count = m_filter->filter(values.begin(), values.end(), std::back_inserter(filtered));
 		rast.setFloat(c, r, count, 1);
 		int band = 2;
 		if(count) {
 			double x = props.toCentroidX(c);
 			double y = props.toCentroidY(r);
 			for(size_t i = 0; i < computers.size(); ++i) {
-				computers[i]->compute(x, y, values, radius, out, m_filter);
+				computers[i]->compute(x, y, values, filtered, radius, out);
 				for(double val : out)
 					rast.setFloat(c, r, std::isnan(val) ? NODATA : val, band++);
 				out.clear();
@@ -1281,6 +1301,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 			}
 		}
 		values.clear();
+		filtered.clear();
 	}
 
 }

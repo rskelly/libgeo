@@ -532,6 +532,8 @@ public:
 		 */
 		virtual int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter = nullptr) = 0;
 
+		virtual int compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out) = 0;
+
 		/**
 		 * Return the number of bands that should be returned by the computer.
 		 * @return The number of bands that should be returned by the computer.
@@ -592,7 +594,18 @@ public:
 	 */
 	bool keep(const geo::pc::Point& pt) const;
 
+	/**
+	 * Filters a container of geo::pc::Point, adding them to the given iterator.
+	 * @param begin An iterator.
+	 * @param end The end iterator.
+	 * @param iter A back_inserter or other iterator.
+	 * @return The number of points added to iter.
+	 */
+	template <class T, class U>
+	int filter(T begin, T end, U iter) const;
+
 };
+
 
 /**
  * Given a terrain model, normalizes a point cloud so that all point
