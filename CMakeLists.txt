@@ -42,9 +42,10 @@ set (Boost_USE_STATIC_RUNTIME OFF)
 set (THREADS_PREFER_PTHREAD_FLAG ON)
 find_package (Threads REQUIRED)
 find_package (OpenMP REQUIRED)
-find_package (Boost 1.58 COMPONENTS system filesystem date_time thread REQUIRED)
+find_package (Boost 1.62 COMPONENTS system filesystem date_time thread REQUIRED)
 find_package (GDAL 2.2 REQUIRED)
 find_package (CGAL REQUIRED COMPONENTS Core)
+find_package (PCL 1.8 REQUIRED)
 
 find_library (LIBLAS_LIBRARY las PATHS /usr/local/lib)
 find_library (JSONCPP_LIBRARY jsoncpp PATHS /usr/lib/x86_64-linux-gnu)
@@ -63,7 +64,8 @@ project (libgeo)
 
 # Configure directories###################################################################################
 
-link_directories(. ${Boost_LIBRARY_DIRS} ${LIB_PATH})
+include_directories( ${PCL_INCLUDE_DIRS} )
+link_directories(. ${Boost_LIBRARY_DIRS} ${LIB_PATH} ${PCL_LIBRARY_DIRS})
 
 # Build support libraries ################################################################################
 
@@ -106,6 +108,9 @@ target_link_libraries (pcnorm geo geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBR
 
 add_executable (pcperturb src/apps/pcperturb.cpp)
 target_link_libraries (pcperturb geo geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY})
+
+add_executable (pcregister src/apps/pcregister.cpp)
+target_link_libraries (pcregister geo geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY} ${PCL_LIBRARIES})
 
 add_executable (geoinfo src/apps/geoinfo.cpp)
 target_link_libraries (geoinfo geo geoutil ${GDAL_LIBRARY} ${LIBLAS_LIBRARY} ${JSONCPP_LIBRARY})
