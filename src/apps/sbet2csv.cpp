@@ -10,8 +10,10 @@
 #include <fstream>
 
 #include "raster.hpp"
+#include "pc_trajectory.hpp"
 
 using namespace geo::raster;
+using namespace geo::pc;
 
 double toDeg(double c) {
 	return c * 180.0 / M_PI;
@@ -21,27 +23,8 @@ void usage() {
 	std::cerr << "Usage: <sbet file> <output srid>\n";
 }
 
-typedef struct {
-	double time; //	seconds	double
-	double latitude; //	radians	double
-	double longitude; //	radians	double
-	double altitude; //	meters	double
-	double xVelocity; //	meters/second	double
-	double yVelocity;	//meters/second	double
-	double zVelocity; //	meters/second	double
-	double roll; //	radians	double
-	double pitch; //	radians	double
-	double heading; //	radians	double
-	double wanderAngle;//	radians	double
-	double xAcceleration;//	meters/second2	double
-	double yAcceleration;//	meters/second2	double
-	double zAcceleration; //	meters/second2	double
-	double xAngularRate; //	radians/second	double
-	double yAngularRate; //	radians/second	double
-	double zAngularRate; //	radians/second	double
-} Record;
 
-void printRec(Record& rec) {
+void printRec(SBETRecord& rec) {
 	std::cout << std::setprecision(12)
 		<< rec.time << ","
 		<< rec.latitude << "," << rec.longitude << "," << rec.altitude << ","
@@ -68,10 +51,10 @@ int main(int argc, char** argv) {
 	os << "+init=epsg:" << srid;
 	projPJ op = pj_init_plus(os.str().c_str());
 
-	Record rec;
+	SBETRecord rec;
 	std::ifstream str(sbetfile, std::ios::binary|std::ios::in);
 	do {
-		str.read((char*) &rec, sizeof(Record));
+		str.read((char*) &rec, sizeof(SBETRecord));
 		pj_transform(sp, op, 1, 1, &rec.longitude, &rec.latitude, NULL);
 		printRec(rec);
 	} while(true);

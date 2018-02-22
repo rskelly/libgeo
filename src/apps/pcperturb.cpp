@@ -11,7 +11,18 @@
 
 #include <liblas/liblas.hpp>
 
+void usage() {
+	std::cerr << "Usage: pcperturb <infile> <outfile> <xshift> <yshift> <zshift> <sigma> \n"
+			<< " Sigma is the std. devation of the distribution by which\n"
+			<< " the shifts will be multiplied.\n";
+}
+
 int main(int argc, char** argv) {
+
+	if(argc < 7) {
+		usage();
+		return 1;
+	}
 
 	std::string infile(argv[1]);
 	std::string outfile(argv[2]);

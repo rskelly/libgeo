@@ -109,7 +109,7 @@ target_link_libraries (pcnorm geo geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBR
 add_executable (pcperturb src/apps/pcperturb.cpp)
 target_link_libraries (pcperturb geo geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY})
 
-add_executable (pcregister src/apps/pcregister.cpp)
+add_executable (pcregister src/apps/pcregister.cpp src/pc_trajectory.cpp)
 target_link_libraries (pcregister geo geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY} ${PCL_LIBRARIES})
 
 add_executable (geoinfo src/apps/geoinfo.cpp)
