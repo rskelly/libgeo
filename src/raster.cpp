@@ -2123,7 +2123,7 @@ public:
 		if(mask) {
 			const GridProps& mprops = mask->props();
 			const Bounds& mbounds = mprops.bounds();
-			return props.toRow(mprops.resolutionY() ? mbounds.miny() : mbounds.maxy());
+			return props.toRow(mprops.resolutionY() > 0 ? mbounds.miny() : mbounds.maxy());
 		} else {
 			return 0;
 		}
