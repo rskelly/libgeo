@@ -1250,7 +1250,7 @@ namespace geo {
             void polygonize(const std::string &filename, const std::string &layerName, 
                 const std::string &driver, uint16_t srid = 0, uint16_t band = 1, uint16_t threads = 1,
 				int bufSize = 0, bool removeHoles = false, bool removeDangles = false,
-				geo::util::Status *status = nullptr, bool *cancel = nullptr);
+				geo::util::Status *status = nullptr, bool *cancel = nullptr, const std::string& mask = "");
 
             ~Raster();
 

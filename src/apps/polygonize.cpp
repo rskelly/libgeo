@@ -17,7 +17,8 @@ void usage() {
 			<< " -h              Remove holes.\n"
 			<< " -t <t>          The number of threads. Default 3. There are 2 threads for\n"
 			<< "                 reading and writing and n threads for processing polygons.\n"
-			<< " -u <buf size>   The buffer size. Set to zero to use the whole raster in memory.\n";
+			<< " -u <buf size>   The buffer size. Set to zero to use the whole raster in memory.\n"
+			<< " -m <mask image> A mask image to determine the bounds of the input.\n";
 }
 
 int main(int argc, char** argv) {
@@ -37,6 +38,7 @@ int main(int argc, char** argv) {
 	bool holes = false;
 	bool dangles = false;
 	std::vector<std::string> args;
+	std::string mask;
 
 	for(int i = 1; i < argc; ++i) {
 		std::string v = argv[i];
@@ -54,6 +56,8 @@ int main(int argc, char** argv) {
 			dangles = true;
 		} else if(v == "-t") {
 			threads = atoi(argv[++i]);
+		} else if(v == "-m") {
+			mask = argv[++i];
 		} else {
 			args.push_back(argv[i]);
 		}
@@ -74,7 +78,7 @@ int main(int argc, char** argv) {
 	}
 
 	Raster test(args[0]);
-	test.polygonize(args[1], args[2], driver, srid, band, threads, bufSize, holes, dangles, nullptr, nullptr);
+	test.polygonize(args[1], args[2], driver, srid, band, threads, bufSize, holes, dangles, nullptr, nullptr, mask);
 	//test.potrace(args[1], args[2], driver, srid, band, threads, holes, dangles, nullptr, nullptr);
 	//test.polygonize2(args[1], args[2], driver, srid, band, threads, holes, dangles, nullptr, nullptr);
 
