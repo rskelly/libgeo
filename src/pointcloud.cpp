@@ -1227,8 +1227,8 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 		int c0 = props.toCol(fbounds[0]);
 		int c1 = props.toCol(fbounds[2]);
 		double tbounds[6], cbounds[4];
-		double rX = radius > 0 ? radius : std::abs(resX) * 0.5;
-		double rY = radius > 0 ? radius : std::abs(resY) * 0.5;
+		double rX = radius > 0 ? radius * 2 : std::abs(resX); // TODO: Why 2x the radius? Leaves gaps otherwise...
+		double rY = radius > 0 ? radius * 2 : std::abs(resY);
 		for(int r = std::min(r0, r1); r <= std::max(r0, r1); ++r) {
 			for(int c = std::min(c0, c1); c <= std::max(c0, c1); ++c) {
 				bool final = true;
@@ -1262,18 +1262,12 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 								rast.setFloat(c, r, std::isnan(val) ? NODATA : val, band++);
 							out.clear();
 						}
-					} else {
-						for(size_t i = 0; i < computers.size(); ++i) {
-							for(int j = 0; j < computers[i]->bandCount(); ++j)
-								rast.setFloat(c, r, NODATA, band++);
-						}
 					}
 					values.clear();
 					filtered.clear();
 				}
 			}
 		}
-
 	}
 
 	std::unordered_map<size_t, size_t> mp(grid.indexMap()); // Copy to avoid invalidating the iterator.
@@ -1293,11 +1287,6 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 				for(double val : out)
 					rast.setFloat(c, r, std::isnan(val) ? NODATA : val, band++);
 				out.clear();
-			}
-		} else {
-			for(size_t i = 0; i < computers.size(); ++i) {
-				for(int j = 0; j < computers[i]->bandCount(); ++j)
-					rast.setFloat(c, r, NODATA, band++);
 			}
 		}
 		values.clear();

@@ -475,7 +475,6 @@ TileIterator::TileIterator(const TileIterator& iter) :
 }
 
 bool TileIterator::hasNext() {
-	std::lock_guard<std::mutex> lk(m_mtx);
 	const GridProps& p = m_source.props();
 	return m_curCol < p.cols() && m_curRow < p.rows();
 }
@@ -492,7 +491,6 @@ Tile TileIterator::next() {
 	int col, row, srcCol, srcRow, dstCol, dstRow, cols, rows;
 
 	{
-		std::lock_guard<std::mutex> lk(m_mtx);
 		if(!(m_curCol < props.cols() && m_curRow < props.rows()))
 			g_runerr("No more tiles.");
 
@@ -881,7 +879,6 @@ void MemRaster::freeMem() {
 }
 
 void MemRaster::init(const GridProps &pr, bool mapped) {
-	std::lock_guard<std::mutex> lk(m_mtx);
 	m_grid = nullptr;
 	m_mmapped = false;
 	if (pr.cols() != m_props.cols() || pr.rows() != m_props.rows()) {
@@ -919,12 +916,9 @@ void MemRaster::fillFloat(double value, int band) {
 		for (size_t i = 0; i < chunk / sizeof(double); ++i)
 			*(buf + i) = value;
 		char* grid = (char*)m_grid;
-		{
-			std::lock_guard<std::mutex> lk(m_mtx);
-			for (uint64_t i = 0; i < size; i += chunk) {
-				std::memcpy(grid, buffer.buf, chunk);
-				grid += chunk;
-			}
+		for (uint64_t i = 0; i < size; i += chunk) {
+			std::memcpy(grid, buffer.buf, chunk);
+			grid += chunk;
 		}
 	}
 }
@@ -941,12 +935,9 @@ void MemRaster::fillInt(int value, int band) {
 		for(size_t i = 0; i < chunk / sizeof(int); ++i)
 			*(buf + i) = value;
 		char* grid = (char*) m_grid;
-		{
-			std::lock_guard<std::mutex> lk(m_mtx);
-			for (uint64_t i = 0; i < size; i += chunk) {
-				std::memcpy(grid, buffer.buf, chunk);
-				grid += chunk;
-			}
+		for (uint64_t i = 0; i < size; i += chunk) {
+			std::memcpy(grid, buffer.buf, chunk);
+			grid += chunk;
 		}
 	}
 }
@@ -1026,7 +1017,6 @@ void MemRaster::setFloat(uint64_t idx, double value, int band) {
 	if(m_props.isInt()) {
 		setInt(idx, (int) value, band);
 	} else {
-		std::lock_guard<std::mutex> lk(m_mtx);
 		*(((double *) m_grid) + idx) = value;
 	}
 }
@@ -1044,7 +1034,6 @@ void MemRaster::setInt(uint64_t idx, int value, int band) {
 						<< "; value: " << value << "; col: " << (idx % m_props.cols())
 						<< "; row: " << (idx / m_props.cols()));
 	if(m_props.isInt()) {
-		std::lock_guard<std::mutex> lk(m_mtx);
 		*(((int *) m_grid) + idx) = value;
 	} else {
 		setFloat(idx, (double) value, band);
@@ -1098,15 +1087,10 @@ void MemRaster::writeToRaster(Raster &grd,
 
 	char* input  = (char*) grid();
 
-	{
-		std::lock_guard<std::mutex> lk1(grd.m_mtx);
-		std::lock_guard<std::mutex> lk0(m_mtx);
-		for(int r = 0; r < rows; ++r) {
-			//std::memcpy(output + r * cols * typeSize, input + ((srcRow + r) * gcols + srcCol) * typeSize, cols * typeSize);
-			if(CPLE_None != band->RasterIO(GF_Write, dstCol, dstRow + r, cols, 1, input + ((srcRow + r) * gcols + srcCol) * typeSize,
-					cols, 1, gtype, 0, 0, 0))
-				g_runerr("Failed to write to: " << grd.filename());
-		}
+	for(int r = 0; r < rows; ++r) {
+		if(CPLE_None != band->RasterIO(GF_Write, dstCol, dstRow + r, cols, 1, input + ((srcRow + r) * gcols + srcCol) * typeSize,
+				cols, 1, gtype, 0, 0, 0))
+			g_runerr("Failed to write to: " << grd.filename());
 	}
 
 }
@@ -1128,13 +1112,11 @@ void MemRaster::writeToMemRaster(MemRaster &grd,
 
 	if(grd.m_props.isInt()) {
 		if(m_props.isInt()) {
-			std::lock_guard<std::mutex> lk(m_mtx);
 			for(int r = 0; r < rows; ++r) {
 				for(int c = 0; c < cols; ++c)
 					grd.setInt(c + dstCol, r + dstRow, getInt(c + srcCol, r + srcRow, srcBand), dstBand);
 			}
 		} else {
-			std::lock_guard<std::mutex> lk(m_mtx);
 			for(int r = 0; r < rows; ++r) {
 				for(int c = 0; c < cols; ++c)
 					grd.setInt(c + dstCol, r + dstRow, (int) getFloat(c + srcCol, r + srcRow, srcBand), dstBand);
@@ -1142,13 +1124,11 @@ void MemRaster::writeToMemRaster(MemRaster &grd,
 		}
 	} else {
 		if(m_props.isInt()) {
-			std::lock_guard<std::mutex> lk(m_mtx);
 			for(int r = 0; r < rows; ++r) {
 				for(int c = 0; c < cols; ++c)
 					grd.setFloat(c + dstCol, r + dstRow, (double) getInt(c + srcCol, r + srcRow, srcBand), dstBand);
 			}
 		} else {
-			std::lock_guard<std::mutex> lk(m_mtx);
 			for(int r = 0; r < rows; ++r) {
 				for(int c = 0; c < cols; ++c)
 					grd.setFloat(c + dstCol, r + dstRow, getFloat(c + srcCol, r + srcRow, srcBand), dstBand);
@@ -1360,13 +1340,11 @@ void writeInt(char* buf, int size, int value) {
 
 void Raster::fillInt(int value, int band) {
 	GDALRasterBand *bnd = m_ds->GetRasterBand(band);
-	std::lock_guard<std::mutex> lk(m_mtx);
 	bnd->Fill((int) value);
 }
 
 void Raster::fillFloat(double value, int band) {
 	GDALRasterBand *bnd = m_ds->GetRasterBand(band);
-	std::lock_guard<std::mutex> lk(m_mtx);
 	bnd->Fill(value);
 }
 
@@ -1380,7 +1358,6 @@ void Raster::writeToRaster(Raster &grd,
 		GDALRasterBand* bnd = m_ds->GetRasterBand(m_bband);
 		if(!bnd)
 			g_runerr("Failed to find band " << m_bband);
-		std::lock_guard<std::mutex> lk(m_mtx);
 		if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, getBlock(m_bband)))
 			g_runerr("Failed to flush to: " << filename());
 		m_dirty = false;
@@ -1414,15 +1391,12 @@ void Raster::writeToRaster(Raster &grd,
 	GDALRasterBand* dstBnd = grd.m_ds->GetRasterBand(dstBand);
 	if(!dstBnd)
 		g_runerr("Failed to find destination band " << dstBand);
-	{
-		std::lock_guard<std::mutex> lk(m_mtx);
-		if(CPLE_None != srcBnd->RasterIO(GF_Read, srcCol, srcRow, cols, rows,
-				buf.buf, cols, rows, gtype, 0, 0, 0))
-			g_runerr("Failed to read from: " << grd.filename());
-		if(CPLE_None != dstBnd->RasterIO(GF_Write, dstCol, dstRow, cols, rows,
-				buf.buf, cols, rows, gtype, 0, 0, 0))
-			g_runerr("Failed to write to: " << filename());
-	}
+	if(CPLE_None != srcBnd->RasterIO(GF_Read, srcCol, srcRow, cols, rows,
+			buf.buf, cols, rows, gtype, 0, 0, 0))
+		g_runerr("Failed to read from: " << grd.filename());
+	if(CPLE_None != dstBnd->RasterIO(GF_Write, dstCol, dstRow, cols, rows,
+			buf.buf, cols, rows, gtype, 0, 0, 0))
+		g_runerr("Failed to write to: " << filename());
 }
 
 void Raster::writeToMemRaster(MemRaster &grd,
@@ -1435,7 +1409,6 @@ void Raster::writeToMemRaster(MemRaster &grd,
 		GDALRasterBand* bnd = m_ds->GetRasterBand(m_bband);
 		if(!bnd)
 			g_runerr("Failed to find band " << bnd);
-		std::lock_guard<std::mutex> lk(m_mtx);
 		if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, getBlock(m_bband)))
 			g_runerr("Failed to flush to: " << filename());
 		m_dirty = false;
@@ -1462,12 +1435,9 @@ void Raster::writeToMemRaster(MemRaster &grd,
 	GDALRasterBand *band = m_ds->GetRasterBand(srcBand);
 	if(!band)
 		g_runerr("Failed to find band " << srcBand);
-	{
-		std::lock_guard<std::mutex> lk(m_mtx);
-		if(CPLE_None != band->RasterIO(GF_Read, srcCol, srcRow, cols, rows, buf.buf,
-				cols, rows, gtype, 0, 0, 0))
-			g_runerr("Failed to read from: " << filename());
-	}
+	if(CPLE_None != band->RasterIO(GF_Read, srcCol, srcRow, cols, rows, buf.buf,
+			cols, rows, gtype, 0, 0, 0))
+		g_runerr("Failed to read from: " << filename());
 
 	char* output = (char*) grd.grid();
 	char* input  = (char*) buf.buf;
@@ -1506,7 +1476,6 @@ double Raster::getFloat(int col, int row, int band) {
 			GDALRasterBand* bnd = m_ds->GetRasterBand(m_bband);
 			if(!bnd)
 				g_runerr("Failed to find band " << bnd);
-			std::lock_guard<std::mutex> lk(m_mtx);
 			if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, getBlock(m_bband)))
 				g_runerr("Failed to flush to: " << filename());
 			m_dirty = false;
@@ -1514,11 +1483,8 @@ double Raster::getFloat(int col, int row, int band) {
 		GDALRasterBand *rb = m_ds->GetRasterBand(band);
 		if(!rb)
 			g_argerr("Failed to find band " << band);
-		{
-			std::lock_guard<std::mutex> lk(m_mtx);
-			if(CPLE_None != rb->ReadBlock(bcol, brow, getBlock(band)))
-				g_runerr("Failed to read from: " << filename());
-		}
+		if(CPLE_None != rb->ReadBlock(bcol, brow, getBlock(band)))
+			g_runerr("Failed to read from: " << filename());
 		m_bcol = bcol;
 		m_brow = brow;
 		m_bband = band;
@@ -1546,7 +1512,6 @@ int Raster::getInt(int col, int row, int band) {
 			GDALRasterBand* bnd = m_ds->GetRasterBand(m_bband);
 			if(!bnd)
 				g_runerr("Failed to find band " << m_bband);
-			std::lock_guard<std::mutex> lk(m_mtx);
 			if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, getBlock(m_bband)))
 				g_runerr("Failed to flush to: " << filename());
 			m_dirty = false;
@@ -1554,11 +1519,8 @@ int Raster::getInt(int col, int row, int band) {
 		GDALRasterBand *rb = m_ds->GetRasterBand(band);
 		if(!rb)
 			g_argerr("Failed to find band " << band);
-		{
-			std::lock_guard<std::mutex> lk(m_mtx);
-			if(CPLE_None != rb->ReadBlock(bcol, brow, getBlock(band)))
-				g_runerr("Failed to read from: " << filename());
-		}
+		if(CPLE_None != rb->ReadBlock(bcol, brow, getBlock(band)))
+			g_runerr("Failed to read from: " << filename());
 		m_bcol = bcol;
 		m_brow = brow;
 		m_bband = band;
@@ -1597,6 +1559,7 @@ void Raster::setFloat(int col, int row, double v, int band) {
 				g_runerr("Failed to find band " << m_bband);
 			if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, getBlock(m_bband)))
 				g_runerr("Failed to flush to: " << filename());
+			bnd->FlushBlock(m_bcol, m_brow, true); // TODO: Doesn't work.
 			m_dirty = false;
 		}
 		GDALRasterBand *rb = m_ds->GetRasterBand(band);
@@ -1625,6 +1588,7 @@ void Raster::setInt(int col, int row, int v, int band) {
 				g_runerr("Failed to find band " << m_bband);
 			if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, getBlock(m_bband)))
 				g_runerr("Failed to flush to: " << filename());
+			bnd->FlushBlock(m_bcol, m_brow, true); // TODO: Doesn't work.
 			m_dirty = false;
 		}
 		GDALRasterBand *rb = m_ds->GetRasterBand(band);
@@ -2868,11 +2832,10 @@ void Raster::polygonize(const std::string& filename, const std::string& layerNam
 }
 
 void Raster::flush() {
-	if(m_brow > -1 && m_bcol > -1 && m_props.writable()) {
+	if(m_dirty && m_props.writable()) {
 		GDALRasterBand* bnd = m_ds->GetRasterBand(m_band);
 		if(!bnd)
 			g_runerr("Failed to find band " << m_band);
-		std::lock_guard<std::mutex> lk(m_mtx);
 		if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, getBlock(m_band)))
 			g_warn("Failed to write block to " << filename());
 	}
