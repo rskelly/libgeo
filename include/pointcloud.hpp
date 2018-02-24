@@ -681,7 +681,7 @@ public:
 	 * @param ext 		An extra filter value. For example, for percentiles, this is the cutoff value.
 	 */
 	void rasterize(const std::string& filename, const std::vector<std::string>& types, double resX, double resY,
-		double easting, double northing, double radius, int srid, int density = 32, double ext = 0);
+		double easting, double northing, double radius, int srid);
 
 	/**
 	 * Esitmate the point density (per cell) given the source files, resolution and search radius.

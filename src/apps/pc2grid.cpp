@@ -32,10 +32,7 @@ void usage() {
 			<< "                  layer (see below.) Default mean.\n"
 			<< "                  rugosity, variance, std. deviation and percentile.\n"
 			<< "                  For percentile, use the form, 'percenile:n', where\n"
-			<< "                  n is the percentile (no % sign); 1 - 99.\n"
-			<< " -i <density>     The estimated number of points per cell underestimating this\n"
-			<< "                  saves disk space at the cost of efficiency.\n"
-			<< " -t               Estimate the per-cell point density. Do nothing else\n\n";
+			<< "                  n is the percentile (no % sign); 1 - 99.\n";
 
 	PCPointFilter::printHelp(std::cerr);
 
@@ -56,9 +53,7 @@ int main(int argc, char** argv) {
 	double resY = std::nan("");
 	double easting = std::nan("");
 	double northing = std::nan("");
-	double radius = -1;
-	int density = 64;
-	bool estimate = false;
+	double radius = std::nan("");
 	uint16_t srid = 0;
 	std::vector<std::string> types;
 	std::vector<std::string> args;
@@ -75,8 +70,6 @@ int main(int argc, char** argv) {
 			resX = atof(argv[++i]);
 		} else if(v == "-ry") {
 			resY = atof(argv[++i]);
-		} else if(v == "-i") {
-			density = atoi(argv[++i]);
 		} else if(v == "-d") {
 			radius = atof(argv[++i]);
 		} else if(v == "-s") {
@@ -85,8 +78,6 @@ int main(int argc, char** argv) {
 			easting = atof(argv[++i]);
 		} else if(v == "-n") {
 			northing = atof(argv[++i]);
-		} else if(v == "-t") {
-			estimate = true;
 		} else {
 			args.push_back(argv[i]);
 		}
@@ -103,13 +94,7 @@ int main(int argc, char** argv) {
 	try {
 		Rasterizer r(infiles);
 		r.setFilter(filter);
-		if(estimate) {
-			density = (int) std::ceil(r.density(resX, radius));
-			std::cerr << "Estimated point density: " << density << "\n";
-		} else {
-			std::cerr << "Point density: " << density << "\n";
-		}
-		r.rasterize(args[0], types, resX, resY, easting, northing, radius, srid, density, 0);
+		r.rasterize(args[0], types, resX, resY, easting, northing, radius, srid);
 	} catch(const std::exception& ex) {
 		std::cerr << ex.what() << "\n";
 		usage();

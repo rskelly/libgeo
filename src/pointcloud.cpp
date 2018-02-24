@@ -1108,7 +1108,7 @@ void fixBounds(double* bounds, double resX, double resY, double* easting, double
 }
 
 void Rasterizer::rasterize(const std::string& filename, const std::vector<std::string>& _types,
-		double resX, double resY, double easting, double northing, double radius, int srid, int density, double ext) {
+		double resX, double resY, double easting, double northing, double radius, int srid) {
 
 	if(std::isnan(resX) || std::isnan(resY))
 		g_runerr("Resolution not valid.");
@@ -1147,7 +1147,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	std::cerr << "cols " << cols << "; rows " << rows << "\n";
 	std::cerr << "bounds " << bounds[0] << ", " << bounds[1] << ", " << bounds[2] << ", " << bounds[3] << "\n";
 
-	int bandCount = 0;
+	int bandCount = 1;
 	for(const std::unique_ptr<Computer>& comp : computers)
 		bandCount += comp->bandCount();
 
@@ -1158,10 +1158,10 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	props.setDataType(DataType::Float32);
 	props.setSrid(srid);
 	props.setWritable(true);
-	props.setBands(bandCount + 1);
+	props.setBands(bandCount);
 	Raster rast(filename, props);
 	rast.fillFloat(0, 1);
-	for(int band = 2; band < bandCount + 1; ++band)
+	for(int band = 2; band < bandCount; ++band)
 		rast.fillFloat(NODATA, band);
 
 	liblas::ReaderFactory fact;
@@ -1176,7 +1176,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	int i = 0;
 
 	// Initialize the grid with some starting slots.
-	grid.init(100000, 0);
+	grid.init(1000, 0);
 
 	// As we go through the m_files list, we'll remove pointers from
 	// this list and use it to calculate bounds for finalizing cells.
