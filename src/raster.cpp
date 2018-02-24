@@ -1457,18 +1457,20 @@ double Raster::getFloat(int col, int row, int band) {
 	int bcol = col / m_bcols;
 	int brow = row / m_brows;
 	if(bcol != m_bcol || brow != m_brow || band != m_bband) {
+		GDALRasterBand* bnd;
 		if(m_dirty) {
-			GDALRasterBand* bnd = m_ds->GetRasterBand(m_bband);
+			bnd = m_ds->GetRasterBand(m_bband);
 			if(!bnd)
-				g_runerr("Failed to find band " << bnd);
+				g_runerr("Failed to find band " << m_bband);
 			if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, getBlock(m_bband)))
 				g_runerr("Failed to flush to: " << filename());
+			bnd->FlushBlock(m_bcol, m_brow, true);
 			m_dirty = false;
 		}
-		GDALRasterBand *rb = m_ds->GetRasterBand(band);
-		if(!rb)
+		bnd = m_ds->GetRasterBand(band);
+		if(!bnd)
 			g_argerr("Failed to find band " << band);
-		if(CPLE_None != rb->ReadBlock(bcol, brow, getBlock(band)))
+		if(CPLE_None != bnd->ReadBlock(bcol, brow, getBlock(band)))
 			g_runerr("Failed to read from: " << filename());
 		m_bcol = bcol;
 		m_brow = brow;
@@ -1481,7 +1483,8 @@ double Raster::getFloat(int col, int row, int band) {
 }
 
 double Raster::getFloat(uint64_t idx, int band) {
-	return getFloat((int) (idx % m_props.cols()), (int) (idx / m_props.cols()), band);
+	int cols = m_props.cols();
+	return getFloat((int) (idx % cols), (int) (idx / cols), band);
 }
 
 
@@ -1493,18 +1496,20 @@ int Raster::getInt(int col, int row, int band) {
 	int bcol = col / m_bcols;
 	int brow = row / m_brows;
 	if(bcol != m_bcol || brow != m_brow || band != m_bband) { // TODO: No effective cacheing if the band changes.
+		GDALRasterBand* bnd;
 		if(m_dirty) {
-			GDALRasterBand* bnd = m_ds->GetRasterBand(m_bband);
+			bnd = m_ds->GetRasterBand(m_bband);
 			if(!bnd)
 				g_runerr("Failed to find band " << m_bband);
 			if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, getBlock(m_bband)))
 				g_runerr("Failed to flush to: " << filename());
+			bnd->FlushBlock(m_bcol, m_brow, true);
 			m_dirty = false;
 		}
-		GDALRasterBand *rb = m_ds->GetRasterBand(band);
-		if(!rb)
+		bnd = m_ds->GetRasterBand(band);
+		if(!bnd)
 			g_argerr("Failed to find band " << band);
-		if(CPLE_None != rb->ReadBlock(bcol, brow, getBlock(band)))
+		if(CPLE_None != bnd->ReadBlock(bcol, brow, getBlock(band)))
 			g_runerr("Failed to read from: " << filename());
 		m_bcol = bcol;
 		m_brow = brow;
@@ -1517,7 +1522,8 @@ int Raster::getInt(int col, int row, int band) {
 }
 
 int Raster::getInt(uint64_t idx, int band) {
-	return getInt((int) (idx % m_props.cols()), (int) (idx / m_props.cols()), band);
+	int cols = m_props.cols();
+	return getInt((int) (idx % cols), (int) (idx / cols), band);
 }
 
 int Raster::getInt(double x, double y, int band) {
@@ -1525,7 +1531,8 @@ int Raster::getInt(double x, double y, int band) {
 }
 
 void Raster::setInt(uint64_t idx, int v, int band) {
-	setInt((int) (idx % m_props.cols()), (int) (idx / m_props.cols()), v, band);
+	int cols = m_props.cols();
+	setInt((int) (idx % cols), (int) (idx / cols), v, band);
 }
 
 void Raster::setInt(double x, double y, int v, int band) {
@@ -1593,7 +1600,8 @@ void Raster::setInt(int col, int row, int v, int band) {
 }
 
 void Raster::setFloat(uint64_t idx, double v, int band) {
-	setFloat((int) (idx % m_props.cols()), (int) (idx / m_props.cols()), v, band);
+	int cols = m_props.cols();
+	setFloat((int) (idx % cols), (int) (idx / cols), v, band);
 }
 
 void Raster::setFloat(double x, double y, double v, int band) {
