@@ -77,7 +77,7 @@ target_link_libraries (geoutil geo rt ${Boost_LIBRARIES} ${GDAL_LIBRARY} ${CRYPT
 add_library (geodb SHARED src/db.cpp)
 target_link_libraries (geodb geo geoutil)
 
-add_library (georaster SHARED src/raster.cpp)
+add_library (georaster SHARED src/raster.cpp src/rast_polygonize.cpp)
 target_link_libraries (georaster geo geoutil geodb Threads::Threads ${GEOS_LIBRARY})
 
 add_library (geopc SHARED src/pointcloud.cpp src/pc_computer.cpp)
