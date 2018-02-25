@@ -332,8 +332,8 @@ typedef std::queue<std::unique_ptr<Poly> > PolyQueue;
 
 class PolyContext {
 private:
-	Raster* m_raster;
-	Raster* m_maskRaster;
+	Grid* m_raster;
+	Grid* m_maskRaster;
 	Status* m_status;
 	int* m_block;
 	bool* m_cancel;
@@ -363,8 +363,8 @@ private:
 	std::vector<bool> m_rowsFinished;
 
 public:
-	PolyContext(Raster* raster, Status* status, int* block, bool* cancel,
-			int bufSize, int band, bool removeHoles, bool removeDangles, Raster* maskRaster = nullptr) :
+	PolyContext(Grid* raster, Status* status, int* block, bool* cancel,
+			int bufSize, int band, bool removeHoles, bool removeDangles, Grid* maskRaster = nullptr) :
 		m_raster(raster),
 		m_maskRaster(maskRaster),
 		m_status(status),
@@ -469,7 +469,7 @@ public:
 		m_polyQueueCond.notify_all();
 	}
 
-	int getCols(const GridProps& props, Raster* mask) {
+	int getCols(const GridProps& props, Grid* mask) {
 		if(mask) {
 			const GridProps& mprops = mask->props();
 			const Bounds& mbounds = mprops.bounds();
@@ -479,7 +479,7 @@ public:
 		}
 	}
 
-	int getRows(const GridProps& props, Raster* mask) {
+	int getRows(const GridProps& props, Grid* mask) {
 		if(mask) {
 			const GridProps& mprops = mask->props();
 			const Bounds& mbounds = mprops.bounds();
@@ -489,7 +489,7 @@ public:
 		}
 	}
 
-	int getCol(const GridProps& props, Raster* mask) {
+	int getCol(const GridProps& props, Grid* mask) {
 		if(mask) {
 			const GridProps& mprops = mask->props();
 			const Bounds& mbounds = mprops.bounds();
@@ -499,7 +499,7 @@ public:
 		}
 	}
 
-	int getRow(const GridProps& props, Raster* mask) {
+	int getRow(const GridProps& props, Grid* mask) {
 		if(mask) {
 			const GridProps& mprops = mask->props();
 			const Bounds& mbounds = mprops.bounds();
@@ -775,11 +775,11 @@ public:
 
 bool s_cancel = false;
 
-void Raster::polygonize(const std::string& filename, const std::string& layerName,
-		const std::string& driver, uint16_t srid, uint16_t band, uint16_t threads,
-		int bufSize, bool removeHoles, bool removeDangles, Status *status, bool *cancel, const std::string& mask) {
+void Grid::polygonize(const std::string& filename, const std::string& layerName,
+		const std::string& driver, int srid, int band, bool removeHoles,
+		bool removeDangles, Status *status, bool *cancel, const std::string& mask, int threads) {
 
-	if(!m_props.isInt())
+	if(!props().isInt())
 		g_runerr("Only integer rasters can be polygonized.");
 
 	// There need to be at least three threads for readin from the raster(1),
@@ -794,18 +794,15 @@ void Raster::polygonize(const std::string& filename, const std::string& layerNam
 	// Counter for the current block.
 	int block = 0;
 
-	// If the bufsize given is invalid, use the entire raster height.
-	// This can use a lot of memory!
-	if(bufSize <= 0 || bufSize > props().rows()) {
-		g_warn("Invalid buffer size; using raster height.");
-		bufSize = props().rows();
-	}
+	// Set the buffer size.
+	int bufSize = std::min(512, props().rows());
 
 	// Remove the original file; some can't be overwritten directly.
 	// This will not take care of any auxillary files (e.g. shapefiles)
 	Util::rm(filename);
 
-	Raster* maskRaster = nullptr;
+	// Initialize the mask if necessary.
+	Grid* maskRaster = nullptr;
 	if(!mask.empty())
 		maskRaster = new Raster(mask);
 
