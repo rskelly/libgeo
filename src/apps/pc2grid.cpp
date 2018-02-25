@@ -32,7 +32,8 @@ void usage() {
 			<< "                  layer (see below.) Default mean.\n"
 			<< "                  rugosity, variance, std. deviation and percentile.\n"
 			<< "                  For percentile, use the form, 'percenile:n', where\n"
-			<< "                  n is the percentile (no % sign); 1 - 99.\n";
+			<< "                  n is the percentile (no % sign); 1 - 99.\n"
+			<< " -v               Verbose. Enable debug and warning messages.\n";
 
 	PCPointFilter::printHelp(std::cerr);
 
@@ -66,6 +67,8 @@ int main(int argc, char** argv) {
 		if(v == "-m") {
 			std::string type = argv[++i];
 			Util::splitString(std::back_inserter(types), Util::lower(type), ",");
+		} else if(v == "-v") {
+			g_loglevel(G_LOG_TRACE);
 		} else if(v == "-rx") {
 			resX = atof(argv[++i]);
 		} else if(v == "-ry") {

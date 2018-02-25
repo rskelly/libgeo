@@ -312,7 +312,6 @@ std::string PCWriter::nextFile() {
 void PCWriter::open() {
 	close();
 	std::string filename = nextFile();
-	std::cerr << filename << "\n";
 	m_str.open(filename, std::ios::out | std::ios::binary | std::ios::trunc);
 	m_writer = new liblas::Writer(m_str, *m_header);
 }
@@ -408,8 +407,6 @@ Tiler::Tiler(const std::vector<std::string> filenames) {
 void Tiler::tile(const std::string& outdir, double size, double buffer, int srid,
 	double easting, double northing, int maxFileHandles) {
 
-	std::cerr << std::setprecision(12);
-
 	if(buffer < 0)
 		g_runerr("Negative buffer is not allowed. Use easting, northing and tile size to crop tiles.");
 
@@ -419,7 +416,6 @@ void Tiler::tile(const std::string& outdir, double size, double buffer, int srid
 	for(PCFile& f : files) {
 		f.init();
 		f.fileBounds(fBounds);
-		std::cerr << "file bounds " << fBounds[0] << ", " << fBounds[1] << "; " << fBounds[2] << ", " << fBounds[3] << "\n";
 		if(fBounds[0] < allBounds[0]) allBounds[0] = fBounds[0];
 		if(fBounds[1] < allBounds[1]) allBounds[1] = fBounds[1];
 		if(fBounds[2] > allBounds[2]) allBounds[2] = fBounds[2];
@@ -464,9 +460,6 @@ void Tiler::tile(const std::string& outdir, double size, double buffer, int srid
 	std::vector<std::unique_ptr<PCWriter> > writers;
 
 	do {
-
-		std::cerr << "cols " << cols0 << "; rows " << rows0 << "; size " << size0 << "\n";
-		std::cerr << "bounds " << allBounds[0] << ", " << allBounds[1] << "; " << allBounds[2] << ", " << allBounds[3] << "\n";
 
 		if(!writers.empty()) {
 			// This is run n>0, so we now read from the intermediate tiles.
@@ -555,7 +548,6 @@ void Tiler::tile(const std::string& outdir, double size, double buffer, int srid
 						double y = allBounds[1] + r * size0;
 						ss << "tile_" << (int) x << "_" << (int) y << "_" << size0;
 						std::string outfile = Util::pathJoin(outdir, ss.str());
-						std::cerr << outfile << "\n";
 						writers.emplace_back(new PCWriter(outfile, ihdr, x, y, size0, buffer));
 					}
 				}
@@ -759,7 +751,7 @@ private:
 
 
 	void resize(size_t size) {
-		std::cerr << "resize " << size << "\n";
+		g_debug("MemGrid resize: " << size);
 		m_mapped.reset(size);
 		m_totalLength = size;
 	}
@@ -790,7 +782,7 @@ private:
 		offset *= m_lineLength;
 
 		if(offset + m_lineLength >= m_totalLength) {
-			resize(m_totalLength + std::max(m_lineLength, (size_t) (m_totalLength * 0.25)));
+			resize(m_totalLength * 2);
 			data = (char*) m_mapped.data();
 		}
 
@@ -830,7 +822,7 @@ private:
 
 				// If the new offset is too far, resize the memory.
 				if(ml.nextLine * m_lineLength + m_lineLength >= m_totalLength) {
-					resize(m_totalLength + std::max(m_lineLength, (size_t) (m_totalLength * 0.25)));
+					resize(m_totalLength * 2);
 					data = (char*) m_mapped.data();
 				}
 
@@ -923,7 +915,7 @@ public:
 		m_totalLength = cellCount * m_lineLength;
 		m_mapFile = mapFile;
 
-		std::cerr << "MemGrid: cells: " << cellCount << "; line count: " << lineCount << "; total size: " << m_totalLength << "; line length: " << m_lineLength << "\n";
+		g_debug("MemGrid: cells: " << cellCount << "; line count: " << lineCount << "; total size: " << m_totalLength << "; line length: " << m_lineLength);
 
 		if(mapFile.empty()) {
 			m_mapped.init(m_totalLength, true);
@@ -1045,7 +1037,7 @@ double Rasterizer::density(double resolution, double radius) {
 			++count;
 		}
 	}
-	std::cerr << sum << ", " << count << "\n";
+
 	double cell = radius > 0 ? (M_PI * radius * radius) / (resolution * resolution) : 1;
 	return (sum / count) * 1.5 * cell;
 }
@@ -1113,8 +1105,10 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	if(std::isnan(resX) || std::isnan(resY))
 		g_runerr("Resolution not valid.");
 
-	if(radius < 0)
+	if(radius < 0 || std::isnan(radius)) {
 		radius = std::sqrt(std::pow(resX / 2, 2) * 2);
+		g_warn("Invalid radius; using " << radius << ".");
+	}
 
 	std::vector<std::string> types(_types);
 	if(types.empty()) {
@@ -1143,9 +1137,6 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 
 	int cols = (int) ((bounds[2] - bounds[0]) / std::abs(resX)) + 1;
 	int rows = (int) ((bounds[3] - bounds[1]) / std::abs(resY)) + 1;
-
-	std::cerr << "cols " << cols << "; rows " << rows << "\n";
-	std::cerr << "bounds " << bounds[0] << ", " << bounds[1] << ", " << bounds[2] << ", " << bounds[3] << "\n";
 
 	int bandCount = 1;
 	for(const std::unique_ptr<Computer>& comp : computers)
@@ -1176,7 +1167,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	int i = 0;
 
 	// Initialize the grid with some starting slots.
-	grid.init(1000, 0);
+	grid.init(cols * rows, 0);
 
 	// As we go through the m_files list, we'll remove pointers from
 	// this list and use it to calculate bounds for finalizing cells.
@@ -1189,7 +1180,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	std::vector<double> out;
 
 	for(PCFile& file : m_files) {
-		std::cerr << "Reading file " << i++ << " of " << m_files.size() << ".\n";
+		g_debug("Reading file " << i++ << " of " << m_files.size());
 		for(const std::string& filename : file.filenames()) {
 			std::ifstream str(filename);
 			liblas::Reader rdr = fact.CreateWithStream(str);
@@ -1336,8 +1327,6 @@ void Normalizer::normalize(const std::string& dtmpath, const std::string& outdir
 		std::ifstream str(filename);
 		liblas::Reader rdr = fact.CreateWithStream(str);
 
-		std::cerr << outfile << "\n";
-
 		std::ofstream ostr(outfile, std::ios::binary | std::ios::trunc | std::ios::out);
 		liblas::Header hdr(rdr.GetHeader());
 		liblas::Writer wtr(ostr, hdr);
@@ -1362,10 +1351,8 @@ void Normalizer::normalize(const std::string& dtmpath, const std::string& outdir
 			int col = props.toCol(x);
 			int row = props.toRow(y);
 
-			if(col < 0 || col >= props.cols() || row < 0 || row >= props.rows()) {
-				std::cerr << x << ", " << y << "; " << props.toCol(x) << ", " << props.toRow(y) << "; " << props.cols() << "; " << props.rows() << "\n";
+			if(col < 0 || col >= props.cols() || row < 0 || row >= props.rows())
 				continue;
-			}
 
 			double t = dtm.getFloat(props.toCol(x), props.toRow(y), band);
 
