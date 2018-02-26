@@ -19,6 +19,7 @@
 #include <geos/geom/CoordinateArraySequence.h>
 #include <geos/geom/Geometry.h>
 #include <geos/geom/Polygon.h>
+#include <geos/geom/MultiPolygon.h>
 #include <geos/geom/Point.h>
 #include <geos/geom/LinearRing.h>
 #include <geos/geom/CoordinateSequence.h>
@@ -198,7 +199,8 @@ public:
 			}
 			m_geoms.clear();
 
-			std::cerr << "collapsing " << polys.size() << " polys\n";
+			g_debug("Collapsing " << polys.size() << " polys")
+
 			// The max group size is 1024; min 2.
 			int groupSize = g_max(2, g_min(1024, polys.size() / 16));
 			// If the group size is 2, just use one group.
@@ -206,7 +208,7 @@ public:
 				groupSize = polys.size();
 
 			// Number of threads
-			// TODO: Configurable. Causes breaks in polys; need a final merge.
+			// TODO: Configurable.
 			size_t tc = 4;
 			// The number of items in one group.
 			size_t groupCount = (int) std::ceil((float) polys.size() / groupSize);
@@ -238,7 +240,7 @@ public:
 			change = geomCount - m_geoms.size();
 			geomCount = m_geoms.size();
 
-			std::cerr << "collapse " << change << ", " << geomCount << "\n";
+			g_debug("Collapse " << change << ", " << geomCount)
 		}
 
 		m_collapsed = true;
@@ -258,7 +260,7 @@ public:
 
 		collapse();
 
-		std::cerr << "finalize\n";
+		g_debug("Finalize")
 
 		Geometry* geom = fact->createMultiPolygon(m_geoms);
 
@@ -297,7 +299,6 @@ public:
 		}
 
 		m_geom = geom;
-		std::cerr << "geom " << m_geom << "\n";
 	}
 
 	/**
@@ -624,7 +625,7 @@ public:
 
 		} // while
 
-		std::cerr << "read block finished\n";
+		g_debug("Read block finished");
 
 		notifyTransfer();
 	}
@@ -663,7 +664,7 @@ public:
 			notifyWrite();
 		}
 
-		std::cerr << "poly transfer queue finished\n";
+		g_debug("Poly transfer queue finished")
 
 		notifyWrite();
 	}
@@ -718,10 +719,11 @@ public:
 			if(!p.get())
 				continue;
 
-			std::cerr << "write\n";
+			g_debug("Write")
 
 			// Retrieve the unioned geometry and write it.
 			const Geometry* g = p->geom();
+			Geometry* final = nullptr;
 
 			{
 				std::vector<Polygon*> polys;
@@ -745,10 +747,18 @@ public:
 					g_runerr("Illegal geometry type: " << g->getGeometryTypeId());
 					break;
 				}
-				g = geos::operation::geounion::CascadedPolygonUnion::CascadedPolygonUnion::Union(&polys);
+				final = geos::operation::geounion::CascadedPolygonUnion::CascadedPolygonUnion::Union(&polys);
 			}
 
-			OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(m_gctx, (GEOSGeom) g);
+			if(final->getGeometryTypeId() != GEOS_MULTIPOLYGON) {
+				g_debug("Converting to multipolygon " << final->getGeometryTypeId())
+				std::vector<Geometry*>* geoms = new std::vector<Geometry*>;
+				geoms->push_back(final);
+				final = m_geomFactory->createMultiPolygon(geoms);
+			}
+
+			g_debug("Writing to file")
+			OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(m_gctx, (GEOSGeom) final);
 			if(!geom)
 				g_runerr("Null geometry.");
 			OGRFeature feat(m_layer->GetLayerDefn());
@@ -765,10 +775,10 @@ public:
 			if(OGRERR_NONE != err)
 				g_runerr("Failed to add geometry.");
 
-			std::cerr << "poly\n";
+			g_debug("Poly")
 		}
 
-		std::cerr << "poly write queue finished\n";
+		g_debug("Poly write queue finished")
 	}
 
 };
