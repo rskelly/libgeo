@@ -23,9 +23,8 @@
 #include "pointcloud.hpp"
 #include "ds/kdtree.hpp"
 #include "pc_computer.hpp"
+#include "pc_memgrid.hpp"
 
-#define MIN_DBL std::numeric_limits<double>::lowest()
-#define MAX_DBL std::numeric_limits<double>::max()
 #define NODATA -9999.0
 
 using namespace geo::raster;
@@ -34,7 +33,7 @@ using namespace geo::pc;
 
 PCFile::PCFile(const std::string& filename, double x, double y, double size, double buffer) :
 	m_x(x), m_y(y),
-	m_fileBounds{MAX_DBL, MAX_DBL, MIN_DBL, MIN_DBL, MAX_DBL, MIN_DBL},
+	m_fileBounds{G_DBL_MAX_POS, G_DBL_MAX_POS, G_DBL_MIN_POS, G_DBL_MIN_POS, G_DBL_MAX_POS, G_DBL_MIN_POS},
 	m_bounds{x, y, x + size, y + size},
 	m_bufferedBounds{x - buffer, y - buffer, x + size + buffer, y + size + buffer},
 	m_pointCount(0),
@@ -45,7 +44,7 @@ PCFile::PCFile(const std::string& filename, double x, double y, double size, dou
 
 PCFile::PCFile(const std::vector<std::string>& filenames, double x, double y, double size, double buffer) :
 	m_x(x), m_y(y),
-	m_fileBounds{MAX_DBL, MAX_DBL, MIN_DBL, MIN_DBL, MAX_DBL, MIN_DBL},
+	m_fileBounds{G_DBL_MAX_POS, G_DBL_MAX_POS, G_DBL_MIN_POS, G_DBL_MIN_POS, G_DBL_MAX_POS, G_DBL_MIN_POS},
 	m_bounds{x, y, x + size, y + size},
 	m_bufferedBounds{x - buffer, y - buffer, x + size + buffer, y + size + buffer},
 	m_pointCount(0),
@@ -259,7 +258,7 @@ PCWriter::PCWriter(const std::string& filename, const liblas::Header& hdr, doubl
 	m_totalReturns(0),
 	m_bounds{x, y, x + size, y + size},
 	m_bufferedBounds{x - buffer, y - buffer, x + size + buffer, y + size + buffer},
-	m_outBounds{MAX_DBL, MAX_DBL, MIN_DBL, MIN_DBL, MAX_DBL, MIN_DBL},
+	m_outBounds{G_DBL_MAX_POS, G_DBL_MAX_POS, G_DBL_MIN_POS, G_DBL_MIN_POS, G_DBL_MAX_POS, G_DBL_MIN_POS},
 	m_x(x), m_y(y),
 	m_filename(filename),
 	m_writer(nullptr), m_header(nullptr),
@@ -312,7 +311,6 @@ std::string PCWriter::nextFile() {
 void PCWriter::open() {
 	close();
 	std::string filename = nextFile();
-	std::cerr << filename << "\n";
 	m_str.open(filename, std::ios::out | std::ios::binary | std::ios::trunc);
 	m_writer = new liblas::Writer(m_str, *m_header);
 }
@@ -408,18 +406,15 @@ Tiler::Tiler(const std::vector<std::string> filenames) {
 void Tiler::tile(const std::string& outdir, double size, double buffer, int srid,
 	double easting, double northing, int maxFileHandles) {
 
-	std::cerr << std::setprecision(12);
-
 	if(buffer < 0)
 		g_runerr("Negative buffer is not allowed. Use easting, northing and tile size to crop tiles.");
 
 	// Calculate the overall bounds of the file set.
-	double allBounds[6] = {MAX_DBL, MAX_DBL, MIN_DBL, MIN_DBL, MAX_DBL, MIN_DBL};
+	double allBounds[6] = {G_DBL_MAX_POS, G_DBL_MAX_POS, G_DBL_MIN_POS, G_DBL_MIN_POS, G_DBL_MAX_POS, G_DBL_MIN_POS};
 	double fBounds[6];
 	for(PCFile& f : files) {
 		f.init();
 		f.fileBounds(fBounds);
-		std::cerr << "file bounds " << fBounds[0] << ", " << fBounds[1] << "; " << fBounds[2] << ", " << fBounds[3] << "\n";
 		if(fBounds[0] < allBounds[0]) allBounds[0] = fBounds[0];
 		if(fBounds[1] < allBounds[1]) allBounds[1] = fBounds[1];
 		if(fBounds[2] > allBounds[2]) allBounds[2] = fBounds[2];
@@ -464,9 +459,6 @@ void Tiler::tile(const std::string& outdir, double size, double buffer, int srid
 	std::vector<std::unique_ptr<PCWriter> > writers;
 
 	do {
-
-		std::cerr << "cols " << cols0 << "; rows " << rows0 << "; size " << size0 << "\n";
-		std::cerr << "bounds " << allBounds[0] << ", " << allBounds[1] << "; " << allBounds[2] << ", " << allBounds[3] << "\n";
 
 		if(!writers.empty()) {
 			// This is run n>0, so we now read from the intermediate tiles.
@@ -555,7 +547,6 @@ void Tiler::tile(const std::string& outdir, double size, double buffer, int srid
 						double y = allBounds[1] + r * size0;
 						ss << "tile_" << (int) x << "_" << (int) y << "_" << size0;
 						std::string outfile = Util::pathJoin(outdir, ss.str());
-						std::cerr << outfile << "\n";
 						writers.emplace_back(new PCWriter(outfile, ihdr, x, y, size0, buffer));
 					}
 				}
@@ -719,253 +710,6 @@ geo::pc::Point::~Point() {
 	if(m_point)
 		delete m_point;
 }
-
-/**
- * Struct used to store the line headers in the point cloud cache file.
- */
-typedef struct {
-	size_t idx;			// The index of the cell: row * cols + col
-	size_t nextLine;	// The address in the mapped memory of the next row containing data for this cell.
-	size_t count;		// The number of points in the cell.
-} MappedLine;
-
-/**
- * Struct used to store point in the point cache file.
- */
-typedef struct {
-	float x;
-	float y;
-	float z;
-	float intensity;
-	float angle;
-	int cls;
-	int retNum;
-	int numRets;
-	int edge;
-} MappedPoint;
-
-class MemGrid {
-private:
-	geo::util::MappedFile m_mapped;
-	size_t m_lineCount;
-	size_t m_cellCount;
-	size_t m_lineLength;
-	size_t m_totalLength;
-	size_t m_currentLine;						// The next available line index.
-	size_t m_pointCount;
-	std::string m_mapFile;
-	std::list<size_t> m_finalized; 				// The line offsets of finalized cells available for re-use.
-	std::unordered_map<size_t, size_t> m_map;   // Maps cell indices to line indices.
-
-
-	void resize(size_t size) {
-		std::cerr << "resize " << size << "\n";
-		m_mapped.reset(size);
-		m_totalLength = size;
-	}
-
-	// row structure: idx (size_t -> 8 bytes) | next line (size_t -> 8 bytes) | count (size_t -> 8 bytes) | points (3 * double * n)
-	// row length = 8 + 8 + 8 + (3 * 8) * n; n = m_lineCount
-	// if the count >= line count, the next row must be set.
-
-	void writePoint(size_t idx, float x, float y, float z, float intensity, float angle, int cls, int retNum, int numRets, int edge) {
-
-		char* data = (char*) m_mapped.data();
-		size_t offset;
-		bool newLine;
-
-		if(m_map.find(idx) != m_map.end()) {
-			offset = m_map[idx];
-			newLine = false;
-		} else {
-			if(!m_finalized.empty()) {
-				offset = m_finalized.front();
-				m_finalized.pop_front();
-			} else {
-				offset = m_currentLine++;
-			}
-			m_map[idx] = offset;
-			newLine = true;
-		}
-		offset *= m_lineLength;
-
-		if(offset + m_lineLength >= m_totalLength) {
-			resize(m_totalLength + std::max(m_lineLength, (size_t) (m_totalLength * 0.25)));
-			data = (char*) m_mapped.data();
-		}
-
-		MappedPoint mp = {x, y, z, intensity, angle, cls, retNum, numRets, edge};
-		MappedLine ml = {0, 0, 0};
-
-		if(newLine) {
-
-			// There is no record in the points file; start one.
-			ml.idx = idx;
-			ml.count = 1;
-			ml.nextLine = 0;
-			std::memcpy(data + offset, &ml, sizeof(MappedLine));
-			std::memcpy(data + offset + sizeof(MappedLine), &mp, sizeof(MappedPoint));
-			++m_pointCount;
-
-		} else {
-
-			// Retrieve the line header at the offset.
-			std::memcpy(&ml, data + offset, sizeof(MappedLine));
-
-			// Find the last line for this cell.
-			while(ml.nextLine) {
-				offset = ml.nextLine * m_lineLength;
-				std::memcpy(&ml, data + offset, sizeof(MappedLine));
-			}
-
-			// If the line is full, update the nextLine and grab a finalized one or start a new one.
-			if(ml.count == m_lineCount) {
-
-				if(!m_finalized.empty()) {
-					ml.nextLine = m_finalized.front();
-					m_finalized.pop_front();
-				} else {
-					ml.nextLine = m_currentLine++;
-				}
-
-				// If the new offset is too far, resize the memory.
-				if(ml.nextLine * m_lineLength + m_lineLength >= m_totalLength) {
-					resize(m_totalLength + std::max(m_lineLength, (size_t) (m_totalLength * 0.25)));
-					data = (char*) m_mapped.data();
-				}
-
-				// Copy the line header to the previous line
-				std::memcpy(data + offset, &ml, sizeof(MappedLine));
-
-				// Create the new line.
-				offset = ml.nextLine * m_lineLength;
-				ml.nextLine = 0;
-				ml.count = 1;
-				std::memcpy(data + offset, &ml, sizeof(MappedLine));
-				std::memcpy(data + offset + sizeof(MappedLine), &mp, sizeof(MappedPoint));
-				++m_pointCount;
-
-			} else {
-
-				// Add the point toe the line.
-				size_t count = ml.count++;
-				std::memcpy(data + offset, &ml, sizeof(MappedLine));
-				offset += sizeof(MappedLine) + count * sizeof(MappedPoint);
-				std::memcpy(data + offset, &mp, sizeof(MappedPoint));
-				++m_pointCount;
-
-			}
-		}
-	}
-
-	void finalize(size_t idx) {
-		size_t offset = m_map[idx];
-		m_finalized.push_back(offset);
-		char* data = (char*) m_mapped.data();
-		MappedLine ml = {0, 0, 0};
-		std::memcpy(&ml, data + offset * m_lineLength, sizeof(MappedLine));
-		while(ml.nextLine) {
-			m_finalized.push_back(ml.nextLine);
-			std::memcpy(&ml, data + ml.nextLine * m_lineLength, sizeof(MappedLine));
-		}
-		m_map.erase(idx);
-	}
-
-	size_t readPoints(size_t idx, std::vector<geo::pc::Point>& pts, bool final) {
-		if(!hasUnread(idx))
-			return 0; //g_runerr("No unread pixel for that index.");
-		char* data = (char*) m_mapped.data();
-		size_t offset = m_map[idx] * m_lineLength;
-		size_t count = 0;
-		MappedLine ml;
-		MappedPoint mp;
-		do {
-			char* buf = data + offset;
-			std::memcpy(&ml, buf, sizeof(MappedLine));
-			buf += sizeof(MappedLine);
-			for(size_t i = 0; i < ml.count; ++i) {
-				std::memcpy(&mp, buf, sizeof(MappedPoint));
-				pts.emplace_back(mp.x, mp.y, mp.z, mp.intensity, mp.angle, mp.cls, mp.retNum, mp.numRets, mp.edge);
-				buf += sizeof(MappedPoint);
-				++count;
-			}
-			offset = ml.nextLine * m_lineLength;
-		} while(ml.nextLine);
-		if(final)
-			finalize(idx);
-		m_pointCount -= count;
-		return count;
-	}
-
-public:
-
-	MemGrid() :
-		m_lineCount(0),
-		m_cellCount(0),
-		m_lineLength(0),
-		m_totalLength(0),
-		m_currentLine(0),
-		m_pointCount(0) {
-	}
-
-	MemGrid(size_t cellCount, size_t lineCount) :
-		MemGrid() {
-		init(cellCount, lineCount);
-	}
-
-	/**
-	 * If the line count is zero, will calculate the line count to fit in a page.
-	 */
-	void init(const std::string& mapFile, size_t cellCount, size_t lineCount) {
-		m_lineCount = lineCount == 0 ? (sysconf(_SC_PAGESIZE) - sizeof(MappedLine)) / sizeof(MappedPoint) : lineCount;
-		m_cellCount = cellCount;
-		m_lineLength = sizeof(MappedLine) + sizeof(MappedPoint) * m_lineCount;
-		m_totalLength = cellCount * m_lineLength;
-		m_mapFile = mapFile;
-
-		std::cerr << "MemGrid: cells: " << cellCount << "; line count: " << lineCount << "; total size: " << m_totalLength << "; line length: " << m_lineLength << "\n";
-
-		if(mapFile.empty()) {
-			m_mapped.init(m_totalLength, true);
-		} else {
-			m_mapped.init(mapFile, m_totalLength, true);
-		}
-	}
-
-	size_t pointCount() const {
-		return m_pointCount;
-	}
-
-	void init(size_t cellCount, size_t lineCount) {
-		init("", cellCount, lineCount);
-	}
-
-	bool hasUnread(size_t idx) {
-		return m_map.find(idx) != m_map.end();
-	}
-
-	const std::unordered_map<size_t, size_t>& indexMap() const {
-		return m_map;
-	}
-
-	void add(size_t idx, double x, double y, double z, double intensity, double angle, int cls, int retNum, int numRets, int edge) {
-		writePoint(idx, x, y, z, intensity, angle, cls, retNum, numRets, edge);
-	}
-
-	size_t get(size_t idx, std::vector<geo::pc::Point>& out, bool final = true) {
-		return readPoints(idx, out, final);
-	}
-
-	void flush() {
-		m_mapped.flush();
-	}
-
-	~MemGrid() {
-		if(m_mapFile.empty())
-			Util::rm(m_mapped.name());
-	}
-};
-
 const std::unordered_map<std::string, std::string> computerNames = {
 		{"min", "The minimum value"},
 		{"max", "The maximum value"},
@@ -1045,7 +789,7 @@ double Rasterizer::density(double resolution, double radius) {
 			++count;
 		}
 	}
-	std::cerr << sum << ", " << count << "\n";
+
 	double cell = radius > 0 ? (M_PI * radius * radius) / (resolution * resolution) : 1;
 	return (sum / count) * 1.5 * cell;
 }
@@ -1108,25 +852,26 @@ void fixBounds(double* bounds, double resX, double resY, double* easting, double
 }
 
 void Rasterizer::rasterize(const std::string& filename, const std::vector<std::string>& _types,
-		double resX, double resY, double easting, double northing, double radius, int srid, int density, double ext) {
+		double resX, double resY, double easting, double northing, double radius, int srid, int memory) {
 
 	if(std::isnan(resX) || std::isnan(resY))
-		g_runerr("Resolution not valid.");
+		g_runerr("Resolution not valid");
 
-	if(radius < 0)
+	if(radius < 0 || std::isnan(radius)) {
 		radius = std::sqrt(std::pow(resX / 2, 2) * 2);
+		g_warn("Invalid radius; using " << radius);
+	}
 
 	std::vector<std::string> types(_types);
-	if(types.empty()) {
-		g_warn("No methods given; defaulting to mean.");
-		types.push_back("mean");
-	}
+	if(types.empty())
+		g_argerr("No methods given; defaulting to mean");
 
 	std::vector<std::unique_ptr<Computer> > computers;
 	for(const std::string& name : types)
 		computers.emplace_back(getComputer(name));
 
-	double bounds[4] = {MAX_DBL, MAX_DBL, MIN_DBL, MIN_DBL};
+	g_trace("Checking file bounds");
+	double bounds[4] = {G_DBL_MAX_POS, G_DBL_MAX_POS, G_DBL_MIN_POS, G_DBL_MIN_POS};
 	{
 		double fBounds[6];
 		for(PCFile& f: m_files) {
@@ -1139,18 +884,20 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 		}
 	}
 
+	g_trace("Fixing bounds")
 	fixBounds(bounds, resX, resY, &easting, &northing);
+	g_trace(" bounds: " << bounds[0] << ", " << bounds[1] << "; " << bounds[2] << ", " << bounds[3])
 
 	int cols = (int) ((bounds[2] - bounds[0]) / std::abs(resX)) + 1;
 	int rows = (int) ((bounds[3] - bounds[1]) / std::abs(resY)) + 1;
+	g_trace(" cols: " << cols << ", rows: " << rows)
 
-	std::cerr << "cols " << cols << "; rows " << rows << "\n";
-	std::cerr << "bounds " << bounds[0] << ", " << bounds[1] << ", " << bounds[2] << ", " << bounds[3] << "\n";
-
-	int bandCount = 0;
+	int bandCount = 1;
 	for(const std::unique_ptr<Computer>& comp : computers)
 		bandCount += comp->bandCount();
+	g_trace(" bands: " << bandCount)
 
+	g_trace("Preparing raster")
 	GridProps props;
 	props.setTrans(easting, resX, northing, resY);
 	props.setSize(cols, rows);
@@ -1158,10 +905,10 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	props.setDataType(DataType::Float32);
 	props.setSrid(srid);
 	props.setWritable(true);
-	props.setBands(bandCount + 1);
+	props.setBands(bandCount);
 	Raster rast(filename, props);
 	rast.fillFloat(0, 1);
-	for(int band = 2; band < bandCount + 1; ++band)
+	for(int band = 2; band <= bandCount; ++band)
 		rast.fillFloat(NODATA, band);
 
 	liblas::ReaderFactory fact;
@@ -1176,7 +923,8 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	int i = 0;
 
 	// Initialize the grid with some starting slots.
-	grid.init(100000, 0);
+	g_trace("Initializing memory grid")
+	grid.init(1000, memory);
 
 	// As we go through the m_files list, we'll remove pointers from
 	// this list and use it to calculate bounds for finalizing cells.
@@ -1188,8 +936,9 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	std::vector<geo::pc::Point> filtered;
 	std::vector<double> out;
 
+	g_trace("Sorting points")
 	for(PCFile& file : m_files) {
-		std::cerr << "Reading file " << i++ << " of " << m_files.size() << ".\n";
+		g_debug("Reading file " << i++ << " of " << m_files.size());
 		for(const std::string& filename : file.filenames()) {
 			std::ifstream str(filename);
 			liblas::Reader rdr = fact.CreateWithStream(str);
@@ -1214,8 +963,11 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 					}
 				}
 			}
+			g_trace("Flush")
+			grid.flush(); // TODO: Necessary?
 		}
 
+		g_trace("Finalizing")
 		// Get the bounds of the finished file and then remove it
 		// from the set.
 		double fbounds[4];
@@ -1227,8 +979,8 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 		int c0 = props.toCol(fbounds[0]);
 		int c1 = props.toCol(fbounds[2]);
 		double tbounds[6], cbounds[4];
-		double rX = radius > 0 ? radius * 2 : std::abs(resX); // TODO: Why 2x the radius? Leaves gaps otherwise...
-		double rY = radius > 0 ? radius * 2 : std::abs(resY);
+		double rX = radius > 0 ? radius : std::abs(resX) * 0.5;
+		double rY = radius > 0 ? radius : std::abs(resY) * 0.5;
 		for(int r = std::min(r0, r1); r <= std::max(r0, r1); ++r) {
 			for(int c = std::min(c0, c1); c <= std::max(c0, c1); ++c) {
 				bool final = true;
@@ -1270,6 +1022,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 		}
 	}
 
+	g_trace("Finishing")
 	std::unordered_map<size_t, size_t> mp(grid.indexMap()); // Copy to avoid invalidating the iterator.
 	for(const auto& item : mp) {
 		int r = item.first / cols;
@@ -1336,8 +1089,6 @@ void Normalizer::normalize(const std::string& dtmpath, const std::string& outdir
 		std::ifstream str(filename);
 		liblas::Reader rdr = fact.CreateWithStream(str);
 
-		std::cerr << outfile << "\n";
-
 		std::ofstream ostr(outfile, std::ios::binary | std::ios::trunc | std::ios::out);
 		liblas::Header hdr(rdr.GetHeader());
 		liblas::Writer wtr(ostr, hdr);
@@ -1362,10 +1113,8 @@ void Normalizer::normalize(const std::string& dtmpath, const std::string& outdir
 			int col = props.toCol(x);
 			int row = props.toRow(y);
 
-			if(col < 0 || col >= props.cols() || row < 0 || row >= props.rows()) {
-				std::cerr << x << ", " << y << "; " << props.toCol(x) << ", " << props.toRow(y) << "; " << props.cols() << "; " << props.rows() << "\n";
+			if(col < 0 || col >= props.cols() || row < 0 || row >= props.rows())
 				continue;
-			}
 
 			double t = dtm.getFloat(props.toCol(x), props.toRow(y), band);
 

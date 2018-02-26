@@ -77,11 +77,11 @@ target_link_libraries (geoutil geo rt ${Boost_LIBRARIES} ${GDAL_LIBRARY} ${CRYPT
 add_library (geodb SHARED src/db.cpp)
 target_link_libraries (geodb geo geoutil)
 
-add_library (georaster SHARED src/raster.cpp)
+add_library (georaster SHARED src/raster.cpp src/rast_polygonize.cpp)
 target_link_libraries (georaster geo geoutil geodb Threads::Threads ${GEOS_LIBRARY})
 
-add_library (geopc SHARED src/pointcloud.cpp src/pc_computer.cpp)
-target_link_libraries (geopc geo geoutil georaster geoann ${LIBLAS_LIBRARY} ${CGAL_LIBRARY} ${STXXL_LIBRARIES})
+add_library (geopc SHARED src/pointcloud.cpp src/pc_computer.cpp src/pc_memgrid.cpp)
+target_link_libraries (geopc geo geoutil georaster geoann ${LIBLAS_LIBRARY} ${CGAL_LIBRARY})
 
 add_library (geoann SHARED ann/src/ANN.cpp ann/src/brute.cpp ann/src/kd_tree.cpp ann/src/kd_util.cpp 
 	ann/src/kd_split.cpp ann/src/kd_dump.cpp ann/src/kd_search.cpp ann/src/kd_pr_search.cpp 

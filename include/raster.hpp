@@ -190,7 +190,7 @@ namespace geo {
             /**
              * Returns the number of pixels.
              */
-            uint64_t size() const;
+            size_t size() const;
 
             /**
              * Set the data type of the raster.
@@ -326,7 +326,7 @@ namespace geo {
             double stdDev;
             double variance;
             double sum;
-            uint64_t count;
+            size_t count;
     	};
 
         /**
@@ -621,7 +621,7 @@ namespace geo {
              * @param idx The index in the raster; left to right, top to bottom.
              * @param band The band.
              */
-            virtual int getInt(uint64_t idx, int band = 1) = 0;
+            virtual int getInt(size_t idx, int band = 1) = 0;
 
             /**
              * Return a the value held at the given position in the grid.
@@ -636,7 +636,7 @@ namespace geo {
              * @param idx The index in the raster; left to right, top to bottom.
              * @param band The band.
              */
-            virtual double getFloat(uint64_t idx, int band = 1) = 0;
+            virtual double getFloat(size_t idx, int band = 1) = 0;
 
             /**
              * Return a the value held at the given position in the grid.
@@ -652,7 +652,7 @@ namespace geo {
              * @param value The value to set.
              * @param band The band.
              */
-            virtual void setInt(uint64_t idx, int value, int band = 1) = 0;
+            virtual void setInt(size_t idx, int value, int band = 1) = 0;
 
             /**
              * Set the value held at  the given index in the grid.
@@ -669,7 +669,7 @@ namespace geo {
              * @param value The value to set.
              * @param band The band.
              */
-            virtual void setFloat(uint64_t idx, double value, int band = 1) = 0;
+            virtual void setFloat(size_t idx, double value, int band = 1) = 0;
 
             /**
              * Set the value held at  the given index in the grid.
@@ -742,7 +742,7 @@ namespace geo {
 
                 int cols = gp.cols();
                 int rows = gp.rows();
-                uint64_t size = gp.size();
+                size_t size = gp.size();
                 int minc = cols + 1;
                 int minr = rows + 1;
                 int maxc = -1;
@@ -761,7 +761,7 @@ namespace geo {
                     col = cel.col;
                     q.pop();
 
-                    uint64_t idx = (uint64_t) row * cols + col;
+                    size_t idx = (size_t) row * cols + col;
 
                     if (!visited[idx] && op.shouldFill(col, row)) {
 
@@ -780,7 +780,7 @@ namespace geo {
 
                         int c;
                         for (c = col - 1; c >= 0; --c) {
-                            idx = (uint64_t) row * cols + c;
+                            idx = (size_t) row * cols + c;
                             if (!visited[idx] && op.shouldFill(c, row)) {
                                 minc = g_min(c, minc);
                                 ++area;
@@ -801,7 +801,7 @@ namespace geo {
                                 q.push(Cell(c, row + 1));
                         }
                         for (c = col + 1; c < cols; ++c) {
-                            idx = (uint64_t) row * cols + c;
+                            idx = (size_t) row * cols + c;
                             if (!visited[idx] && op.shouldFill(c, row)) {
                                 maxc = g_max(c, maxc);
                                 ++area;
@@ -871,7 +871,7 @@ namespace geo {
 
             // TODO: Document me.
         	template <class V>
-        	void writeAStarPath(uint64_t start, std::unordered_map<uint64_t, uint64_t>& parents, V inserter) {
+        	void writeAStarPath(size_t start, std::unordered_map<size_t, size_t>& parents, V inserter) {
         		*inserter = start;
         		++inserter;
         		while(parents.find(start) != parents.end()) {
@@ -881,9 +881,9 @@ namespace geo {
         		}
             }
 
-        	uint64_t minValue(std::unordered_map<uint64_t, double>& m) {
+        	size_t minValue(std::unordered_map<size_t, double>& m) {
         		double min = G_DBL_MAX_POS;
-        		uint64_t key = 0;
+        		size_t key = 0;
         		for(const auto& it : m) {
         			if(it.second < min) {
         				min = it.second;
@@ -899,18 +899,18 @@ namespace geo {
             template <class U, class V>
             void searchAStar(int startCol, int startRow, int goalCol, int goalRow, U heuristic, V inserter) {
 
-            	uint64_t goal = ((uint64_t) goalCol << 32) | goalRow;
+            	size_t goal = ((size_t) goalCol << 32) | goalRow;
 
             	std::vector<std::pair<int, int> > offsets = Util::squareKernel(3, false);
 
-            	std::unordered_map<uint64_t, uint64_t> parents;
-            	std::unordered_map<uint64_t, double> gscore;
-            	std::unordered_map<uint64_t, double> fscore;
+            	std::unordered_map<size_t, size_t> parents;
+            	std::unordered_map<size_t, double> gscore;
+            	std::unordered_map<size_t, double> fscore;
 
-            	std::unordered_set<uint64_t> openSet;
-            	std::unordered_set<uint64_t> closedSet;
+            	std::unordered_set<size_t> openSet;
+            	std::unordered_set<size_t> closedSet;
 
-            	uint64_t start = ((uint64_t) startCol << 32) | startRow;
+            	size_t start = ((size_t) startCol << 32) | startRow;
 
             	openSet.insert(start);
             	gscore[start] = 0; 						// Distance from start to neighbour
@@ -921,7 +921,7 @@ namespace geo {
 
             	while(!openSet.empty()) {
 
-            		uint64_t top = minValue(fscore);
+            		size_t top = minValue(fscore);
 
             		if(top == goal) {
             			writeAStarPath(top, parents, inserter);
@@ -944,7 +944,7 @@ namespace geo {
             			if(qcol + it.first < 0 || qrow + it.second < 0 || qcol + it.first >= cols || qrow + it.second >= rows)
             				continue;
 
-            			uint64_t n = ((uint64_t) (qcol + it.first) << 32) | (qrow + it.second);
+            			size_t n = ((size_t) (qcol + it.first) << 32) | (qrow + it.second);
 
             			if(closedSet.find(n) != closedSet.end())
             				continue;
@@ -965,6 +965,24 @@ namespace geo {
             	}
             }
 
+            /**
+             * Vectorize the raster.
+             * @param filename The filename of the output vector.
+             * @param layerName The name of the output layer.
+             * @param driver The name of the output driver. Any of the GDAL options.
+             * @param srid The spatial reference ID of the dataset.
+             * @param band The band to vectorize.
+             * @param removeHoles Remove holes from the polygons.
+             * @param removeDangles Remove small polygons attached to larger ones diagonally.
+             * @param status A Status object to receive progress updates.
+             * @param cancel A boolean that will be set to true if the algorithm should quit.
+             * @param mask The name of a raster file that will be used to set the bounds for vectorization.
+             * @param threads The number of threads to use.
+             */
+            void polygonize(const std::string &filename, const std::string &layerName,
+                const std::string &driver, int srid = 0, int band = 1, bool removeHoles = false,
+				bool removeDangles = false,	geo::util::Status *status = nullptr, bool *cancel = nullptr,
+				const std::string& mask = "", int threads = 1);
         };
 
        
@@ -1053,9 +1071,9 @@ namespace geo {
             void fillInt(int value, int band = 1);
 
             // Return a the value held at the given index in the grid.
-            int getInt(uint64_t idx, int band = 1);
+            int getInt(size_t idx, int band = 1);
             int getInt(int col, int row, int band = 1);
-            double getFloat(uint64_t idx, int band = 1);
+            double getFloat(size_t idx, int band = 1);
             double getFloat(int col, int row, int band = 1);
 
             /**
@@ -1077,9 +1095,9 @@ namespace geo {
             int getFloatRow(int row, int band, float* buf);
 
             // Set the value held at  the given index in the grid.
-            void setInt(uint64_t idx, int value, int band = 1);
+            void setInt(size_t idx, int value, int band = 1);
             void setInt(int col, int row, int value, int band = 1);
-            void setFloat(uint64_t idx, double value, int band = 1);
+            void setFloat(size_t idx, double value, int band = 1);
             void setFloat(int col, int row, double value, int band = 1);
 
 			void writeTo(Grid &grd,
@@ -1106,23 +1124,26 @@ namespace geo {
 
         };
 
-
+        /**
+         * Represents a file-backed raster.
+         */
         class G_DLL_EXPORT Raster : public Grid {
         	friend class MemRaster;
         private:
-            GDALDataset *m_ds;          // GDAL dataset
-            int m_bcols, m_brows;		// The size of the GDAL block.
-            int m_bcol, m_brow;			// The current loaded block position.
-            int m_band;
-    		//void *m_block;
-            bool m_dirty;
-            int m_bband;
-            std::string m_filename;     // Raster filename
-            GridProps m_props;
-            GDALDataType m_type;        // GDALDataType -- limits the possible template types.
-            std::mutex m_mtx;
-            std::unordered_map<int, void*> m_blocks;
+            GDALDataset *m_ds;          				///< GDAL data set pointer.
+            int m_bcols, m_brows;						///< The size of the GDAL block.
+            int m_bcol, m_brow;							///< The current loaded block position.
+            int m_bband;								///< The band corresponding to the current block.
+            bool m_dirty;								///< True if the current block has been written to and must be flushed.
+            std::string m_filename;     				///< Raster filename
+            GridProps m_props;							///< Properties of the raster.
+            GDALDataType m_type;        				///< GDALDataType -- limits the possible template types.
+            std::unordered_map<int, void*> m_blocks;	///< The block cache.
 
+            /**
+             * Returns the GDAL data type.
+             * @return The GDAL data type.
+             */
             GDALDataType getGDType() const;
 
             /**
@@ -1135,66 +1156,184 @@ namespace geo {
             void* getBlock(int band);
 
         protected:
+
+            /**
+             * Return the GDAL data set pointer.
+             * @return The GDAL data set pointer.
+             */
             GDALDataset* ds() const;
 
+            /**
+             * Write the raster into another grid instance.
+             * @param cols The number of columns to write.
+             * @param rows The number of rows to write.
+             * @param srcCol The column to begin reading from.
+             * @param srcRow The row to begin reading from.
+             * @param dstCol The column to begin writing to.
+             * @param dstRow The row to begin writing to.
+             * @param srcBand The band to read from.
+             * @param dstBand The band to write to.
+             */
+			void writeToMemRaster(MemRaster &grd,
+            		int cols = 0, int rows = 0,
+            		int srcCol = 0, int srcRow = 0,
+					int dstCol = 0, int dstRow = 0,
+            		int srcBand = 1, int dstBand = 1);
+
+            /**
+             * Write the raster into another grid instance.
+             * @param cols The number of columns to write.
+             * @param rows The number of rows to write.
+             * @param srcCol The column to begin reading from.
+             * @param srcRow The row to begin reading from.
+             * @param dstCol The column to begin writing to.
+             * @param dstRow The row to begin writing to.
+             * @param srcBand The band to read from.
+             * @param dstBand The band to write to.
+             */
+			void writeToRaster(Raster &grd,
+            		int cols = 0, int rows = 0,
+            		int srcCol = 0, int srcRow = 0,
+					int dstCol = 0, int dstRow = 0,
+					int srcBand = 1, int dstBand = 1);
+
         public:
-            // Create a new raster for writing with a template.
+
+            /**
+             * Create a new raster with a template. The raster will be created.
+             * @param filename The path to the file.
+             * @param props A GridProps instance containing a descriptor for the raster.
+             */
             Raster(const std::string &filename, const GridProps &props);
 
-            // Open the given raster. Set the writable argument to true
-            // to enable writing.
+            /**
+             * Open the given extant raster. Set the writable argument to true
+             * to enable writing.
+             * @param filename The path to the file.
+             * @param writable True if the file is to be writable.
+             */
             Raster(const std::string &filename, bool writable = false);
 
-            // Return the grid properties object.
+            /**
+             * Return the grid properties object.
+             * @return The grid properties object.
+             */
             const GridProps& props() const;
 
-            // Attempts to return the datatype of the raster
-            // with the given filename.
+            /**
+             * Attempts to return the data type of the raster
+             * with the given filename.
+             * @param filename The path to an existing raster.
+             * @return The data type.
+             */
             static DataType getFileDataType(const std::string &filename);
 
-            // Return a map containing the raster driver short name and extension.
+            /**
+             * Return a map containing the raster driver short name and extension.
+             * @return A map containing the raster driver short name and extension.
+             */
             static std::map<std::string, std::set<std::string> > extensions();
 
-            // Return a map containing the raster driver short name and long name.
+            /**
+             * Return a map containing the raster driver short name and long name.
+             * @return A map containing the raster driver short name and long name.
+             */
             static std::map<std::string, std::string> drivers();
 
+            /**
+             * Get the name of the driver that would be used to open a file
+             * with the given path.
+             * @param filename The path to an existing raster.
+             * @return The name of the griver used to open the file.
+             */
             static std::string getDriverForFilename(const std::string &filename);
 
+            /**
+             * Creates a virtual raster using the given files and writes it to a file
+             * with the given name.
+             * @param files A list of files to include in the raster.
+             * @param outfile The path to the virtual raster.
+             * @param nodata The nodata value for the virtual raster.
+             */
             static void createVirtualRaster(const std::vector<std::string>& files, const std::string& outfile, double nodata);
 
+            /**
+             * Creates a virtual raster using the given files and writes it to a file
+             * with the given name.
+             * @param begin An iterator into a list of files to include in the raster.
+             * @param files The end iterator of the list of files to include in the raster.
+             * @param outfile The path to the virtual raster.
+             * @param nodata The nodata value for the virtual raster.
+             */
             template <class T>
             static void createVirtualRaster(T begin, T end, const std::string& outfile, double nodata) {
             	std::vector<std::string> files(begin, end);
             	return createVirtualRaster(files, outfile, nodata);
             }
 
-            // Return the filename for this raster.
+            /**
+             * Return the filename for this raster.
+             * @return The filename for this raster.
+             */
             std::string filename() const;
 
-            // Fill the given band with the given value.
+            /**
+             * Fill the given band with the given value.
+             * @param value The value.
+             * @param band The band.
+             */
             void fillInt(int value, int band = 1);
+
+            /**
+             * Fill the given band with the given value.
+             * @param value The value.
+             * @param band The band.
+             */
             void fillFloat(double value, int band = 1);
 
+            /**
+             * Write the raster into another grid instance.
+             * @param cols The number of columns to write.
+             * @param rows The number of rows to write.
+             * @param srcCol The column to begin reading from.
+             * @param srcRow The row to begin reading from.
+             * @param dstCol The column to begin writing to.
+             * @param dstRow The row to begin writing to.
+             * @param srcBand The band to read from.
+             * @param dstBand The band to write to.
+             */
 			void writeTo(Grid &grd,
 					int cols = 0, int rows = 0,
 					int srcCol = 0, int srcRow = 0,
 					int dstCol = 0, int dstRow = 0,
 					int srcBand = 1, int dstBand = 1);
-            void writeToMemRaster(MemRaster &grd,
-            		int cols = 0, int rows = 0,
-            		int srcCol = 0, int srcRow = 0,
-					int dstCol = 0, int dstRow = 0,
-            		int srcBand = 1, int dstBand = 1);
-            void writeToRaster(Raster &grd,
-            		int cols = 0, int rows = 0,
-            		int srcCol = 0, int srcRow = 0,
-					int dstCol = 0, int dstRow = 0,
-					int srcBand = 1, int dstBand = 1);
 
-            // Returns a pixel value.
+
+            /**
+             * Returns the pixel value at the given position.
+             * @param x The x coordinate to read from.
+             * @param y The y coordinate to read from.
+             * @param band The band to read from.
+             * @return The value at the given position and band.
+             */
             int getInt(double x, double y, int band = 1);
+
+            /**
+             * Returns the pixel value at the given position.
+             * @param col The column to read from.
+             * @param row The row to read from.
+             * @param band The band to read from.
+             * @return The value at the given position and band.
+             */
             int getInt(int col, int row, int band = 1);
-            int getInt(uint64_t idx, int band = 1);
+
+            /**
+             * Returns the pixel value at the given index.
+             * @param idx The index to read from.
+             * @param band The band to read from.
+             * @return The value at the given position and band.
+             */
+            int getInt(size_t idx, int band = 1);
 
             /**
              * Copies the image data from an entire row into the buffer
@@ -1205,9 +1344,31 @@ namespace geo {
              */
             int getIntRow(int row, int band, int* buf);
 
+            /**
+             * Returns the pixel value at the given position.
+             * @param x The x coordinate to read from.
+             * @param y The y coordinate to read from.
+             * @param band The band to read from.
+             * @return The value at the given position and band.
+             */
             double getFloat(double x, double y, int band = 1);
+
+            /**
+             * Returns the pixel value at the given position.
+             * @param col The column to read from.
+             * @param row The row to read from.
+             * @param band The band to read from.
+             * @return The value at the given position and band.
+             */
             double getFloat(int col, int row, int band = 1);
-            double getFloat(uint64_t idx, int band = 1);
+
+            /**
+             * Returns the pixel value at the given index.
+             * @param idx The index to read from.
+             * @param band The band to read from.
+             * @return The value at the given position and band.
+             */
+            double getFloat(size_t idx, int band = 1);
 
             /**
              * Copies the image data from an entire row into the buffer
@@ -1215,43 +1376,70 @@ namespace geo {
              * @param row The row index.
              * @param band The band number.
              * @param buf A pre-allocated buffer to store the data.
+             * @return The number of columns read.
              */
             int getFloatRow(int row, int band, double* buf);
 
-            // Set an pixel value.
+            /**
+             * Set the pixel value at the given position.
+             * @param x The x coordinate to read from.
+             * @param y The y coordinate to read from.
+             * @param band The band to read from.
+             */
             void setInt(double x, double y, int v, int band = 1);
+
+            /**
+             * Set the pixel value at the given position.
+             * @param col The column to read from.
+             * @param row The row to read from.
+             * @param band The band to read from.
+             */
             void setInt(int col, int row, int v, int band = 1);
-            void setInt(uint64_t idx, int v, int band = 1);
 
+            /**
+             * Set the pixel value at the given index.
+             * @param idx The index to read from.
+             * @param band The band to read from.
+             */
+            void setInt(size_t idx, int v, int band = 1);
+
+            /**
+             * Set the pixel value at the given position.
+             * @param x The x coordinate to read from.
+             * @param y The y coordinate to read from.
+             * @param band The band to read from.
+             */
             void setFloat(double x, double y, double v, int band = 1);
-            void setFloat(int col, int row, double v, int band = 1);
-            void setFloat(uint64_t idx, double v, int band = 1);
 
-            // Returns true if the raster is square.
+            /**
+             * Set the pixel value at the given position.
+             * @param col The column to read from.
+             * @param row The row to read from.
+             * @param band The band to read from.
+             */
+            void setFloat(int col, int row, double v, int band = 1);
+
+            /**
+             * Set the pixel value at the given index.
+             * @param idx The index to read from.
+             * @param band The band to read from.
+             */
+            void setFloat(size_t idx, double v, int band = 1);
+
+            /**
+             * Returns true if the raster is square.
+             * @return True if the raster is square.
+             */
             bool isSquare() const;
 
-            // Flush the current block to the dataset.
+            /**
+             * Flush the current block to the dataset.
+             */
             void flush();
 
-            // Flush a dirty read/write block to the dataset.
-            void flushDirty();
-
-            void potrace(const std::string& filename, const std::string& layerName,
-                    const std::string& driver, uint16_t srid, uint16_t band = 1, uint16_t threads = 1,
-                    bool removeHoles = false, bool removeDangles = false,
-                    geo::util::Status *status = nullptr, bool *cancel = nullptr);
-
-            void polygonize2(const std::string& filename, const std::string& layerName,
-                    const std::string& driver, uint16_t srid, uint16_t band = 1, uint16_t threads = 1,
-                    bool removeHoles = false, bool removeDangles = false,
-                    geo::util::Status *status = nullptr, bool *cancel = nullptr);
-
-            // Vectorize the raster.
-            void polygonize(const std::string &filename, const std::string &layerName, 
-                const std::string &driver, uint16_t srid = 0, uint16_t band = 1, uint16_t threads = 1,
-				int bufSize = 0, bool removeHoles = false, bool removeDangles = false,
-				geo::util::Status *status = nullptr, bool *cancel = nullptr, const std::string& mask = "");
-
+            /**
+             * Destroy the raster.
+             */
             ~Raster();
 
         };
