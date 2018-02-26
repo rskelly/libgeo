@@ -15,12 +15,12 @@ char* MemGrid::data() {
 
 void MemGrid::resize(size_t size) {
 	if(size > m_memLimit) {
-		g_debug("MemGrid resize (mapped): " << size);
+		g_debug("MemGrid resize (mapped): " << size << "; limit: " << m_memLimit);
 		if(!m_mapped.data()) {
 			if(m_mapFile.empty()) {
-				m_mapped.init(m_totalLength, true);
+				m_mapped.init(size, true);
 			} else {
-				m_mapped.init(m_mapFile, m_totalLength, true);
+				m_mapped.init(m_mapFile, size, true);
 			}
 			if(m_mem) {
 				std::memcpy(m_mapped.data(), m_mem, m_totalLength);
@@ -31,10 +31,10 @@ void MemGrid::resize(size_t size) {
 			m_mapped.reset(size);
 		}
 	} else if(m_mem) {
-		g_debug("MemGrid resize (realloc): " << size);
+		g_debug("MemGrid resize (realloc): " << size << "; limit: " << m_memLimit);
 		m_mem = (char*) realloc((void*) m_mem, size);
 	} else {
-		g_debug("MemGrid resize (alloc): " << size);
+		g_debug("MemGrid resize (alloc): " << size << "; limit: " << m_memLimit);
 		m_mem = (char*) malloc(size);
 	}
 	m_totalLength = size;
@@ -60,9 +60,9 @@ void MemGrid::writePoint(size_t idx, float x, float y, float z, float intensity,
 	}
 	offset *= m_lineLength;
 
-	if(offset + m_lineLength >= m_totalLength) {
+	// If the new offset is too far, resize the data.
+	if(offset + m_lineLength >= m_totalLength)
 		resize(m_totalLength * 2);
-	}
 
 	MappedPoint mp = {x, y, z, intensity, angle, cls, retNum, numRets, edge};
 	MappedLine ml = {0, 0, 0};

@@ -908,7 +908,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	props.setBands(bandCount);
 	Raster rast(filename, props);
 	rast.fillFloat(0, 1);
-	for(int band = 2; band < bandCount; ++band)
+	for(int band = 2; band <= bandCount; ++band)
 		rast.fillFloat(NODATA, band);
 
 	liblas::ReaderFactory fact;
@@ -924,7 +924,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 
 	// Initialize the grid with some starting slots.
 	g_trace("Initializing memory grid")
-	grid.init(cols * rows, memory);
+	grid.init(1000, memory);
 
 	// As we go through the m_files list, we'll remove pointers from
 	// this list and use it to calculate bounds for finalizing cells.
