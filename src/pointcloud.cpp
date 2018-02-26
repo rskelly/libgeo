@@ -852,7 +852,7 @@ void fixBounds(double* bounds, double resX, double resY, double* easting, double
 }
 
 void Rasterizer::rasterize(const std::string& filename, const std::vector<std::string>& _types,
-		double resX, double resY, double easting, double northing, double radius, int srid) {
+		double resX, double resY, double easting, double northing, double radius, int srid, int memory) {
 
 	if(std::isnan(resX) || std::isnan(resY))
 		g_runerr("Resolution not valid");
@@ -872,13 +872,11 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 
 	g_trace("Checking file bounds");
 	double bounds[4] = {G_DBL_MAX_POS, G_DBL_MAX_POS, G_DBL_MIN_POS, G_DBL_MIN_POS};
-	size_t pointCount = 0;
 	{
 		double fBounds[6];
 		for(PCFile& f: m_files) {
 			f.init();
 			f.fileBounds(fBounds);
-			pointCount += f.pointCount();
 			if(fBounds[0] < bounds[0]) bounds[0] = fBounds[0];
 			if(fBounds[1] < bounds[1]) bounds[1] = fBounds[1];
 			if(fBounds[2] > bounds[2]) bounds[2] = fBounds[2];
@@ -926,7 +924,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 
 	// Initialize the grid with some starting slots.
 	g_trace("Initializing memory grid")
-	grid.init(pointCount / (cols * rows) * 2);
+	grid.init(cols * rows, memory);
 
 	// As we go through the m_files list, we'll remove pointers from
 	// this list and use it to calculate bounds for finalizing cells.

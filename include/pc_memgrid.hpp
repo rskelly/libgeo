@@ -40,6 +40,7 @@ typedef struct {
 
 class MemGrid {
 private:
+	char* m_mem;
 	geo::util::MappedFile m_mapped;
 	size_t m_lineCount;
 	size_t m_cellCount;
@@ -47,6 +48,7 @@ private:
 	size_t m_totalLength;
 	size_t m_currentLine;						// The next available line index.
 	size_t m_pointCount;
+	size_t m_memLimit;
 	std::string m_mapFile;
 	std::list<size_t> m_finalized; 				// The line offsets of finalized cells available for re-use.
 	std::unordered_map<size_t, size_t> m_map;   // Maps cell indices to line indices.
@@ -88,6 +90,11 @@ private:
 	 */
 	size_t readPoints(size_t idx, std::vector<geo::pc::Point>& pts, bool final);
 
+	/**
+	 * Return the data pointer which may be mapped or RAM.
+	 */
+	char* data();
+
 public:
 
 	/**
@@ -99,13 +106,13 @@ public:
 	 * Construct a MemGrid with the given number of cells.
 	 * @param cellCount The number of cells to start with.
 	 */
-	MemGrid(size_t cellCount);
+	MemGrid(size_t cellCount, size_t memLimit);
 
 	/**
 	 * Initialize a MemGrid with the given number of cells.
 	 * @param cellCount The number of cells to start with.
 	 */
-	void init(size_t cellCount);
+	void init(size_t cellCount, size_t memLimit);
 
 	/**
 	/**
@@ -113,7 +120,7 @@ public:
 	 * @param mapFile The filename of the map file, if there is one. Empty string otherwise.
 	 * @param cellCount The number of cells to start with.
 	 */
-	void init(const std::string& mapFile, size_t cellCount);
+	void init(const std::string& mapFile, size_t cellCount, size_t memLimit);
 
 	/**
 	 * Return the number of points stored in the grid.

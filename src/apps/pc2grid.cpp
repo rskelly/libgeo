@@ -33,7 +33,9 @@ void usage() {
 			<< "                  rugosity, variance, std. deviation and percentile.\n"
 			<< "                  For percentile, use the form, 'percenile:n', where\n"
 			<< "                  n is the percentile (no % sign); 1 - 99.\n"
-			<< " -v               Verbose. Enable debug and warning messages.\n";
+			<< " -v               Verbose. Enable debug and warning messages.\n"
+			<< " -l <memory>      The memory limit in bytes, where working memory is moved from main\n"
+			<< "                  memory (RAM) to disk. Disk is slow, so use the highest reasonable value.\n";
 
 	PCPointFilter::printHelp(std::cerr);
 
@@ -55,6 +57,7 @@ int main(int argc, char** argv) {
 	double easting = std::nan("");
 	double northing = std::nan("");
 	double radius = std::nan("");
+	int memory = 0;
 	uint16_t srid = 0;
 	std::vector<std::string> types;
 	std::vector<std::string> args;
@@ -67,6 +70,8 @@ int main(int argc, char** argv) {
 		if(v == "-m") {
 			std::string type = argv[++i];
 			Util::splitString(std::back_inserter(types), Util::lower(type), ",");
+		} else if(v == "-l") {
+			memory = atoi(argv[++i]);
 		} else if(v == "-v") {
 			g_loglevel(G_LOG_TRACE);
 		} else if(v == "-rx") {
@@ -97,7 +102,7 @@ int main(int argc, char** argv) {
 	try {
 		Rasterizer r(infiles);
 		r.setFilter(filter);
-		r.rasterize(args[0], types, resX, resY, easting, northing, radius, srid);
+		r.rasterize(args[0], types, resX, resY, easting, northing, radius, srid, memory);
 	} catch(const std::exception& ex) {
 		std::cerr << ex.what() << "\n";
 		usage();
