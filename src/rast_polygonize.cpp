@@ -569,8 +569,6 @@ public:
 							double x1 = gp.toX(c + col) + (gp.resolutionX() > 0 ? 0.0001 : -0.0001); // TODO: Perturbation should be configurable.
 							double y1 = gp.toY(r + row) + gp.resolutionY() + (gp.resolutionY() > 0 ? 0.0001 : -0.0001);
 
-							std::cerr << std::setprecision(22) << x0 << ", " << x1 << ", " << y0 << ", " << y1 << "\n";
-
 							// Build the geometry.
 							CoordinateSequence* seq = m_geomFactory->getCoordinateSequenceFactory()->create(5, 2);
 							seq->setAt(Coordinate(x0, y0), 0);
