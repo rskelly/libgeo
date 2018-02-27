@@ -566,8 +566,8 @@ public:
 						if(id0 > 0 && id1 != id0) {
 
 							// Coord of the other corner.
-							double x1 = gp.toX(c + col) + gp.resolutionX() > 0 ? -G_DBL_MIN_POS : G_DBL_MIN_POS;
-							double y1 = gp.toY(r + row) + gp.resolutionY() + gp.resolutionY() > 0 ? -G_DBL_MIN_POS : G_DBL_MIN_POS;
+							double x1 = gp.toX(c + col) + (gp.resolutionX() > 0 ? G_DBL_MIN_POS : -G_DBL_MIN_POS);
+							double y1 = gp.toY(r + row) + gp.resolutionY() + (gp.resolutionY() > 0 ? G_DBL_MIN_POS : -G_DBL_MIN_POS);
 
 							// Build the geometry.
 							CoordinateSequence* seq = m_geomFactory->getCoordinateSequenceFactory()->create(5, 2);
