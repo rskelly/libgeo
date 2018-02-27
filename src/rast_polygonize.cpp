@@ -148,21 +148,11 @@ public:
 	void _collapse(std::vector<Polygon*>* group, std::vector<Geometry*>* geoms) {
 		if(!group->empty()) {
 			Geometry* p = geos::operation::geounion::CascadedPolygonUnion::CascadedPolygonUnion::Union(group);
-			switch(p->getGeometryTypeId()) {
-			case GEOS_POLYGON:
-				geoms->push_back(p);
-				break;
-			case GEOS_MULTIPOLYGON:
-				const Geometry *g;
-				for(size_t i = 0; i < p->getNumGeometries(); ++i) {
-					g = p->getGeometryN(i);
-					if(!g || g->getGeometryTypeId() != GEOS_POLYGON)
-						g_runerr("Null or invalid polygon.");
-					geoms->push_back(g->clone());
-				}
-				break;
-			default:
-				break;
+			for(size_t i = 0; i < p->getNumGeometries(); ++i) {
+				const Geometry* g = p->getGeometryN(i);
+				if(!g || g->getGeometryTypeId() != GEOS_POLYGON)
+					g_runerr("Null or invalid polygon.");
+				geoms->push_back(g->clone());
 			}
 		}
 	}
@@ -172,31 +162,18 @@ public:
 			return;
 		size_t geomCount = m_geoms.size();
 		int change = 1;
-		Geometry* g0;
 		while(change) {
 			std::vector<Polygon*> polys;
-			for(Geometry* g : m_geoms) {
-				switch(g->getGeometryTypeId()){
-				case GEOS_MULTIPOLYGON:
-					for(size_t i = 0; i < g->getNumGeometries(); ++i) {
-						g0 = g->getGeometryN(i)->clone();
-						if(!g0 || g0->getGeometryTypeId() != GEOS_POLYGON)
-							g_runerr("Null or invalid polygon.");
-						polys.push_back(dynamic_cast<Polygon*>(g0));
-					}
-					break;
-				case GEOS_POLYGON:
-					g0 = g->clone();
-					if(!g0 || g0->getGeometryTypeId() != GEOS_POLYGON)
+			for(Geometry* geom : m_geoms) {
+				for(size_t i = 0; i < geom->getNumGeometries(); ++i) {
+					const Geometry* g = geom->getGeometryN(i);
+					if(!g || g->getGeometryTypeId() != GEOS_POLYGON)
 						g_runerr("Null or invalid polygon.");
-					polys.push_back(dynamic_cast<Polygon*>(g0));
-					break;
-				default:
-					g_runerr("Illegal geometry type: " << g->getGeometryTypeId());
-					break;
+					polys.push_back(dynamic_cast<Polygon*>(g->clone()));
 				}
-				delete g;
 			}
+			for(Geometry* g : m_geoms)
+				delete g;
 			m_geoms.clear();
 
 			g_debug("Collapsing " << polys.size() << " polys")
@@ -412,7 +389,7 @@ public:
 
 		// Create the GEOS context and factory.
 		m_gctx = OGRGeometry::createGEOSContext();
-		m_geomFactory = GeometryFactory::create(new PrecisionModel(1.0));
+		m_geomFactory = GeometryFactory::create(new PrecisionModel());
 
 		// Get the vector driver.
 		GDALDriver *drv = GetGDALDriverManager()->GetDriverByName(driver.c_str());
@@ -589,8 +566,8 @@ public:
 						if(id0 > 0 && id1 != id0) {
 
 							// Coord of the other corner.
-							double x1 = gp.toX(c + col);
-							double y1 = gp.toY(r + row) + gp.resolutionY();
+							double x1 = gp.toX(c + col) + gp.resolutionX() > 0 ? -G_DBL_MIN_POS : G_DBL_MIN_POS;
+							double y1 = gp.toY(r + row) + gp.resolutionY() + gp.resolutionY() > 0 ? -G_DBL_MIN_POS : G_DBL_MIN_POS;
 
 							// Build the geometry.
 							CoordinateSequence* seq = m_geomFactory->getCoordinateSequenceFactory()->create(5, 2);
@@ -722,50 +699,36 @@ public:
 			g_debug("Write")
 
 			// Retrieve the unioned geometry and write it.
-			const Geometry* g = p->geom();
-			Geometry* final = nullptr;
+			Geometry* geom = p->geom();
 
 			{
 				std::vector<Polygon*> polys;
-				Geometry* p;
-				switch(g->getGeometryTypeId()){
-				case GEOS_MULTIPOLYGON:
-					for(size_t i = 0; i < g->getNumGeometries(); ++i) {
-						p = g->getGeometryN(i)->clone();
-						if(!p || p->getGeometryTypeId() != GEOS_POLYGON)
-							g_runerr("Null or invalid polygon.");
-						polys.push_back(dynamic_cast<Polygon*>(p));
-					}
-					break;
-				case GEOS_POLYGON:
-					p = g->clone();
-					if(!p || p->getGeometryTypeId() != GEOS_POLYGON)
+				for(size_t i = 0; i < geom->getNumGeometries(); ++i) {
+					const Geometry* g = geom->getGeometryN(i);
+					if(!g || g->getGeometryTypeId() != GEOS_POLYGON)
 						g_runerr("Null or invalid polygon.");
-					polys.push_back(dynamic_cast<Polygon*>(p));
-					break;
-				default:
-					g_runerr("Illegal geometry type: " << g->getGeometryTypeId());
-					break;
+					polys.push_back(dynamic_cast<Polygon*>(g->clone()));
 				}
-				final = geos::operation::geounion::CascadedPolygonUnion::CascadedPolygonUnion::Union(&polys);
+				geom = geos::operation::geounion::CascadedPolygonUnion::CascadedPolygonUnion::Union(&polys);
 			}
 
-			if(final->getGeometryTypeId() != GEOS_MULTIPOLYGON) {
-				g_debug("Converting to multipolygon " << final->getGeometryTypeId())
+			if(geom->getGeometryTypeId() != GEOS_MULTIPOLYGON) {
+				g_debug("Converting to multipolygon " << geom->getGeometryTypeId())
 				std::vector<Geometry*>* geoms = new std::vector<Geometry*>;
-				geoms->push_back(final);
-				final = m_geomFactory->createMultiPolygon(geoms);
+				geoms->push_back(geom);
+				geom = m_geomFactory->createMultiPolygon(geoms);
 			}
 
-			g_debug("Writing to file")
-			OGRGeometry* geom = OGRGeometryFactory::createFromGEOS(m_gctx, (GEOSGeom) final);
+			g_debug("Writing to file " << geom->getNumGeometries())
+			OGRGeometry* ogeom = OGRGeometryFactory::createFromGEOS(m_gctx, (GEOSGeom) geom);
 			if(!geom)
 				g_runerr("Null geometry.");
 			OGRFeature feat(m_layer->GetLayerDefn());
-			feat.SetGeometry(geom);
+			feat.SetGeometry(ogeom);
 			feat.SetField("id", (GIntBig) p->id());
 			feat.SetFID(nextFeatureId());
 			delete geom;        // The geom is copied by the feature.
+			delete ogeom;
 
 			int err;
 			{
