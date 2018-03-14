@@ -28,6 +28,7 @@ int main(int argc, char** argv) {
 	}
 
 	std::vector<std::string> args;
+	std::vector<int> classes;
 	geo::pc::PCPointFilter filter;
 	int band = 1;
 
@@ -38,9 +39,10 @@ int main(int argc, char** argv) {
 			std::string cls = argv[++i];
 			Util::splitString(std::back_inserter(tmp), cls);
 			for(const std::string& t : tmp)
-				filter.classes.push_back(atoi(t.c_str()));
+				classes.push_back(atoi(t.c_str()));
+			filter.addClassFilter(classes);
 		} else if(v == "-t") {
-			filter.minZ = atof(argv[++i]);
+			filter.addZRangeFilter(atof(argv[++i]), DBL_MAX);
 		} else if(v == "-b") {
 			band = atoi(argv[++i]);
 		} else {

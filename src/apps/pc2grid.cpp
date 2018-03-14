@@ -35,7 +35,9 @@ void usage() {
 			<< "                  n is the percentile (no % sign); 1 - 99.\n"
 			<< " -v               Verbose. Enable debug and warning messages.\n"
 			<< " -l <memory>      The memory limit in bytes, where working memory is moved from main\n"
-			<< "                  memory (RAM) to disk. Disk is slow, so use the highest reasonable value.\n";
+			<< "                  memory (RAM) to disk. Disk is slow, so use the highest reasonable value.\n"
+			<< " -h               If given *do not* trust the LAS file headers to contain\n"
+			<< "                  good bounds (etc.) info\n";
 
 	PCPointFilter::printHelp(std::cerr);
 
@@ -59,6 +61,7 @@ int main(int argc, char** argv) {
 	double radius = std::nan("");
 	int memory = 0;
 	uint16_t srid = 0;
+	bool useHeader = true;
 	std::vector<std::string> types;
 	std::vector<std::string> args;
 	PCPointFilter filter;
@@ -72,6 +75,8 @@ int main(int argc, char** argv) {
 			Util::splitString(std::back_inserter(types), Util::lower(type), ",");
 		} else if(v == "-l") {
 			memory = atoi(argv[++i]);
+		} else if(v == "-h") {
+			useHeader = false;
 		} else if(v == "-v") {
 			g_loglevel(G_LOG_TRACE);
 		} else if(v == "-rx") {
@@ -91,6 +96,8 @@ int main(int argc, char** argv) {
 		}
 	}
 
+	filter.print();
+	
 	if(args.size() < 2) {
 		std::cerr << "Input and output filenames required.\n";
 		usage();
@@ -102,7 +109,7 @@ int main(int argc, char** argv) {
 	try {
 		Rasterizer r(infiles);
 		r.setFilter(filter);
-		r.rasterize(args[0], types, resX, resY, easting, northing, radius, srid, memory);
+		r.rasterize(args[0], types, resX, resY, easting, northing, radius, srid, memory, useHeader);
 	} catch(const std::exception& ex) {
 		std::cerr << ex.what() << "\n";
 		usage();

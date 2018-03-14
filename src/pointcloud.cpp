@@ -148,16 +148,131 @@ bool PCFile::containsBuffered(double x, double y) const {
 
 PCFile::~PCFile() {}
 
-PCPointFilter::PCPointFilter() :
-	minScanAngle(-90),
-	maxScanAngle(90),
-	keepEdges(false),
-	minZ(DBL_MIN),
-	maxZ(DBL_MAX),
-	minIntensity(DBL_MIN),
-	maxIntensity(DBL_MAX),
-	lastOnly(false),
-	firstOnly(false) {
+
+
+class PointClassFilter : public PointFilter {
+public:
+	std::vector<int> classes;
+	PointClassFilter(int cls) {
+		classes.push_back(cls);
+	}
+	PointClassFilter(const std::vector<int>& classes) :
+		classes(classes) {
+	}
+	bool keep(const geo::pc::Point& pt) const {
+		int cls = pt.classId();
+		for(size_t i = 0; i < classes.size(); ++i) {
+			if(classes[i] == cls)
+				return true;
+		}
+		return false;
+	}
+	void print() const {
+		std::stringstream ss;
+		for(int c : classes)
+			ss << c << ", ";
+		g_debug("Class filter: " << ss.str());
+	}
+};
+
+class PointScanAngleFilter : public PointFilter  {
+public:
+	double minAngle;
+	double maxAngle;
+	PointScanAngleFilter(double minAngle = -DBL_MAX, double maxAngle = DBL_MAX) :
+		minAngle(minAngle), maxAngle(maxAngle) {
+	}
+	bool keep(const geo::pc::Point& pt) const {
+		double a = pt.scanAngle();
+		if(a < minAngle || a > maxAngle)
+			return false;
+		return true;
+	}
+	void print() const {
+		g_debug("Scan angle filter: " << minAngle << ", " << maxAngle);
+	}
+};
+
+class PointEdgeFilter : public PointFilter  {
+public:
+	bool keepEdge;
+	PointEdgeFilter(bool keepEdge = false) :
+		keepEdge(keepEdge) {
+	}
+	bool keep(const geo::pc::Point& pt) const {
+		return keepEdge || !pt.isEdge();
+	}
+	void print() const {
+		g_debug("Keep edge filter: " << keepEdge);
+	}
+};
+
+class PointZRangeFilter : public PointFilter  {
+public:
+	double minZ;
+	double maxZ;
+	PointZRangeFilter(double minZ = -DBL_MAX, double maxZ = DBL_MAX) :
+		minZ(minZ), maxZ(maxZ) {
+	}
+	bool keep(const geo::pc::Point& pt) const {
+		double z = pt.z();
+		return z >= minZ && z <= maxZ;
+	}
+	void print() const {
+		g_debug("Z range filter: " << minZ << ", " << maxZ);
+	}
+};
+
+class PointIntensityFilter : public PointFilter  {
+public:
+	double minIntensity;
+	double maxIntensity;
+	PointIntensityFilter(double minIntensity = -DBL_MAX, double maxIntensity = DBL_MAX) :
+		minIntensity(minIntensity), maxIntensity(maxIntensity) {
+	}
+	bool keep(const geo::pc::Point& pt) const {
+		double i = pt.intensity();
+		return i >= minIntensity && i <= maxIntensity;
+	}
+	void print() const {
+		g_debug("Intensity filter: " << minIntensity << ", " << maxIntensity);
+	}
+};
+
+class PointFirstOnlyFilter : public PointFilter  {
+public:
+	bool keepFirst;
+	PointFirstOnlyFilter(bool keepFirst = false) :
+		keepFirst(keepFirst) {
+	}
+	bool keep(const geo::pc::Point& pt) const {
+		return !keepFirst || pt.isFirst();
+	}
+	void print() const {
+		g_debug("First only filter: " << keepFirst);
+	}
+};
+
+class PointLastOnlyFilter : public PointFilter  {
+public:
+	bool keepLast;
+	PointLastOnlyFilter(bool keepLast = false) :
+		keepLast(keepLast) {
+	}
+	bool keep(const geo::pc::Point& pt) const {
+		return !keepLast || pt.isLast();
+	}
+	void print() const {
+		g_debug("Last only filter: " << keepLast);
+	}
+};
+
+PCPointFilter::PCPointFilter() {
+}
+
+PCPointFilter::~PCPointFilter() {
+	for(PointFilter* f : filters)
+		delete f;
 }
 
 void PCPointFilter::printHelp(std::ostream& str) {
@@ -165,10 +280,13 @@ void PCPointFilter::printHelp(std::ostream& str) {
 		<< " -p:c <class(es)>     Comma-delimited list of classes to keep.\n"
 		<< " -p:minz <z>          The minimum height threshold.\n"
 		<< " -p:maxz <z>          The maximum height threshold.\n"
+		<< " -p:z    <min,max>    The minimum and maximum height threshold.\n"
 		<< " -p:mini <intensity>  The minimum intensity.\n"
 		<< " -p:maxi <intensity>  The maximum intensity.\n"
+		<< " -p:i    <min,max>    The minimum and maximum intensity threshold.\n"
 		<< " -p:mina <angle>      The minimum scan angle.\n"
 		<< " -p:maxa <angle>      The maximum scan angle.\n"
+		<< " -p:a    <min,max>    The minimum and maximum scan angle threshold.\n"
 		<< " -p:f                 First returns only\n"
 		<< " -p:l                 Last returns only\n";
 }
@@ -178,60 +296,77 @@ bool PCPointFilter::parseArgs(int& idx, char** argv) {
 	bool found = false;
 	if(v == "-p:c") {
 		std::vector<std::string> tmp;
+		std::vector<int> classes;
 		std::string cls = argv[++idx];
 		Util::splitString(std::back_inserter(tmp), cls);
 		for(const std::string& t : tmp)
 			classes.push_back(atoi(t.c_str()));
+		addClassFilter(classes);
 		found = true;
 	} else if(v == "-p:l") {
-		lastOnly = true;
+		addKeepLastFilter();
 		found = true;
 	} else if(v == "-p:f") {
-		firstOnly = true;
+		addKeepFirstFilter();
 		found = true;
 	} else if(v == "-p:minz") {
-		minZ = atof(argv[++idx]);
+		double minZ = atof(argv[++idx]);
+		addZRangeFilter(minZ, DBL_MAX);
 		found = true;
 	} else if(v == "-p:maxz") {
-		maxZ = atof(argv[++idx]);
+		double maxZ = atof(argv[++idx]);
+		addZRangeFilter(-DBL_MAX, maxZ);
+		found = true;
+	} else if(v == "-p:a") {
+		std::string arg = argv[++idx];
+		std::vector<std::string> parts;
+		Util::splitString(std::back_inserter(parts), arg);
+		addZRangeFilter(atof(parts[0].c_str()), atof(parts[1].c_str()));
 		found = true;
 	} else if(v == "-p:mini") {
-		minIntensity = atof(argv[++idx]);
+		double minIntensity = atof(argv[++idx]);
+		addIntensityFilter(minIntensity, DBL_MAX);
 		found = true;
 	} else if(v == "-p:maxi") {
-		maxIntensity = atof(argv[++idx]);
+		double maxIntensity = atof(argv[++idx]);
+		addIntensityFilter(-DBL_MAX, maxIntensity);
+		found = true;
+	} else if(v == "-p:i") {
+		std::string arg = argv[++idx];
+		std::vector<std::string> parts;
+		Util::splitString(std::back_inserter(parts), arg);
+		addIntensityFilter(atof(parts[0].c_str()), atof(parts[1].c_str()));
 		found = true;
 	} else if(v == "-p:mina") {
-		minScanAngle = atof(argv[++idx]);
+		double minScanAngle = atof(argv[++idx]);
+		addScanAngleFilter(minScanAngle, DBL_MAX);
 		found = true;
 	} else if(v == "-p:maxa") {
-		maxScanAngle = atof(argv[++idx]);
+		double maxScanAngle = atof(argv[++idx]);
+		addScanAngleFilter(-DBL_MAX, maxScanAngle);
+		found = true;
+	} else if(v == "-p:a") {
+		std::string arg = argv[++idx];
+		std::vector<std::string> parts;
+		Util::splitString(std::back_inserter(parts), arg);
+		addScanAngleFilter(atof(parts[0].c_str()), atof(parts[1].c_str()));
 		found = true;
 	} else if(v == "-p:e") {
-		keepEdges = true;
+		addRejectEdgeFilter();
 		found = true;
 	}
 	return found;
 }
 
+void PCPointFilter::print() const {
+	for(PointFilter* f : filters)
+		f->print();
+}
+
 bool PCPointFilter::keep(const geo::pc::Point& pt) const {
-	if(lastOnly && !pt.isLast())
-		return false;
-	if(firstOnly && !pt.isFirst())
-		return false;
-	double z = pt.z();
-	if(z < minZ || z > maxZ ||
-			pt.intensity() < minIntensity || pt.intensity() > maxIntensity ||
-			pt.scanAngle() < minScanAngle || pt.scanAngle() > maxScanAngle ||
-			(pt.isEdge() && !keepEdges))
-		return false;
-	if(!classes.empty()) {
-		int cls = pt.classId();
-		for(size_t i = 0; i < classes.size(); ++i) {
-			if(cls == classes[i])
-				return true;
-		}
-		return false;
+	for(PointFilter* f : filters) {
+		if(!f->keep(pt))
+			return false;
 	}
 	return true;
 }
@@ -247,6 +382,38 @@ int PCPointFilter::filter(T begin, T end, U iter) const {
 		++begin;
 	}
 	return i;
+}
+
+void PCPointFilter::addClassFilter(int cls) {
+	filters.push_back(new PointClassFilter(cls));
+}
+
+void PCPointFilter::addClassFilter(const std::vector<int>& cls) {
+	filters.push_back(new PointClassFilter(cls));
+}
+
+void PCPointFilter::addIntensityFilter(double min, double max) {
+	filters.push_back(new PointIntensityFilter(min, max));
+}
+
+void PCPointFilter::addZRangeFilter(double min, double max) {
+	filters.push_back(new PointZRangeFilter(min, max));
+}
+
+void PCPointFilter::addScanAngleFilter(double min, double max) {
+	filters.push_back(new PointIntensityFilter(min, max));
+}
+
+void PCPointFilter::addKeepLastFilter() {
+	filters.push_back(new PointLastOnlyFilter(true));
+}
+
+void PCPointFilter::addKeepFirstFilter() {
+	filters.push_back(new PointFirstOnlyFilter(true));
+}
+
+void PCPointFilter::addRejectEdgeFilter() {
+	filters.push_back(new PointEdgeFilter(false));
 }
 
 
@@ -852,7 +1019,7 @@ void fixBounds(double* bounds, double resX, double resY, double* easting, double
 }
 
 void Rasterizer::rasterize(const std::string& filename, const std::vector<std::string>& _types,
-		double resX, double resY, double easting, double northing, double radius, int srid, int memory) {
+		double resX, double resY, double easting, double northing, double radius, int srid, int memory, bool useHeader) {
 
 	if(std::isnan(resX) || std::isnan(resY))
 		g_runerr("Resolution not valid");
@@ -875,7 +1042,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	{
 		double fBounds[6];
 		for(PCFile& f: m_files) {
-			f.init();
+			f.init(useHeader);
 			f.fileBounds(fBounds);
 			if(fBounds[0] < bounds[0]) bounds[0] = fBounds[0];
 			if(fBounds[1] < bounds[1]) bounds[1] = fBounds[1];
@@ -981,8 +1148,11 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 		double tbounds[6], cbounds[4];
 		double rX = radius > 0 ? radius : std::abs(resX) * 0.5;
 		double rY = radius > 0 ? radius : std::abs(resY) * 0.5;
-		for(int r = std::min(r0, r1); r <= std::max(r0, r1); ++r) {
-			for(int c = std::min(c0, c1); c <= std::max(c0, c1); ++c) {
+		int rstart = std::min(r0, r1) + 1;
+		for(int r = rstart; r <= std::max(r0, r1) - 1; ++r) {
+			if((r - rstart) % 10 == 0)
+				g_trace("Computing row " << r)
+			for(int c = std::min(c0, c1) + 1; c <= std::max(c0, c1) - 1; ++c) {
 				bool final = true;
 				if(!files.empty()) {
 					double x = props.toCentroidX(c);
@@ -1045,7 +1215,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 		values.clear();
 		filtered.clear();
 	}
-
+	g_trace("Done");
 }
 
 void Rasterizer::setFilter(const PCPointFilter& filter) {

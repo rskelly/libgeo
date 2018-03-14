@@ -546,26 +546,26 @@ public:
 		virtual ~Computer() {}
 };
 
+class PointFilter {
+public:
+	virtual bool keep(const geo::pc::Point& pt) const = 0;
+	virtual void print() const = 0;
+	virtual ~PointFilter() {}
+};
+
 /**
  * A configurable filter for point clouds.
  */
 class PCPointFilter {
 public:
-	std::vector<int> classes;	///< A list of classes to keep. If this list is empty, all classes are kept. Default empty.
-	double minScanAngle;		///< The minimum scan angle. Default -90.
-	double maxScanAngle;		///< The maximum scan angle. Default 90.
-	bool keepEdges;				///< Keep the points marked as flight line edges. Default false.
-	double minZ;				///< The maximum elevation to keep. Default minimum double value.
-	double maxZ;				///< The minimum elevation to keep. Default maximum double value.
-	double minIntensity;		///< The minimum intensity to keep. Default minimum double value.
-	double maxIntensity;		///< The maximum intensity to keep.	Default maximum double value.
-	bool lastOnly;				///< Only keep the last returns. Default false.
-	bool firstOnly;				///< Only keep the first returns. Default false.
+	std::vector<PointFilter*> filters;
 
 	/**
 	 * Construct a PCPointFilter.
 	 */
 	PCPointFilter();
+
+	~PCPointFilter();
 
 	/**
 	 * Print the command-line parameters that can be used to
@@ -603,6 +603,24 @@ public:
 	 */
 	template <class T, class U>
 	int filter(T begin, T end, U iter) const;
+
+	void addClassFilter(int cls);
+
+	void addClassFilter(const std::vector<int>& cls);
+
+	void addIntensityFilter(double min, double max);
+
+	void addZRangeFilter(double min, double max);
+
+	void addScanAngleFilter(double min, double max);
+
+	void addKeepLastFilter();
+
+	void addKeepFirstFilter();
+
+	void addRejectEdgeFilter();
+
+	void print() const;
 
 };
 
@@ -672,16 +690,18 @@ public:
 	 * centre.
 	 * @param filename 	The output (raster) filename.
 	 * @param types		The list of statistics to compute.
-	 * @param res 		The raster resolution.
+	 * @param resX 		The raster x resolution.
+	 * @param resY 		The raster y resolution.
 	 * @param easting 	The minimum corner coordinate of the raster.
 	 * @param northing 	The minimum corner coordinate of the raster.
 	 * @param radius 	The size of the neighbourhood around each cell centre.
 	 * @param srid 		The spatial reference ID of the output.
-	 * @param density   The estimated number of points per cell; used for reserving mapped memory. Default 32.
-	 * @param ext 		An extra filter value. For example, for percentiles, this is the cutoff value.
+	 * @param memory    The number of bytes to consume in RAM before changing to disk-backed storage.
+	 * @param useHeader True to trust the LAS file headers for things like bounds. Otherwise, read the points.
+
 	 */
 	void rasterize(const std::string& filename, const std::vector<std::string>& types, double resX, double resY,
-		double easting, double northing, double radius, int srid, int memory);
+		double easting, double northing, double radius, int srid, int memory, bool useHeader);
 
 	/**
 	 * Esitmate the point density (per cell) given the source files, resolution and search radius.
