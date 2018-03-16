@@ -461,8 +461,13 @@ TileIterator::TileIterator(const TileIterator& iter) :
 }
 
 bool TileIterator::hasNext() {
-	const GridProps& p = m_source.props();
-	return m_curCol < p.cols() && m_curRow < p.rows();
+	bool has = false;
+	{
+		std::lock_guard<std::mutex> lk(m_mtx);
+		const GridProps& p = m_source.props();
+		has = m_curCol < p.cols() && m_curRow < p.rows();
+	}
+	return has;
 }
 
 int TileIterator::count() const {
@@ -472,11 +477,11 @@ int TileIterator::count() const {
 
 Tile TileIterator::next() {
 
-	const GridProps& props = m_source.props();
-
+	MemRaster* tile = nullptr;
 	int col, row, srcCol, srcRow, dstCol, dstRow, cols, rows;
-
+	const GridProps& props = m_source.props();
 	{
+		std::lock_guard<std::mutex> lk(m_mtx);
 		if(!(m_curCol < props.cols() && m_curRow < props.rows()))
 			g_runerr("No more tiles.");
 
@@ -494,23 +499,27 @@ Tile TileIterator::next() {
 			m_curCol = 0;
 			m_curRow += m_rows;
 		}
+
+		GridProps p(props);
+		p.setSize(m_cols + m_buffer * 2, m_rows + m_buffer * 2);
+		tile = new MemRaster(p);
+
+		m_source.writeTo(*tile, cols, rows, srcCol, srcRow, dstCol, dstRow, m_band, 1);
 	}
-
-	GridProps p(props);
-	p.setSize(m_cols + m_buffer * 2, m_rows + m_buffer * 2);
-	MemRaster* tile = new MemRaster(p);
-
-	m_source.writeTo(*tile, cols, rows, srcCol, srcRow, dstCol, dstRow, m_band, 1);
 
 	return Tile(tile, &m_source, m_cols, m_rows, col, row, m_buffer, srcCol, srcRow, dstCol, dstRow, m_band, props.writable());
 }
 
 Tile TileIterator::create(Tile &tpl) {
+	MemRaster* tile = nullptr;
 	const GridProps& props = m_source.props();
-	GridProps p(props);
-	p.setSize(m_cols + m_buffer * 2, m_rows + m_buffer * 2);
-	MemRaster* tile = new MemRaster(p);
-	m_source.writeTo(*tile, tpl.m_cols, tpl.m_rows, tpl.m_srcCol, tpl.m_srcRow, tpl.m_dstCol, tpl.m_dstRow, m_band, 1);
+	{
+		std::lock_guard<std::mutex> lk(m_mtx);
+		GridProps p(props);
+		p.setSize(m_cols + m_buffer * 2, m_rows + m_buffer * 2);
+		tile = new MemRaster(p);
+		m_source.writeTo(*tile, tpl.m_cols, tpl.m_rows, tpl.m_srcCol, tpl.m_srcRow, tpl.m_dstCol, tpl.m_dstRow, m_band, 1);
+	}
 	return Tile(tile, &m_source, m_cols, m_rows, tpl.m_col, tpl.m_row, m_buffer, tpl.m_srcCol, tpl.m_srcRow, tpl.m_dstCol, tpl.m_dstRow, m_band, props.writable());
 }
 
@@ -881,7 +890,7 @@ void MemRaster::init(const GridProps &pr, bool mapped) {
 		size_t typeSize = getTypeSize(m_props.dataType());
 		size_t size = MappedFile::fixSize(typeSize * m_props.cols() * m_props.rows());
 		if (mapped) {
-			m_mappedFile.reset(new MappedFile(size));
+			m_mappedFile.reset(new MappedFile(size, true));
 			m_grid = m_mappedFile->data();
 		} else {
 			m_grid = malloc(size);
