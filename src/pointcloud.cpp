@@ -778,8 +778,8 @@ geo::pc::Point::Point(double x, double y, double z, double intensity, double ang
 	m_cls(cls),
 	m_returnNum(returnNum),
 	m_numReturns(numReturns),
-	m_isEdge(isEdge),
-	m_point(nullptr) {
+	m_isEdge(isEdge) {
+	//m_point(nullptr) {
 }
 
 geo::pc::Point::Point(const liblas::Point& pt) :
@@ -791,7 +791,7 @@ geo::pc::Point::Point(const liblas::Point& pt) :
 			pt.GetNumberOfReturns(),
 			pt.GetFlightLineEdge()) {
 
-	m_point = new liblas::Point(pt);
+	//m_point = new liblas::Point(pt);
 }
 
 geo::pc::Point::Point(double x, double y, double z) :
@@ -811,8 +811,8 @@ geo::pc::Point::Point() :
 	m_cls(0),
 	m_returnNum(0),
 	m_numReturns(0),
-	m_isEdge(false),
-	m_point(nullptr) {
+	m_isEdge(false) {
+	//m_point(nullptr) {
 }
 
 int geo::pc::Point::classId() const {
@@ -874,9 +874,11 @@ int geo::pc::Point::numReturns() const {
 }
 
 geo::pc::Point::~Point() {
-	if(m_point)
-		delete m_point;
+	//if(m_point)
+	//	delete m_point;
 }
+
+
 const std::unordered_map<std::string, std::string> computerNames = {
 		{"min", "The minimum value"},
 		{"max", "The maximum value"},
@@ -1018,6 +1020,206 @@ void fixBounds(double* bounds, double resX, double resY, double* easting, double
 	}
 }
 
+// 1) Create byte grid (map) corresponding to output raster.
+// 2) Iterate over bounds. For each one, increment the cells in the grid that are covered by the bounds plus the radius.
+// 4) Iterate over bounds. 
+//	-- Create a cell if required and add values to it. 
+//  -- Decrement the count for that cell in the grid.
+//  -- If the count is zero, finalize the cell.
+
+class RCell {
+public:
+	std::vector<geo::pc::Point> values;
+};
+
+void Rasterizer::rasterize(const std::string& filename, const std::vector<std::string>& _types,
+		double resX, double resY, double easting, double northing, double radius, int srid, int memory, bool useHeader) {
+
+	if(std::isnan(resX) || std::isnan(resY))
+		g_runerr("Resolution not valid");
+
+	if(radius < 0 || std::isnan(radius)) {
+		radius = std::sqrt(std::pow(resX / 2, 2) * 2);
+		g_warn("Invalid radius; using " << radius);
+	}
+
+	std::vector<std::string> types(_types);
+	if(types.empty())
+		g_argerr("No methods given; defaulting to mean");
+
+	std::vector<std::unique_ptr<Computer> > computers;
+	for(const std::string& name : types)
+		computers.emplace_back(getComputer(name));
+
+	g_trace("Checking file bounds");
+	double bounds[4] = {G_DBL_MAX_POS, G_DBL_MAX_POS, G_DBL_MIN_POS, G_DBL_MIN_POS};
+	{
+		double fBounds[6];
+		for(PCFile& f: m_files) {
+			f.init(useHeader);
+			f.fileBounds(fBounds);
+			if(fBounds[0] < bounds[0]) bounds[0] = fBounds[0];
+			if(fBounds[1] < bounds[1]) bounds[1] = fBounds[1];
+			if(fBounds[2] > bounds[2]) bounds[2] = fBounds[2];
+			if(fBounds[3] > bounds[3]) bounds[3] = fBounds[3];
+		}
+	}
+
+	g_trace("Fixing bounds")
+	fixBounds(bounds, resX, resY, &easting, &northing);
+	g_trace(" bounds: " << bounds[0] << ", " << bounds[1] << "; " << bounds[2] << ", " << bounds[3])
+
+	int cols = (int) ((bounds[2] - bounds[0]) / std::abs(resX)) + 1;
+	int rows = (int) ((bounds[3] - bounds[1]) / std::abs(resY)) + 1;
+	g_trace(" cols: " << cols << ", rows: " << rows)
+
+	int bandCount = 1;
+	for(const std::unique_ptr<Computer>& comp : computers)
+		bandCount += comp->bandCount();
+	g_trace(" bands: " << bandCount)
+
+	g_trace("Preparing raster")
+	GridProps props;
+	props.setTrans(easting, resX, northing, resY);
+	props.setSize(cols, rows);
+	props.setNoData(NODATA);
+	props.setDataType(DataType::Float32);
+	props.setSrid(srid);
+	props.setWritable(true);
+	props.setBands(bandCount);
+	Raster rast(filename, props);
+	rast.fillFloat(0, 1);
+	for(int band = 2; band <= bandCount; ++band)
+		rast.fillFloat(NODATA, band);
+
+	std::unordered_map<size_t, int> counts;
+	{
+		double fBounds[6];
+		int radCols = std::ceil(radius / std::abs(resX));
+		for(PCFile& f: m_files) {
+			f.fileBounds(fBounds);
+			int c0 = std::min(props.toCol(fBounds[0]), props.toCol(fBounds[2])) - radCols;
+			int r0 = std::min(props.toRow(fBounds[1]), props.toRow(fBounds[3])) - radCols;
+			int c1 = std::max(props.toCol(fBounds[0]), props.toCol(fBounds[2])) + radCols;
+			int r1 = std::max(props.toRow(fBounds[1]), props.toRow(fBounds[3])) + radCols;
+			g_debug("box " << c0 << ", " << r0 << ", " << c1 << ", " << r1 << ", " << radCols)
+			for(int r = r0; r <= r1; ++r) {
+				if(r < 0 || r >= rows) continue;
+				for(int c = c0; c <= c1; ++c) {
+					if(c < 0 || c >= cols) continue;
+					counts[r * cols + c]++;
+				}
+			}
+		}
+	}
+
+	liblas::ReaderFactory fact;
+	CountComputer countComp;
+
+	// The squared radius for comparison.
+	double rad0 = radius * radius;
+
+	// The radius of the "box" of pixels to check for a claim on the current point.
+	int radpx = (int) std::ceil(radius / std::abs(props.resolutionX()));
+	int i = 0;
+
+	std::unordered_map<size_t, RCell> cells;
+
+	g_trace("Sorting points")
+	for(PCFile& file : m_files) {
+		g_debug("Reading file " << i++ << " of " << m_files.size());
+		std::unordered_set<size_t> indexes;
+		for(const std::string& filename : file.filenames()) {
+			std::ifstream str(filename);
+			liblas::Reader rdr = fact.CreateWithStream(str);
+			while(rdr.ReadNextPoint()) {
+				const geo::pc::Point pt(rdr.GetPoint());
+				double x = pt.x();
+				double y = pt.y();
+				int col = props.toCol(x);
+				int row = props.toRow(y);
+				if(radius == 0) {
+					size_t idx = row * cols + col;
+					cells[idx].values.push_back(pt);
+					indexes.insert(idx);
+				} else {
+					g_trace(g_max(0, col - radpx) << ", " << g_min(cols, col + radpx + 1) << ", " << g_max(0, row - radpx) << ", " << g_min(rows, row + radpx + 1))
+					for(int r = g_max(0, row - radpx); r < g_min(rows, row + radpx + 1); ++r) {
+						for(int c = g_max(0, col - radpx); c < g_min(cols, col + radpx + 1); ++c) {
+							double cx = props.toCentroidX(c);
+							double cy = props.toCentroidY(r);
+							double dist = std::pow(cx - x, 2.0) + std::pow(cy - y, 2.0);
+							if(dist <= rad0) {
+								size_t idx = r * cols + c;
+								cells[idx].values.push_back(pt);
+								indexes.insert(idx);
+							}
+						}
+					}
+				}
+			}
+		}
+
+		for(size_t idx : indexes) {
+			if(counts.find(idx) == counts.end())
+				g_runerr("Col " << (idx % cols) << ", row " << (idx / cols) << " has already been processed.")
+			if(--counts[idx] == 0) {
+				//g_debug("Finalizing " << idx)
+				int col = idx % cols;
+				int row = idx / cols;
+				const RCell& cell = cells[idx];
+				std::vector<geo::pc::Point> filtered;
+				std::vector<double> out;
+				size_t count = cell.values.size();
+				if(count)
+					count = m_filter->filter(cell.values.begin(), cell.values.end(), std::back_inserter(filtered));
+				rast.setFloat(col, row, count, 1);
+				if(count) {
+					int band = 2;
+					double x = props.toCentroidX(col);
+					double y = props.toCentroidY(row);
+					for(size_t i = 0; i < computers.size(); ++i) {
+						computers[i]->compute(x, y, cell.values, filtered, radius, out);
+						for(double val : out)
+							rast.setFloat(col, row, std::isnan(val) ? NODATA : val, band++);
+						out.clear();
+					}
+				}
+				counts.erase(idx);
+				cells.erase(idx);
+			}
+		}
+	}
+
+	g_debug("Finalizing the rest " << cells.size())
+	for(auto& item : cells) {
+		size_t idx = item.first;
+		//g_debug(idx << ", " << counts.count(idx) << ", " << counts[idx])
+		int col = idx % cols;
+		int row = idx / cols;
+		const RCell& cell = cells[idx];
+		std::vector<geo::pc::Point> filtered;
+		std::vector<double> out;
+		size_t count = cell.values.size();
+		if(count)
+			count = m_filter->filter(cell.values.begin(), cell.values.end(), std::back_inserter(filtered));
+		rast.setFloat(col, row, count, 1);
+		if(count) {
+			int band = 2;
+			double x = props.toCentroidX(col);
+			double y = props.toCentroidY(row);
+			for(size_t i = 0; i < computers.size(); ++i) {
+				computers[i]->compute(x, y, cell.values, filtered, radius, out);
+				for(double val : out)
+					rast.setFloat(col, row, std::isnan(val) ? NODATA : val, band++);
+				out.clear();
+			}
+		}
+	}
+
+}
+
+/*
 void Rasterizer::rasterize(const std::string& filename, const std::vector<std::string>& _types,
 		double resX, double resY, double easting, double northing, double radius, int srid, int memory, bool useHeader) {
 
@@ -1217,16 +1419,17 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	}
 	g_trace("Done");
 }
+*/
 
-void Rasterizer::setFilter(const PCPointFilter& filter) {
-	if(m_filter)
-		delete m_filter;
-	m_filter = new PCPointFilter(filter);
+void Rasterizer::setFilter(PCPointFilter* filter) {
+	//if(m_filter)
+	//	delete m_filter;
+	m_filter = filter;
 }
 
 Rasterizer::~Rasterizer() {
-	if(m_filter)
-		delete m_filter;
+	//if(m_filter)
+	//	delete m_filter;
 }
 
 
@@ -1244,7 +1447,7 @@ Normalizer::~Normalizer() {
 		delete m_filter;
 }
 
-void Normalizer::normalize(const std::string& dtmpath, const std::string& outdir, int band) {
+void Normalizer::normalize(const std::string& dtmpath, const std::string& outdir, int band, bool force) {
 
 	Raster dtm(dtmpath);
 	const GridProps& props = dtm.props();
@@ -1255,6 +1458,10 @@ void Normalizer::normalize(const std::string& dtmpath, const std::string& outdir
 	for(const std::string& filename : m_filenames) {
 
 		std::string outfile = Util::pathJoin(outdir, Util::basename(filename) + ".las");
+		if(!force && Util::exists(outfile)) {
+			g_trace("File " << outfile << " exists. Skipping.")
+			continue;
+		}
 
 		std::ifstream str(filename);
 		liblas::Reader rdr = fact.CreateWithStream(str);

@@ -108,7 +108,7 @@ int main(int argc, char** argv) {
 
 	try {
 		Rasterizer r(infiles);
-		r.setFilter(filter);
+		r.setFilter(&filter);
 		r.rasterize(args[0], types, resX, resY, easting, northing, radius, srid, memory, useHeader);
 	} catch(const std::exception& ex) {
 		std::cerr << ex.what() << "\n";

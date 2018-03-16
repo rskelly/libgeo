@@ -17,7 +17,9 @@ void usage() {
 	std::cerr << "Usage: pcnorm [options] <output dir> <terrain model> <input las [*]>\n"
 			<< " Point filtering parameters:\n"
 			<< " -c <class(es)>  Comma-delimited list of classes to keep.\n"
-			<< " -t <threshold>  The minimum height threshold.\n";
+			<< " -t <threshold>  The minimum height threshold.\n"
+			<< " -b <band>       The band in the terrain model.\n"
+			<< " -f              Force overwrite of existing files.\n";
 }
 
 int main(int argc, char** argv) {
@@ -31,6 +33,7 @@ int main(int argc, char** argv) {
 	std::vector<int> classes;
 	geo::pc::PCPointFilter filter;
 	int band = 1;
+	bool force = false;
 
 	for(int i = 1; i < argc; ++i) {
 		std::string v = argv[i];
@@ -43,6 +46,8 @@ int main(int argc, char** argv) {
 			filter.addClassFilter(classes);
 		} else if(v == "-t") {
 			filter.addZRangeFilter(atof(argv[++i]), DBL_MAX);
+		} else if(v == "-f") {
+			force = true;
 		} else if(v == "-b") {
 			band = atoi(argv[++i]);
 		} else {
@@ -61,7 +66,7 @@ int main(int argc, char** argv) {
 	try {
 		geo::pc::Normalizer n(infiles);
 		n.setFilter(filter);
-		n.normalize(args[1], args[0], band);
+		n.normalize(args[1], args[0], band, force);
 	} catch(const std::exception& ex) {
 		std::cerr << ex.what() << "\n";
 		usage();

@@ -395,7 +395,7 @@ private:
 	int m_returnNum;
 	int m_numReturns;
 	bool m_isEdge;
-	liblas::Point* m_point;	///< The (optional) liblas::Point instance. Deleted on destruction.
+	//liblas::Point* m_point;	///< The (optional) liblas::Point instance. Deleted on destruction.
 
 public:
 
@@ -653,8 +653,9 @@ public:
 	 * @param dtm 		The filename of a digital terrain model.
 	 * @param outdir 	The output directory for normalized point cloud files.
 	 * @param band		The DTM raster band to use for normalization.
+	 * @param force     Force overwrite of existing files.
 	 */
-	void normalize(const std::string& dtm, const std::string& outdir, int band = 1);
+	void normalize(const std::string& dtm, const std::string& outdir, int band = 1, bool force = false);
 
 	/**
 	 * Destroy the normalizer.
@@ -715,7 +716,7 @@ public:
 	 * Set a point filter to use for filtering points. Removes the old filter.
 	 * @param filter A PointFilter.
 	 */
-	void setFilter(const PCPointFilter& filter);
+	void setFilter(PCPointFilter* filter);
 
 	/**
 	 * Destroy the Rasterizer.
