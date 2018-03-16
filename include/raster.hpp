@@ -580,7 +580,7 @@ namespace geo {
              * @param buffer The buffer around the tile.
              * @param band The band in the source raster.
              */
-            TileIterator iterator(int cols, int rows, int buffer = 0, int band = 1);
+            std::unique_ptr<TileIterator> iterator(int cols, int rows, int buffer = 0, int band = 1);
 
             /**
              * Compute the table of Gaussian weights given the size of

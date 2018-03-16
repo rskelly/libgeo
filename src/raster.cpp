@@ -7,6 +7,7 @@
 #include <thread>
 #include <condition_variable>
 #include <chrono>
+#include <memory>
 
 #include <boost/interprocess/file_mapping.hpp>
 #include <boost/interprocess/mapped_region.hpp>
@@ -522,8 +523,9 @@ TileIterator::~TileIterator() {
 Grid::Grid() {
 }
 
-TileIterator Grid::iterator(int cols, int rows, int buffer, int band) {
-	return TileIterator(*this, cols, rows, buffer, band);
+std::unique_ptr<TileIterator> Grid::iterator(int cols, int rows, int buffer, int band) {
+	std::unique_ptr<TileIterator> iter(new TileIterator(*this, cols, rows, buffer, band));
+	return std::move(iter);
 }
 
 void Grid::gaussianWeights(double *weights, int size, double sigma) {
@@ -768,14 +770,14 @@ void Grid::smooth(Grid &smoothed, double sigma, int size, int band,
 	if (status)
 		status->update(0.02f);
 
-	TileIterator iter = iterator(512, 512, size, band);
-	int tiles = iter.count();
+	std::unique_ptr<TileIterator> iter = iterator(512, 512, size, band);
+	int tiles = iter->count();
 
 	#pragma omp parallel for
 	for (int i = 0; i < tiles; ++i) {
 		if (*cancel) continue;
 
-		Tile tile = iter.next();
+		Tile tile = iter->next();
 
 		Grid& grid = tile.grid();
 		const GridProps& props = grid.props();
