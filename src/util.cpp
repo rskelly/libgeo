@@ -653,7 +653,7 @@ MappedFile::MappedFile(uint64_t size, bool fileBacked, bool deleteOnDestruct) :
 }
 
 MappedFile::MappedFile(const std::string& name, uint64_t size, bool fileBacked, bool deleteOnDestruct) :
-	m_size(size),
+	m_size(0),
 	m_name(name),
 	m_region(nullptr),
 	m_shm(nullptr),
