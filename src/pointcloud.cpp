@@ -10,6 +10,8 @@
 #include <cmath>
 #include <cstdint>
 #include <list>
+#include <condition_variable>
+#include <thread>
 
 #include <errno.h>
 #include <math.h>
@@ -1032,6 +1034,103 @@ public:
 	std::vector<geo::pc::Point> values;
 };
 
+class RWrite {
+public:
+	int col;
+	int row;
+	std::vector<double> values;
+	RWrite(int col, int row, const std::vector<double>& values) : 
+		col(col), row(row),
+		values(values) {
+	}
+};
+
+class RFinalize {
+public:
+	int col, row;
+	double x, y;
+	double radius;
+	RCell cell;
+	PCPointFilter* filter;
+	std::vector<std::unique_ptr<Computer> >* computers;
+
+	RFinalize(int col, int row, double x, double y, double radius, const RCell& cell,
+			PCPointFilter* filter, std::vector<std::unique_ptr<Computer> >* computers) :
+		col(col), row(row),
+		x(x), y(y), radius(radius),
+		cell(cell),
+		filter(filter),
+		computers(computers) {
+	}
+
+	void finalize(std::vector<double>& write) {
+		//g_debug(idx << ", " << counts.count(idx) << ", " << counts[idx])
+		std::vector<geo::pc::Point> filtered;
+		std::vector<double> out;
+		size_t count = cell.values.size();
+		if(count)
+			count = filter->filter(cell.values.begin(), cell.values.end(), std::back_inserter(filtered));
+		write.push_back(count);
+		if(count) {
+			for(size_t i = 0; i < computers->size(); ++i) {
+				(*computers)[i]->compute(x, y, cell.values, filtered, radius, out);
+				for(double val : out)
+					write.push_back(std::isnan(val) ? NODATA : val);
+				out.clear();
+			}
+		}
+	}
+};
+
+void rprocess(std::queue<std::unique_ptr<RFinalize> >* finalizeQ, std::queue<std::unique_ptr<RWrite> >* writeQ, 
+		std::condition_variable* fcond, std::condition_variable* wcond, 
+		std::mutex* fmtx, std::mutex* wmtx, bool* running) {
+	std::vector<double> write;
+	std::unique_ptr<RFinalize> f;
+	while(*running || !finalizeQ->empty()) {
+		{
+			std::unique_lock<std::mutex> lk(*fmtx);
+			while(*running && finalizeQ->empty())
+				fcond->wait(lk);
+			if(finalizeQ->empty()) 
+				continue;
+			f.swap(finalizeQ->front());
+			finalizeQ->pop();
+		}
+		f->finalize(write);
+		{
+			std::unique_lock<std::mutex> lk(*wmtx);
+			writeQ->emplace(new RWrite(f->col, f->row, write));
+		}
+		f.reset();
+		write.clear();
+		wcond->notify_one();
+	}
+}
+
+void rwrite(std::queue<std::unique_ptr<RWrite> >* writeQ, Raster* rast, 
+	std::condition_variable* wcond, std::mutex* wmtx, std::mutex* rmtx, bool* running) {
+	std::unique_ptr<RWrite> w;
+	while(*running || !writeQ->empty()) {
+		{
+			std::unique_lock<std::mutex> lk(*wmtx);
+			while(*running && writeQ->empty())
+				wcond->wait(lk);
+			if(writeQ->empty())
+				continue;
+			w.swap(writeQ->front());
+			writeQ->pop();
+		}
+		{
+			std::lock_guard<std::mutex> lk(*rmtx);
+			int band = 1;
+			for(double v : w->values)
+				rast->setFloat(w->col, w->row, v, band++);
+		}
+		w.reset();
+	}
+}
+
 void Rasterizer::rasterize(const std::string& filename, const std::vector<std::string>& _types,
 		double resX, double resY, double easting, double northing, double radius, int srid, int memory, bool useHeader) {
 
@@ -1124,9 +1223,22 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	int i = 0;
 
 	std::unordered_map<size_t, RCell> cells;
+	std::queue<std::unique_ptr<RFinalize> > finalizeQ;
+	std::queue<std::unique_ptr<RWrite> > writeQ;
+	std::mutex fmtx;
+	std::mutex wmtx;
+	std::mutex rmtx;
+	std::condition_variable fcond;
+	std::condition_variable wcond;
+	bool frunning = true;
+	bool wrunning = true;
 
-	g_trace("Sorting points")
+	std::thread processT(rprocess, &finalizeQ, &writeQ, &fcond, &wcond, &fmtx, &wmtx, &frunning);
+	std::thread writeT(rwrite, &writeQ, &rast, &wcond, &wmtx, &rmtx, &wrunning);
+
 	for(PCFile& file : m_files) {
+		while(finalizeQ.size() > 5000)
+			std::this_thread::sleep_for(std::chrono::milliseconds(100));
 		g_debug("Reading file " << i++ << " of " << m_files.size());
 		std::unordered_set<size_t> indexes;
 		for(const std::string& filename : file.filenames()) {
@@ -1160,63 +1272,48 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 			}
 		}
 
+		g_debug(finalizeQ.size());
 		for(size_t idx : indexes) {
 			if(counts.find(idx) == counts.end())
 				g_runerr("Col " << (idx % cols) << ", row " << (idx / cols) << " has already been processed.")
 			if(--counts[idx] == 0) {
-				//g_debug("Finalizing " << idx)
 				int col = idx % cols;
 				int row = idx / cols;
-				const RCell& cell = cells[idx];
-				std::vector<geo::pc::Point> filtered;
-				std::vector<double> out;
-				size_t count = cell.values.size();
-				if(count)
-					count = m_filter->filter(cell.values.begin(), cell.values.end(), std::back_inserter(filtered));
-				rast.setFloat(col, row, count, 1);
-				if(count) {
-					int band = 2;
-					double x = props.toCentroidX(col);
-					double y = props.toCentroidY(row);
-					for(size_t i = 0; i < computers.size(); ++i) {
-						computers[i]->compute(x, y, cell.values, filtered, radius, out);
-						for(double val : out)
-							rast.setFloat(col, row, std::isnan(val) ? NODATA : val, band++);
-						out.clear();
-					}
-				}
+				double x = props.toCentroidX(col);
+				double y = props.toCentroidY(row);
+				finalizeQ.emplace(new RFinalize(col, row, x, y, radius, cells[idx], m_filter, &computers));
 				counts.erase(idx);
 				cells.erase(idx);
+				fcond.notify_one();
 			}
 		}
+		g_debug(finalizeQ.size());
 	}
 
 	g_debug("Finalizing the rest " << cells.size())
 	for(auto& item : cells) {
 		size_t idx = item.first;
-		//g_debug(idx << ", " << counts.count(idx) << ", " << counts[idx])
 		int col = idx % cols;
 		int row = idx / cols;
-		const RCell& cell = cells[idx];
-		std::vector<geo::pc::Point> filtered;
-		std::vector<double> out;
-		size_t count = cell.values.size();
-		if(count)
-			count = m_filter->filter(cell.values.begin(), cell.values.end(), std::back_inserter(filtered));
-		rast.setFloat(col, row, count, 1);
-		if(count) {
-			int band = 2;
-			double x = props.toCentroidX(col);
-			double y = props.toCentroidY(row);
-			for(size_t i = 0; i < computers.size(); ++i) {
-				computers[i]->compute(x, y, cell.values, filtered, radius, out);
-				for(double val : out)
-					rast.setFloat(col, row, std::isnan(val) ? NODATA : val, band++);
-				out.clear();
-			}
-		}
+		double x = props.toCentroidX(col);
+		double y = props.toCentroidY(row);
+		finalizeQ.emplace(new RFinalize(col, row, x, y, radius, cells[idx], m_filter, &computers));
+		fcond.notify_one();
 	}
+	counts.clear();
+	cells.clear();
 
+	g_debug("Shutting down threads")
+	frunning = false;
+	fcond.notify_one();
+	processT.join();
+	g_debug("Finalizer done")
+	wrunning = false;
+	wcond.notify_one();
+	writeT.join();
+	g_debug("Writer done")
+
+	g_debug("Done")
 }
 
 /*
