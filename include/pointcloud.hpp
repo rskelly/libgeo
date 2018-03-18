@@ -25,6 +25,7 @@
 #include "raster.hpp"
 #include "ds/kdtree.hpp"
 
+#define NODATA -9999.0
 #define DBL_MAX std::numeric_limits<double>::max()
 #define DBL_MIN std::numeric_limits<double>::lowest()
 
@@ -602,7 +603,17 @@ public:
 	 * @return The number of points added to iter.
 	 */
 	template <class T, class U>
-	int filter(T begin, T end, U iter) const;
+	int filter(T begin, T end, U iter) const {
+		int i = 0;
+		while(begin != end) {
+			if(keep(*begin)) {
+				iter = *begin;
+				++i;
+			}
+			++begin;
+		}
+		return i;
+	}
 
 	void addClassFilter(int cls);
 

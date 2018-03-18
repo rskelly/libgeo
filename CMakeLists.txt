@@ -26,13 +26,7 @@ elseif(${WIN32})
 	set (libLAS_INCLUDE_DIR "C:\\dev\\gisinternals\\include")
 	set (libLAS_LIBRARY_DIRS "C:\\dev\\gisinternals\\lib")
 else()
-	include_directories (BEFORE SYSTEM include)
-	include_directories (BEFORE SYSTEM ann/include)
-	include_directories (BEFORE SYSTEM /opt/include)
-	include_directories (BEFORE SYSTEM /usr/include)
-	include_directories (BEFORE SYSTEM /usr/include/eigen3)
-	include_directories (BEFORE SYSTEM /usr/include/gdal)
-	include_directories (BEFORE SYSTEM /usr/include/jsoncpp)
+	include_directories (BEFORE SYSTEM include ann/include /usr/include /usr/include/eigen3 /usr/include/gdal /usr/include/jsoncpp /opt/include)
 endif()
 
 set (Boost_DEBUG OFF)
@@ -47,11 +41,11 @@ find_package (GDAL 2.2 REQUIRED)
 find_package (CGAL REQUIRED COMPONENTS Core)
 #find_package (PCL 1.8 REQUIRED)
 
-find_library (LIBLAS_LIBRARY las PATHS /usr/local/lib)
-find_library (JSONCPP_LIBRARY jsoncpp PATHS /usr/lib/x86_64-linux-gnu)
-find_library (CRYPTO_LIB crypto)
-find_library (GEOS_LIBRARY geos PATHS /opt/lib NO_DEFAULT_PATH) # To use 3.6.2, which has a different API than 3.5.x
-find_library (PROJ_LIBRARY proj PATHS /usr/lib/x86_64-linux-gnu NO_DEFAULT_PATH)
+find_library (LIBLAS_LIBRARY las)
+find_library (JSONCPP_LIBRARY jsoncpp)
+find_library (CRYPTO_LIB crypto PATHS /usr/lib/x86_64-linux-gnu)
+find_library (GEOS_LIBRARY geos PATHS /opt/lib)
+find_library (PROJ_LIBRARY proj)
 
 if(OPENMP_FOUND)
 	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_C_FLAGS} -fopenmp")
@@ -80,7 +74,7 @@ target_link_libraries (geodb geo geoutil)
 add_library (georaster SHARED src/raster.cpp src/rast_polygonize.cpp)
 target_link_libraries (georaster geo geoutil geodb Threads::Threads ${GEOS_LIBRARY})
 
-add_library (geopc SHARED src/pointcloud.cpp src/pc_computer.cpp src/pc_memgrid.cpp)
+add_library (geopc SHARED src/pointcloud.cpp src/pc_computer.cpp src/pc_normalizer.cpp src/pc_rasterizer.cpp src/pc_filter.cpp)
 target_link_libraries (geopc geo geoutil georaster geoann ${LIBLAS_LIBRARY} ${CGAL_LIBRARY})
 
 add_library (geoann SHARED ann/src/ANN.cpp ann/src/brute.cpp ann/src/kd_tree.cpp ann/src/kd_util.cpp 
@@ -123,3 +117,8 @@ target_link_libraries (datumshift geo geoutil georaster ${GDAL_LIBRARY} ${PROJ_L
 
 add_executable (sbet2csv src/apps/sbet2csv.cpp)
 target_link_libraries (sbet2csv geo geoutil ${PROJ_LIBRARY})
+
+
+
+
+install(TARGETS geoinfo geo geoutil RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
