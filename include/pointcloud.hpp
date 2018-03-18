@@ -35,6 +35,8 @@ using namespace geo::ds;
 namespace geo {
 namespace pc {
 
+class Point;
+
 /**
  * A class representing a source point cloud file. Maintains
  * the position of the tile, by the minimum x and y coordinates, 
@@ -50,7 +52,18 @@ private:
 	double m_bufferedBounds[4];				///< The buffered bounding box.
 	size_t m_pointCount;					///< The number of points in the file set.
 	bool m_inited;                          ///< True if the PCFile has already been initialized.
-	std::vector<std::string> m_filenames;	///< The list of filenames of consituent files.
+
+	size_t m_index;
+	std::ifstream* m_instr;
+	liblas::Reader* m_reader;
+
+	std::vector<std::string> m_filenames;	///< The list of filenames of constituent files.
+
+	bool openReader();
+
+	void closeReader();
+
+	bool isReaderOpen() const;
 
 public:
 
@@ -116,6 +129,13 @@ public:
 	bool contains(double x, double y) const;
 
 	/**
+	 * Returns true if the file bounds intersect the given boundary.
+	 * @param bounds An array of coordinates: (minx, miny, maxx, maxy).
+	 * @return True if the bounds intersect.
+	 */
+	bool intersects(double* bounds) const;
+
+	/**
 	 * Returns true if the point is within the buffered bounds of the tile.
 	 */
 	bool containsBuffered(double x, double y) const;
@@ -133,6 +153,15 @@ public:
 	 * @param useHeader Use the header to determine bounds (fast), rather than the point cloud (slow).
 	 */
 	void init(bool useHeader = true);
+
+	/**
+	 * Populates the point with the next point in the source file and returns
+	 * true. If there is no next point, returns false and the point's state
+	 * is undefined.
+	 * @param pt A point to populate with data.
+	 * @return True if there was a point to be read.
+	 */
+	bool next(geo::pc::Point& pt);
 
 	/**
 	 * Destroy the PCFile.
@@ -428,6 +457,11 @@ public:
 	 * Construct an empty point.
 	 */
 	Point();
+
+	/**
+	 * Populate this point with values from a liblas point.
+	 */
+	void setPoint(const liblas::Point& pt);
 
 	/**
 	 * Returns true if the point is a last return.
@@ -733,6 +767,48 @@ public:
 	 * Destroy the Rasterizer.
 	 */
 	~Rasterizer();
+
+};
+
+/**
+ * Provides a means of iterating over a point cloud by means of successive
+ * kd-tree instances, covering geographic tiles with a given buffer zone.
+ * This enables the program to seamlessly scan over a set of point cloud
+ * files without edge effects and without exhausting the machine's memory.
+ */
+class PCTreeIterator {
+private:
+	int m_idx;
+	int m_cols;
+	int m_rows;
+	double m_minX;
+	double m_minY;
+	double m_size;
+	double m_buffer;
+	std::vector<geo::pc::PCFile> m_files;
+
+public:
+	/**
+	 * Build a PCTreeIterator with the given source files, size and buffer. The buffer
+	 * should be sized to allow operations that use a neighbourhood without the
+	 * neighbourhood extending past the edge of the tile, where possible. The
+	 * size should be chosen to make efficient use of the machine's physical memory
+	 * without exhausting it.
+	 *
+	 * The main body of the tile, within the square defined by the size, will not overlap
+	 * any other tile. The buffers will overlap.
+	 *
+	 * @param files   The filenames of the point cloud files; preferrably non-overlapping tiles.
+	 * @param size    The size of the "tile" represented by each tree, not including buffer.
+	 * @param buffer  The size of the buffer around the tile.
+	 */
+	PCTreeIterator(const std::vector<std::string>& files, double size, double buffer);
+
+	void init();
+
+	void reset();
+
+	bool next(geo::ds::KDTree<geo::pc::Point>& tree);
 
 };
 

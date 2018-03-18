@@ -36,7 +36,10 @@ PCFile::PCFile(const std::string& filename, double x, double y, double size, dou
 	m_bounds{x, y, x + size, y + size},
 	m_bufferedBounds{x - buffer, y - buffer, x + size + buffer, y + size + buffer},
 	m_pointCount(0),
-	m_inited(false) {
+	m_inited(false),
+	m_index(0),
+	m_instr(nullptr),
+	m_reader(nullptr) {
 
 	m_filenames.push_back(filename);
 }
@@ -48,6 +51,9 @@ PCFile::PCFile(const std::vector<std::string>& filenames, double x, double y, do
 	m_bufferedBounds{x - buffer, y - buffer, x + size + buffer, y + size + buffer},
 	m_pointCount(0),
 	m_inited(false),
+	m_index(0),
+	m_instr(nullptr),
+	m_reader(nullptr),
 	m_filenames(filenames) {
 }
 
@@ -141,11 +147,59 @@ bool PCFile::contains(double x, double y) const {
 	return x >= m_bounds[0] && x < m_bounds[2]  && y >= m_bounds[1] && y < m_bounds[3];
 }
 
+bool PCFile::intersects(double* b) const {
+	const double* a = m_fileBounds;
+	double aa[4] {g_min(a[0], a[2]), g_min(a[1], a[3]), g_max(a[0], a[2]), g_max(a[1], a[3])};
+	double bb[4] {g_min(b[0], b[2]), g_min(b[1], b[3]), g_max(b[0], b[2]), g_max(b[1], b[3])};
+	return !(aa[2] <= bb[0] || aa[0] >= bb[2] || aa[3] <= bb[1] || aa[1] >= bb[3]);
+}
+
+bool PCFile::next(geo::pc::Point& pt) {
+	if(!isReaderOpen() && openReader()) {
+		if(m_reader->ReadNextPoint()) {
+			pt.setPoint(m_reader->GetPoint());
+			return true;
+		} else if(!next(pt)) {
+			return false;
+		}
+	}
+	return false;
+}
+bool PCFile::openReader() {
+	if(isReaderOpen())
+		return true;
+	if(++m_index < m_filenames.size()) {
+		closeReader();
+		m_instr = new std::ifstream(m_filenames[m_index], std::ios::binary | std::ios::in);
+		liblas::ReaderFactory rf;
+		m_reader = new liblas::Reader(rf.CreateWithStream(*m_instr));
+		return true;
+	}
+	return false;
+}
+
+void PCFile::closeReader() {
+	if(m_reader) {
+		delete m_reader;
+		m_reader = nullptr;
+	}
+	if(m_instr) {
+		delete m_instr;
+		m_instr = nullptr;
+	}
+}
+
+bool PCFile::isReaderOpen() const {
+	return m_reader != nullptr;
+}
+
 bool PCFile::containsBuffered(double x, double y) const {
 	return x >= m_bufferedBounds[0] && x < m_bufferedBounds[2] && y >= m_bufferedBounds[1] && y < m_bufferedBounds[3];
 }
 
-PCFile::~PCFile() {}
+PCFile::~PCFile() {
+	closeReader();
+}
 
 
 
@@ -523,6 +577,18 @@ geo::pc::Point::Point(const liblas::Point& pt) :
 			pt.GetFlightLineEdge()) {
 }
 
+void geo::pc::Point::setPoint(const liblas::Point& pt) {
+	m_x = pt.GetX();
+	m_y = pt.GetY();
+	m_z = pt.GetZ();
+	m_intensity = pt.GetIntensity();
+	m_angle = pt.GetScanAngleRank();
+	m_cls = pt.GetClassification().GetClass();
+	m_returnNum = pt.GetReturnNumber();
+	m_numReturns = pt.GetNumberOfReturns();
+	m_isEdge = pt.GetFlightLineEdge();
+}
+
 geo::pc::Point::Point(double x, double y, double z) :
 	geo::pc::Point() {
 
@@ -602,5 +668,71 @@ int geo::pc::Point::numReturns() const {
 }
 
 geo::pc::Point::~Point() {
+}
+
+
+
+bool pctBoundsSort(const PCFile& a, const PCFile& b) {
+	double ba[6];
+	double bb[6];
+	a.bounds(ba);
+	b.bounds(bb);
+	return ba[1] < bb[1] && ba[0] < bb[0];
+}
+
+PCTreeIterator::PCTreeIterator(const std::vector<std::string>& files, double size, double buffer) :
+	m_idx(-1), m_cols(-1), m_rows(-1),
+	m_minX(0), m_minY(0),
+	m_size(size),
+	m_buffer(buffer) {
+	for(const std::string& filename : files)
+		m_files.emplace_back(filename);
+}
+
+void PCTreeIterator::init() {
+	std::sort(m_files.begin(), m_files.end(), pctBoundsSort);
+	m_minX = DBL_MAX;
+	m_minY = DBL_MAX;
+	double maxX = -DBL_MAX;
+	double maxY = -DBL_MIN;
+	double bounds[6];
+	for(PCFile& file : m_files) {
+		file.init();
+		file.fileBounds(bounds);
+		if(bounds[0] < m_minX) m_minX = bounds[0];
+		if(bounds[1] < m_minY) m_minY = bounds[1];
+		if(bounds[2] > maxX) maxX = bounds[2];
+		if(bounds[3] > maxY) maxY = bounds[3];
+	}
+	m_cols = (int) std::ceil((maxX - m_minX) / m_size);
+	m_rows = (int) std::ceil((maxY - m_minY) / m_size);
+}
+
+void PCTreeIterator::reset() {
+	m_idx = -1;
+}
+
+bool PCTreeIterator::next(geo::ds::KDTree<geo::pc::Point>& tree) {
+	tree.destroy();
+	if(++m_idx >= m_cols * m_rows)
+		return false;
+	int col = m_idx % m_cols;
+	int row = m_idx / m_cols;
+	int minX = m_minX + col * m_size;
+	int minY = m_minY + row * m_size;
+	double tileBounds[4] { minX - m_buffer, minY - m_buffer, minX + m_size + m_buffer, minY + m_size + m_buffer };
+	geo::pc::Point pt;
+	for(PCFile& file : m_files) {
+		if(file.intersects(tileBounds)) {
+			while(file.next(pt)) {
+				double x = pt.x();
+				double y = pt.y();
+				if(x >= tileBounds[0] && x <= tileBounds[2] && y >= tileBounds[1] && y <= tileBounds[2])
+					tree.add(pt);
+			}
+		}
+	}
+	tree.build();
+	return true;
 }
 

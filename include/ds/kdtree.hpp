@@ -72,6 +72,17 @@ private:
 	ANNkd_tree* m_tree;
 	size_t m_dims;
 
+public:
+
+	/**
+	 * Construct the KDTree with the given number of dimensions.
+	 */
+	KDTree(size_t dims) :
+		m_pts(nullptr),
+		m_tree(nullptr),
+		m_dims(dims) {
+	}
+
 	/**
 	 * Destroy the tree.
 	 */
@@ -85,17 +96,6 @@ private:
 			annDeallocPts(m_pts);
 			m_pts = nullptr;
 		}
-	}
-
-public:
-
-	/**
-	 * Construct the KDTree with the given number of dimensions.
-	 */
-	KDTree(size_t dims) :
-		m_pts(nullptr),
-		m_tree(nullptr),
-		m_dims(dims) {
 	}
 
 	/**
