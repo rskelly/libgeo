@@ -71,10 +71,10 @@ target_link_libraries (geoutil geo rt ${Boost_LIBRARIES} ${GDAL_LIBRARY} ${CRYPT
 add_library (geodb SHARED src/db.cpp)
 target_link_libraries (geodb geo geoutil)
 
-add_library (georaster SHARED src/raster.cpp src/rast_polygonize.cpp)
+add_library (georaster SHARED src/raster.cpp src/rast/polygonize.cpp)
 target_link_libraries (georaster geo geoutil geodb Threads::Threads ${GEOS_LIBRARY})
 
-add_library (geopc SHARED src/pointcloud.cpp src/pc_computer.cpp src/pc_normalizer.cpp src/pc_rasterizer.cpp src/pc_filter.cpp)
+add_library (geopc SHARED src/pointcloud.cpp src/pc/computer.cpp src/pc/normalizer.cpp src/pc/rasterizer.cpp src/pc/filter.cpp)
 target_link_libraries (geopc geo geoutil georaster geoann ${LIBLAS_LIBRARY} ${CGAL_LIBRARY})
 
 add_library (geoann SHARED ann/src/ANN.cpp ann/src/brute.cpp ann/src/kd_tree.cpp ann/src/kd_util.cpp 
@@ -103,7 +103,7 @@ target_link_libraries (pcnorm geo geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBR
 #add_executable (pcperturb src/apps/pcperturb.cpp)
 #target_link_libraries (pcperturb geo geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY})
 
-#add_executable (pcregister src/apps/pcregister.cpp src/pc_trajectory.cpp)
+#add_executable (pcregister src/apps/pcregister.cpp src/pc/trajectory.cpp)
 #target_link_libraries (pcregister geo geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY} ${PCL_LIBRARIES})
 
 add_executable (geoinfo src/apps/geoinfo.cpp)
