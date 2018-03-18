@@ -57,7 +57,7 @@ namespace geo {
 			template <class I>
 			bool find(T query, I iter) const {
 				if(query == m_key) {
-					for(const U &v : m_values) {
+					for(const U& v : m_values) {
 						*iter = v;
 						++iter;
 					}
@@ -69,7 +69,7 @@ namespace geo {
 					if(m_gt.get()) {
 						return m_gt->find(query, iter);
 					} else {
-						for(const U &v : m_values) {
+						for(const U& v : m_values) {
 							*iter = v;
 							++iter;
 						}
