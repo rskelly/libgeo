@@ -21,8 +21,8 @@ namespace geo {
 		protected:
 			T m_key;
 			std::list<U> m_values;
-			std::unique_ptr<SimpleIntervalTree> m_lt;
-			std::unique_ptr<SimpleIntervalTree> m_gt;
+			std::unique_ptr<SimpleIntervalTree<T, U> > m_lt;
+			std::unique_ptr<SimpleIntervalTree<T, U> > m_gt;
 
 			SimpleIntervalTree(T key, U value) :
 					m_key(key) {
@@ -40,13 +40,13 @@ namespace geo {
 					m_values.push_back(value);
 				} else if(key < m_key) {
 					if(!m_lt.get()) {
-						m_lt.reset(new SimpleIntervalTree(key, value));
+						m_lt.reset(new SimpleIntervalTree<T, U>(key, value));
 					} else {
 						m_lt->add(key, value);
 					}
 				} else {
 					if(!m_gt.get()) {
-						m_gt.reset(new SimpleIntervalTree(key, value));
+						m_gt.reset(new SimpleIntervalTree<T, U>(key, value));
 					} else {
 						m_gt->add(key, value);
 					}
