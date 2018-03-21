@@ -26,8 +26,8 @@
 #include "ds/kdtree.hpp"
 
 #define NODATA -9999.0
-#define DBL_MAX std::numeric_limits<double>::max()
-#define DBL_MIN std::numeric_limits<double>::lowest()
+#define D_MAX std::numeric_limits<double>::max()
+#define D_MIN std::numeric_limits<double>::lowest()
 
 using namespace geo::util;
 using namespace geo::ds;
