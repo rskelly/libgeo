@@ -22,6 +22,7 @@
 
 using namespace geo::raster;
 using namespace geo::pc;
+using namespace geo::pc::compute;
 
 const std::unordered_map<std::string, std::string> computerNames = {
 		{"min", "The minimum value"},
@@ -142,48 +143,46 @@ void rprocess(std::queue<std::unique_ptr<RFinalize> >* finalizeQ, std::queue<std
 		std::condition_variable* fcond, std::condition_variable* wcond,
 		std::mutex* fmtx, std::mutex* wmtx, bool* running) {
 	std::vector<double> write;
-	std::unique_ptr<RFinalize> f;
+	std::vector<std::unique_ptr<RFinalize> > finals;
 	while(*running || !finalizeQ->empty()) {
 		{
 			std::unique_lock<std::mutex> lk(*fmtx);
 			while(*running && finalizeQ->empty())
 				fcond->wait(lk);
-			if(finalizeQ->empty())
-				continue;
-			f.swap(finalizeQ->front());
-			finalizeQ->pop();
+			while(!finalizeQ->empty()) {
+				finals.emplace_back(finalizeQ->front().release());
+				finalizeQ->pop();
+			}
 		}
-		f->finalize(write);
-		{
+		for(std::unique_ptr<RFinalize>& f : finals) {
+			f->finalize(write);
 			std::unique_lock<std::mutex> lk(*wmtx);
 			writeQ->emplace(new RWrite(f->col, f->row, write));
+			write.clear();
 		}
-		f.reset();
-		write.clear();
 		wcond->notify_one();
 	}
 }
 
-void rwrite(std::queue<std::unique_ptr<RWrite> >* writeQ, Raster* rast,
+void rwrite(std::queue<std::unique_ptr<RWrite> >* writeQ, std::vector<std::unique_ptr<MemRaster> >* rasters,
 	std::condition_variable* wcond, std::mutex* wmtx, std::mutex* rmtx, bool* running) {
-	std::unique_ptr<RWrite> w;
+	std::vector<std::unique_ptr<RWrite> > writes;
 	while(*running || !writeQ->empty()) {
 		{
 			std::unique_lock<std::mutex> lk(*wmtx);
 			while(*running && writeQ->empty())
 				wcond->wait(lk);
-			if(writeQ->empty())
-				continue;
-			w.swap(writeQ->front());
-			writeQ->pop();
+			while(!writeQ->empty()) {
+				writes.emplace_back(writeQ->front().release());
+				writeQ->pop();
+			}
 		}
-		{
+		for(std::unique_ptr<RWrite>& w : writes) {
 			std::lock_guard<std::mutex> lk(*rmtx);
-			int band = 1;
+			int i = 0;
 			for(double v : w->values)
-				rast->setFloat(w->col, w->row, v, band++);
+				rasters->at(i++)->setFloat(w->col, w->row, v);
 		}
-		w.reset();
 	}
 }
 
@@ -340,10 +339,13 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	props.setSrid(srid);
 	props.setWritable(true);
 	props.setBands(bandCount);
-	Raster rast(filename, props);
-	rast.fillFloat(0, 1);
-	for(int band = 2; band <= bandCount; ++band)
-		rast.fillFloat(NODATA, band);
+
+	std::vector<std::unique_ptr<MemRaster> > rasters;
+	for(int band = 1; band <= bandCount; ++band)
+		rasters.emplace_back(new MemRaster(props, true));
+	rasters[0]->fillFloat(0);
+	for(int i= 1; i < bandCount; ++i)
+		rasters[i]->fillFloat(NODATA);
 
 	std::unordered_map<size_t, int> counts;
 	{
@@ -388,7 +390,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	bool wrunning = true;
 
 	std::thread processT(rprocess, &finalizeQ, &writeQ, &fcond, &wcond, &fmtx, &wmtx, &frunning);
-	std::thread writeT(rwrite, &writeQ, &rast, &wcond, &wmtx, &rmtx, &wrunning);
+	std::thread writeT(rwrite, &writeQ, &rasters, &wcond, &wmtx, &rmtx, &wrunning);
 
 	for(PCFile& file : m_files) {
 		while(finalizeQ.size() > 5000)
@@ -466,6 +468,10 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	wcond.notify_one();
 	writeT.join();
 	g_debug("Writer done")
+
+	Raster outrast(filename, props);
+	for(int band = 1; band <= bandCount; ++band)
+		rasters[band - 1]->writeTo(outrast, props.cols(), props.rows(), 0, 0, 0, 0, 1, band);
 
 	g_debug("Done")
 }

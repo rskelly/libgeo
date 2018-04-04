@@ -63,25 +63,25 @@ link_directories(. ${Boost_LIBRARY_DIRS} ${LIB_PATH} ${PCL_LIBRARY_DIRS})
 
 # Build support libraries ################################################################################
 
-add_library (geo SHARED src/geo.cpp)
+add_library (geoutil SHARED src/geo.cpp src/util.cpp src/md5.cpp)
+target_link_libraries (geoutil rt ${Boost_LIBRARIES} ${GDAL_LIBRARY} ${CRYPTO_LIB})
 
-add_library (geoutil SHARED src/util.cpp src/md5.cpp)
-target_link_libraries (geoutil geo rt ${Boost_LIBRARIES} ${GDAL_LIBRARY} ${CRYPTO_LIB})
+add_library (geodb SHARED src/geo.cpp src/db.cpp)
+target_link_libraries (geodb geoutil)
 
-add_library (geodb SHARED src/db.cpp)
-target_link_libraries (geodb geo geoutil)
+add_library (georaster SHARED src/geo.cpp src/raster.cpp src/rast/polygonize.cpp)
+target_link_libraries (georaster geoutil geodb Threads::Threads ${GEOS_LIBRARY})
 
-add_library (georaster SHARED src/raster.cpp src/rast/polygonize.cpp)
-target_link_libraries (georaster geo geoutil geodb Threads::Threads ${GEOS_LIBRARY})
+file(GLOB PC_COMPUTERS src/pc/computers/*.cpp)
+add_library (geopc SHARED src/geo.cpp src/pointcloud.cpp src/pc/normalizer.cpp src/pc/rasterizer.cpp 
+	src/pc/filter.cpp ${PC_COMPUTERS})
+target_link_libraries (geopc geoutil georaster geoann ${LIBLAS_LIBRARY} ${CGAL_LIBRARY})
 
-add_library (geopc SHARED src/pointcloud.cpp src/pc/computer.cpp src/pc/normalizer.cpp src/pc/rasterizer.cpp src/pc/filter.cpp)
-target_link_libraries (geopc geo geoutil georaster geoann ${LIBLAS_LIBRARY} ${CGAL_LIBRARY})
-
-add_library (geoann SHARED ann/src/ANN.cpp ann/src/brute.cpp ann/src/kd_tree.cpp ann/src/kd_util.cpp 
+add_library (geoann SHARED src/geo.cpp ann/src/ANN.cpp ann/src/brute.cpp ann/src/kd_tree.cpp ann/src/kd_util.cpp 
 	ann/src/kd_split.cpp ann/src/kd_dump.cpp ann/src/kd_search.cpp ann/src/kd_pr_search.cpp 
 	ann/src/kd_fix_rad_search.cpp ann/src/bd_tree.cpp ann/src/bd_search.cpp ann/src/bd_pr_search.cpp 
 	ann/src/bd_fix_rad_search.cpp ann/src/perf.cpp)
-target_link_libraries (geoann geo geoutil)
+target_link_libraries (geoann geoutil)
 
 # Applications ##################################################################################################
 
@@ -89,36 +89,36 @@ add_executable (kdtree_test src/tests/kdtree_test.cpp)
 target_link_libraries (kdtree_test geoann ${Boost_LIBRARIES})
 
 add_executable (polygonize src/apps/polygonize.cpp)
-target_link_libraries (polygonize geo geoutil georaster ${Boost_LIBRARIES})
+target_link_libraries (polygonize geoutil georaster ${Boost_LIBRARIES})
 
 add_executable (pc2grid src/apps/pc2grid.cpp)
-target_link_libraries (pc2grid geo geoann geoutil georaster geopc)
+target_link_libraries (pc2grid geoann geoutil georaster geopc)
 
 add_executable (pc2tile src/apps/pc2tile.cpp)
-target_link_libraries (pc2tile geo geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY} ${GEOS_LIBRARY})
+target_link_libraries (pc2tile geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY} ${GEOS_LIBRARY})
 
 add_executable (pcnorm src/apps/pcnorm.cpp)
-target_link_libraries (pcnorm geo geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY} ${GEOS_LIBRARY})
+target_link_libraries (pcnorm geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY} ${GEOS_LIBRARY})
 
 #add_executable (pcperturb src/apps/pcperturb.cpp)
-#target_link_libraries (pcperturb geo geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY})
+#target_link_libraries (pcperturb geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY})
 
 #add_executable (pcregister src/apps/pcregister.cpp src/pc/trajectory.cpp)
-#target_link_libraries (pcregister geo geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY} ${PCL_LIBRARIES})
+#target_link_libraries (pcregister geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY} ${PCL_LIBRARIES})
 
 add_executable (geoinfo src/apps/geoinfo.cpp)
-target_link_libraries (geoinfo geo geoutil ${GDAL_LIBRARY} ${LIBLAS_LIBRARY} ${JSONCPP_LIBRARY})
+target_link_libraries (geoinfo geoutil ${GDAL_LIBRARY} ${LIBLAS_LIBRARY} ${JSONCPP_LIBRARY})
 
 add_executable (voidfill src/apps/voidfill.cpp)
-target_link_libraries (voidfill geo geoutil georaster ${GDAL_LIBRARY})
+target_link_libraries (voidfill geoutil georaster ${GDAL_LIBRARY})
 
 add_executable (datumshift src/apps/datumshift.cpp)
-target_link_libraries (datumshift geo geoutil georaster ${GDAL_LIBRARY} ${PROJ_LIBRARY})
+target_link_libraries (datumshift geoutil georaster ${GDAL_LIBRARY} ${PROJ_LIBRARY})
 
 add_executable (sbet2csv src/apps/sbet2csv.cpp)
-target_link_libraries (sbet2csv geo geoutil ${PROJ_LIBRARY})
+target_link_libraries (sbet2csv geoutil ${PROJ_LIBRARY})
 
 
 
 
-install(TARGETS geoinfo geo geoutil RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
+install(TARGETS geoinfo geoutil RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
