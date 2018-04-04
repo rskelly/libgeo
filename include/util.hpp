@@ -119,8 +119,9 @@ namespace geo {
 
         class Bounds {
         private:
-            double m_minx, m_miny, m_minz;
-            double m_maxx, m_maxy, m_maxz;
+            double m_minx, m_miny;
+            double m_maxx, m_maxy;
+            double m_minz, m_maxz;
         public:
             Bounds();
 
@@ -408,7 +409,46 @@ namespace geo {
 			}
         };
 
-        /**
+
+		/**
+		 * The radius is the number of pixels to search *not including* the center.
+		 * Therefore even and odd inputs are allowed. Returns a vector of offsets
+		 * from a centre position at 0, 0.
+		 * T must be constructible using T(col, row).
+		 */
+		template <class T>
+		std::vector<T> circularKernel(int outerRadius, int innerRadius = 0, bool includeCenter = false) {
+			double outr = g_sq((double) outerRadius) + 1.0;
+			double inr = g_sq((double) innerRadius);
+			std::vector<T> offsets;
+			for(int r = -outerRadius; r < outerRadius + 1; ++r) {
+				for(int c = -outerRadius; c < outerRadius + 1; ++c) {
+					double d0 = g_sq((double) c) + g_sq((double) r);
+					if((d0 <= outr && d0 >= inr) || (includeCenter && r == 0 && c == 0)) {
+						offsets.emplace_back(c, r);
+						std::cerr << "x ";
+					} else {
+						std::cerr << "  ";
+					}
+				}
+				std::cerr << "\n";
+			}
+			return std::move(offsets);
+		}
+
+		template <class T>
+		std::vector<T> squareKernel(int size, bool includeCenter = false) {
+			std::vector<T> offsets;
+			for(int r = -size / 2; r < size / 2 + 1; ++r) {
+				for(int c = -size / 2; c < size / 2 + 1; ++c) {
+					if(includeCenter || !(r == 0 && c == 0))
+						offsets.emplace_back(c, r);
+				}
+			}
+			return std::move(offsets);
+		}
+
+		/**
          * Provides utility methods.
          */
         class Util {
@@ -547,13 +587,6 @@ namespace geo {
                 }
                 return boost::algorithm::join(lst, delim);
             }
-
-            // The radius is the number of pixels to search *not including* the center.
-            // Therefore even and odd inputs are allowed.
-            // Returns a vector of offsets from a centre position at 0, 0.
-            static std::vector<std::pair<int, int> > circularKernel(int outerRadius, int innerRadius = 0, bool includeCenter = false);
-
-            static std::vector<std::pair<int, int> > squareKernel(int size, bool includeCenter = false);
 
             // Return the system tempp directory.
             static std::string tmpDir();

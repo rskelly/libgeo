@@ -901,7 +901,7 @@ namespace geo {
 
             	size_t goal = ((size_t) goalCol << 32) | goalRow;
 
-            	std::vector<std::pair<int, int> > offsets = Util::squareKernel(3, false);
+            	std::vector<std::pair<int, int> > offsets = squareKernel<std::pair<int, int> >(3, false);
 
             	std::unordered_map<size_t, size_t> parents;
             	std::unordered_map<size_t, double> gscore;

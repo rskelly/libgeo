@@ -110,32 +110,30 @@ Point::Point() :
 }
 
 Bounds::Bounds() :
-		m_minx(G_DBL_MAX_POS), m_miny(G_DBL_MAX_POS), m_minz(G_DBL_MAX_POS), m_maxx(
-				G_DBL_MAX_NEG), m_maxy(G_DBL_MAX_NEG), m_maxz(G_DBL_MAX_NEG) {
+	Bounds(G_DBL_MAX_POS, G_DBL_MAX_POS, G_DBL_MAX_NEG, G_DBL_MAX_NEG, G_DBL_MAX_POS, G_DBL_MAX_NEG) {
 }
 
 Bounds::Bounds(double minx, double miny, double maxx, double maxy) :
-		m_minx(minx), m_miny(miny), m_minz(G_DBL_MAX_NEG), m_maxx(maxx), m_maxy(
-				maxy), m_maxz(G_DBL_MAX_POS) {
+	Bounds(minx, miny, maxx, maxy, G_DBL_MAX_POS, G_DBL_MAX_NEG) {
 }
 
-Bounds::Bounds(double minx, double miny, double maxx, double maxy, double minz,
-		double maxz) :
-		m_minx(minx), m_miny(miny), m_minz(minz), m_maxx(maxx), m_maxy(maxy), m_maxz(
-				maxz) {
+Bounds::Bounds(double minx, double miny, double maxx, double maxy, double minz, double maxz) :
+		m_minx(std::min(minx, maxx)), m_miny(std::min(miny, maxy)),
+		m_maxx(std::max(minx, maxx)), m_maxy(std::max(miny, maxy)),
+		m_minz(std::min(minz, maxz)), m_maxz(std::min(minz, maxz)) {
 }
 
 void Bounds::assign(const Bounds& bounds) {
 	set(bounds.minx(), bounds.miny() , bounds.maxx(), bounds.maxy(), bounds.minz(), bounds.maxz());
 }
 
-void Bounds::set(double _minx, double _miny, double _maxx, double _maxy, double _minz, double _maxz) {
-	m_minx = _minx;
-	m_miny = _miny;
-	m_minz = _minz;
-	m_maxx = _maxx;
-	m_maxy = _maxy;
-	m_maxz = _maxz;
+void Bounds::set(double minx, double miny, double maxx, double maxy, double minz, double maxz) {
+	m_minx = std::min(minx, maxx);
+	m_miny = std::min(miny, maxy);
+	m_minz = std::min(minz, maxz);
+	m_maxx = std::max(minx, maxx);
+	m_maxy = std::max(miny, maxy);
+	m_maxz = std::max(minz, maxz);
 }
 
 bool Bounds::contains(double x, double y) const {
@@ -440,36 +438,6 @@ double Util::computeArea(double x1, double y1, double z1, double x2, double y2,
 					+ std::pow(z3 - z1, 2.0));
 	double s = (side0 + side1 + side2) / 2.0;
 	return std::sqrt(s * (s - side0) * (s - side1) * (s - side2));
-}
-
-std::vector<std::pair<int, int> > Util::circularKernel(int outerRadius, int innerRadius, bool includeCenter) {
-	double outr = g_sq((double) outerRadius) + 1.0;
-	double inr = g_sq((double) innerRadius);
-	std::vector<std::pair<int, int> > offsets;
-	for(int r = -outerRadius; r < outerRadius + 1; ++r) {
-		for(int c = -outerRadius; c < outerRadius + 1; ++c) {
-			double d0 = g_sq((double) c) + g_sq((double) r);
-			if((d0 <= outr && d0 >= inr) || (includeCenter && r == 0 && c == 0)) {
-				offsets.push_back(std::make_pair(c, r));
-				std::cerr << "x ";
-			} else {
-				std::cerr << "  ";
-			}
-		}
-		std::cerr << "\n";
-	}
-	return offsets;
-}
-
-std::vector<std::pair<int, int> > Util::squareKernel(int size, bool includeCenter) {
-	std::vector<std::pair<int, int> > offsets;
-	for(int r = -size / 2; r < size / 2 + 1; ++r) {
-		for(int c = -size / 2; c < size / 2 + 1; ++c) {
-			if(includeCenter || !(r == 0 && c == 0))
-				offsets.push_back(std::make_pair(c, r));
-		}
-	}
-	return offsets;
 }
 
 void Util::copyfile(const std::string &srcfile, const std::string &dstfile) {
