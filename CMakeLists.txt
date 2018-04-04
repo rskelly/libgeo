@@ -8,6 +8,12 @@ set (CMAKE_CXX_EXTENSIONS OFF)
 set (CMAKE_POSITION_INDEPENDENT_CODE ON)
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-pragmas -Wall -D_GLIBCXX_PARALLEL")
 
+set (CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+set (CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+set (CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+set (CMAKE_INSTALL_RPATH "/opt/lib;/usr/local/lib")
+set (CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+
 if (${APPLE})
 	set (CMAKE_C_COMPILER /usr/local/bin/clang-omp CACHE STRING "C compiler" FORCE)
 	set (CMAKE_CXX_COMPILER /usr/local/bin/clang-omp++ CACHE STRING "C++ compiler" FORCE)
@@ -92,7 +98,7 @@ add_executable (polygonize src/apps/polygonize.cpp)
 target_link_libraries (polygonize geoutil georaster ${Boost_LIBRARIES})
 
 add_executable (pc2grid src/apps/pc2grid.cpp)
-target_link_libraries (pc2grid geoann geoutil georaster geopc)
+target_link_libraries (pc2grid geoann geoutil georaster geopc geoann)
 
 add_executable (pc2tile src/apps/pc2tile.cpp)
 target_link_libraries (pc2tile geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY} ${GEOS_LIBRARY})
@@ -119,6 +125,4 @@ add_executable (sbet2csv src/apps/sbet2csv.cpp)
 target_link_libraries (sbet2csv geoutil ${PROJ_LIBRARY})
 
 
-
-
-install(TARGETS geoinfo geoutil RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
+install(TARGETS pc2grid pc2tile geopc georaster geoinfo geoutil geoann RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
