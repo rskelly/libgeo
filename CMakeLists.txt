@@ -32,7 +32,8 @@ elseif(${WIN32})
 	set (libLAS_INCLUDE_DIR "C:\\dev\\gisinternals\\include")
 	set (libLAS_LIBRARY_DIRS "C:\\dev\\gisinternals\\lib")
 else()
-	include_directories (BEFORE SYSTEM include ann/include /usr/include /usr/include/eigen3 /usr/include/gdal /usr/include/jsoncpp /opt/include)
+#	include_directories (BEFORE SYSTEM include ann/include /usr/include /usr/include/eigen3 
+#		/usr/include/gdal /usr/include/jsoncpp /opt/include)
 endif()
 
 set (Boost_DEBUG OFF)
@@ -53,6 +54,8 @@ find_library (CRYPTO_LIB crypto PATHS /usr/lib/x86_64-linux-gnu)
 find_library (GEOS_LIBRARY geos PATHS /opt/lib)
 find_library (PROJ_LIBRARY proj)
 
+message(${GEOS_LIBRARY})
+
 if(OPENMP_FOUND)
 	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_C_FLAGS} -fopenmp")
 	set (CMAKE_C_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_C_FLAGS} -fopenmp")
@@ -64,8 +67,9 @@ project (libgeo)
 
 # Configure directories###################################################################################
 
-include_directories( ${PCL_INCLUDE_DIRS} )
-link_directories(. ${Boost_LIBRARY_DIRS} ${LIB_PATH} ${PCL_LIBRARY_DIRS})
+include_directories(BEFORE SYSTEM include ann/include /usr/include /usr/include/eigen3 
+		/usr/include/gdal /usr/include/jsoncpp /opt/include ${PCL_INCLUDE_DIRS})
+link_directories(BEFORE SYSTEM . /opt/lib ${Boost_LIBRARY_DIRS} ${LIB_PATH} ${PCL_LIBRARY_DIRS})
 
 # Build support libraries ################################################################################
 
@@ -98,7 +102,7 @@ add_executable (polygonize src/apps/polygonize.cpp)
 target_link_libraries (polygonize geoutil georaster ${Boost_LIBRARIES})
 
 add_executable (pc2grid src/apps/pc2grid.cpp)
-target_link_libraries (pc2grid geoann geoutil georaster geopc geoann)
+target_link_libraries (pc2grid geoann geoutil georaster geopc geoann ${GEOS_LIBRARY})
 
 add_executable (pc2tile src/apps/pc2tile.cpp)
 target_link_libraries (pc2tile geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY} ${GEOS_LIBRARY})
