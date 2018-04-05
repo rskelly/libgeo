@@ -139,50 +139,54 @@ public:
 	}
 };
 
-void rprocess(std::queue<std::unique_ptr<RFinalize> >* finalizeQ, std::queue<std::unique_ptr<RWrite> >* writeQ,
+void rprocess(std::queue<RFinalize>* finalizeQ, std::queue<RWrite>* writeQ,
 		std::condition_variable* fcond, std::condition_variable* wcond,
 		std::mutex* fmtx, std::mutex* wmtx, bool* running) {
 	std::vector<double> write;
-	std::vector<std::unique_ptr<RFinalize> > finals;
+	std::vector<RFinalize> finals;
 	while(*running || !finalizeQ->empty()) {
 		{
 			std::unique_lock<std::mutex> lk(*fmtx);
-			while(*running && finalizeQ->empty())
+			while((*running && finalizeQ->empty()) || writeQ->size() > 5000)
 				fcond->wait(lk);
 			while(!finalizeQ->empty()) {
-				finals.emplace_back(finalizeQ->front().release());
+				finals.emplace_back(finalizeQ->front());
 				finalizeQ->pop();
 			}
 		}
-		for(std::unique_ptr<RFinalize>& f : finals) {
-			f->finalize(write);
+		{
 			std::unique_lock<std::mutex> lk(*wmtx);
-			writeQ->emplace(new RWrite(f->col, f->row, write));
-			write.clear();
+			for(RFinalize& f : finals) {
+				f.finalize(write);
+				writeQ->emplace(f.col, f.row, write);
+				write.clear();
+			}
 		}
+		finals.clear();
 		wcond->notify_one();
 	}
 }
 
-void rwrite(std::queue<std::unique_ptr<RWrite> >* writeQ, std::vector<std::unique_ptr<MemRaster> >* rasters,
-	std::condition_variable* wcond, std::mutex* wmtx, std::mutex* rmtx, bool* running) {
-	std::vector<std::unique_ptr<RWrite> > writes;
+void rwrite(std::queue<RWrite>* writeQ, std::vector<std::unique_ptr<MemRaster> >* rasters,
+	std::condition_variable* wcond, std::condition_variable* fcond, std::mutex* wmtx, bool* running) {
+	std::vector<RWrite> writes;
 	while(*running || !writeQ->empty()) {
 		{
 			std::unique_lock<std::mutex> lk(*wmtx);
-			while(*running && writeQ->empty())
+			while(*running && writeQ->empty()) 
 				wcond->wait(lk);
 			while(!writeQ->empty()) {
-				writes.emplace_back(writeQ->front().release());
+				writes.emplace_back(writeQ->front());
 				writeQ->pop();
 			}
+			fcond->notify_all();
 		}
-		for(std::unique_ptr<RWrite>& w : writes) {
-			std::lock_guard<std::mutex> lk(*rmtx);
+		for(RWrite& w : writes) {
 			int i = 0;
-			for(double v : w->values)
-				rasters->at(i++)->setFloat(w->col, w->row, v);
+			for(double v : w.values)
+				rasters->at(i++)->setFloat(w.col, w.row, v);
 		}
+		writes.clear();
 	}
 }
 
@@ -343,6 +347,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	std::vector<std::unique_ptr<MemRaster> > rasters;
 	for(int band = 1; band <= bandCount; ++band)
 		rasters.emplace_back(new MemRaster(props, true));
+
 	rasters[0]->fillFloat(0);
 	for(int i= 1; i < bandCount; ++i)
 		rasters[i]->fillFloat(NODATA);
@@ -357,7 +362,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 			int r0 = std::min(props.toRow(fBounds[1]), props.toRow(fBounds[3])) - radCols;
 			int c1 = std::max(props.toCol(fBounds[0]), props.toCol(fBounds[2])) + radCols;
 			int r1 = std::max(props.toRow(fBounds[1]), props.toRow(fBounds[3])) + radCols;
-			g_debug("box " << c0 << ", " << r0 << ", " << c1 << ", " << r1 << ", " << radCols)
+			//g_debug("box " << c0 << ", " << r0 << ", " << c1 << ", " << r1 << ", " << radCols)
 			for(int r = r0; r <= r1; ++r) {
 				if(r < 0 || r >= rows) continue;
 				for(int c = c0; c <= c1; ++c) {
@@ -379,21 +384,20 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	int i = 0;
 
 	std::unordered_map<size_t, RCell> cells;
-	std::queue<std::unique_ptr<RFinalize> > finalizeQ;
-	std::queue<std::unique_ptr<RWrite> > writeQ;
+	std::queue<RFinalize> finalizeQ;
+	std::queue<RWrite> writeQ;
 	std::mutex fmtx;
 	std::mutex wmtx;
-	std::mutex rmtx;
 	std::condition_variable fcond;
 	std::condition_variable wcond;
 	bool frunning = true;
 	bool wrunning = true;
 
 	std::thread processT(rprocess, &finalizeQ, &writeQ, &fcond, &wcond, &fmtx, &wmtx, &frunning);
-	std::thread writeT(rwrite, &writeQ, &rasters, &wcond, &wmtx, &rmtx, &wrunning);
+	std::thread writeT(rwrite, &writeQ, &rasters, &wcond, &fcond, &wmtx, &wrunning);
 
 	for(PCFile& file : m_files) {
-		while(finalizeQ.size() > 5000)
+		while(finalizeQ.size() > 5000 || writeQ.size() > 5000)
 			std::this_thread::sleep_for(std::chrono::milliseconds(100));
 		g_debug("Reading file " << i++ << " of " << m_files.size());
 		std::unordered_set<size_t> indexes;
@@ -411,7 +415,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 					cells[idx].values.push_back(pt);
 					indexes.insert(idx);
 				} else {
-					g_trace(g_max(0, col - radpx) << ", " << g_min(cols, col + radpx + 1) << ", " << g_max(0, row - radpx) << ", " << g_min(rows, row + radpx + 1))
+					//g_trace(g_max(0, col - radpx) << ", " << g_min(cols, col + radpx + 1) << ", " << g_max(0, row - radpx) << ", " << g_min(rows, row + radpx + 1))
 					for(int r = g_max(0, row - radpx); r < g_min(rows, row + radpx + 1); ++r) {
 						for(int c = g_max(0, col - radpx); c < g_min(cols, col + radpx + 1); ++c) {
 							double cx = props.toCentroidX(c);
@@ -437,12 +441,12 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 				int row = idx / cols;
 				double x = props.toCentroidX(col);
 				double y = props.toCentroidY(row);
-				finalizeQ.emplace(new RFinalize(col, row, x, y, radius, cells[idx], m_filter, &computers));
+				finalizeQ.emplace(col, row, x, y, radius, cells[idx], m_filter, &computers);
 				counts.erase(idx);
 				cells.erase(idx);
-				fcond.notify_one();
 			}
 		}
+		fcond.notify_all();
 		g_debug(finalizeQ.size());
 	}
 
@@ -453,9 +457,9 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 		int row = idx / cols;
 		double x = props.toCentroidX(col);
 		double y = props.toCentroidY(row);
-		finalizeQ.emplace(new RFinalize(col, row, x, y, radius, cells[idx], m_filter, &computers));
-		fcond.notify_one();
+		finalizeQ.emplace(col, row, x, y, radius, cells[idx], m_filter, &computers);
 	}
+	fcond.notify_one();
 	counts.clear();
 	cells.clear();
 
