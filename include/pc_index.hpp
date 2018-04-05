@@ -24,25 +24,24 @@
 
 class PointCloud {
 private:
-	// The key is the index of the point in the file.
-	// The value is a the cell index to finalize after that point.
-	// The actual number of finalized cells must be determined by
-	// the caller using the computation radius.
-	// TODO: THIS IS WRONG. Must be determined here, using radius.
-	std::unordered_map<size_t, size_t> m_indices;	///< The file->cell indices for finalization.
+	// The key is the index of the point in the file. The values are a the cell
+	// indices to finalize after that point.The actual number of finalized cells 
+	// must be determined by by calculating a set of cells that cover the target
+	// cell plus any given radius.
+	std::unordered_map<size_t, std::vector<size_t> > m_indices;	///< The file->cell indices for finalization.
 	std::vector<std::string> m_files;				///< The list of point files.
 
 	liblas::Reader* m_reader;						///< The current point file reader.
 	std::ifstream* m_input;							///< The current input file stream.
 	size_t m_readIdx;								///< The index of the current point.
 	size_t m_fileIdx;								///< The index of the current file.
-	size_t m_final;									///< The index of the last finalized cell.
 
 	size_t m_rows;									///< The number of cells in the finalization grid.
 	size_t m_cols;									///< The number of rows in the finalization grid.
 	double m_height;								///< The height of the point cloud (y).
 	double m_width;									///< The width of the point cloud (x).
-	double m_cellSize;								///< The size of a finalization cell.
+	double m_resX;									///< The size of a finalization cell.
+	double m_resY;
 	double m_bounds[4]; // minx, miny, maxx, maxy	///< The bounds of the point cloud.
 
 	/**
@@ -67,14 +66,72 @@ private:
 	bool loadNext() {
 		unload();
 		liblas::ReaderFactory rf;
-		m_input = new std::ifstream(m_files[++m_fileIdx], std::ios::binary|std::ios::in);
+		m_input = new std::ifstream(m_files[m_fileIdx], std::ios::binary|std::ios::in);
 		m_reader = new liblas::Reader(rf.CreateWithStream(*m_input));
+		++m_fileIdx;
 		return m_reader->ReadNextPoint();
+	}
+
+	void fixBounds(double resX, double resY, double* easting, double* northing) {
+
+		double aresX = std::abs(resX);
+		double aresY = std::abs(resY);
+
+		{
+			int a = 0, b = 2;
+			if(resX < 0)
+				a = 2, b = 0;
+			m_bounds[a] = std::floor(m_bounds[a] / resX) * resX;
+			m_bounds[b] = std::ceil(m_bounds[b] / resX) * resX;
+			a = 1, b = 3;
+			if(resY < 0)
+				a = 3, b = 1;
+			m_bounds[a] = std::floor(m_bounds[a] / resY) * resY;
+			m_bounds[b] = std::ceil(m_bounds[b] / resY) * resY;
+		}
+
+		if(!std::isnan(*easting)) {
+			if((resX > 0 && *easting < m_bounds[0]) || (resX < 0 && *easting > m_bounds[2]))
+				g_argerr("The easting is within the data boundary.");
+			double w = m_bounds[2] - m_bounds[0];
+			if(resX > 0) {
+				while(*easting + w < m_bounds[2])
+					w += resX;
+				m_bounds[0] = *easting;
+				m_bounds[2] = *easting + w;
+			} else {
+				while(*easting - w > m_bounds[1])
+					w += aresX;
+				m_bounds[2] = *easting;
+				m_bounds[0] = *easting - w;
+			}
+		} else {
+			*easting = m_bounds[resX > 0 ? 0 : 2];
+		}
+
+		if(!std::isnan(*northing)) {
+			if((resY > 0 && *northing < m_bounds[1]) || (resY < 0 && *northing > m_bounds[3]))
+				g_argerr("The *northing is within the data boundary.");
+			double h = m_bounds[3] - m_bounds[1];
+			if(resY > 0) {
+				while(*northing + h < m_bounds[3])
+					h += resY;
+				m_bounds[1] = *northing;
+				m_bounds[3] = *northing + h;
+			} else {
+				while(*northing - h > m_bounds[1])
+					h += aresY;
+				m_bounds[3] = *northing;
+				m_bounds[1] = *northing - h;
+			}
+		} else {
+			*northing = m_bounds[resY > 0 ? 1 : 3];
+		}
 	}
 
 public:
 
-	PointCloud(std::vector<std::string>& files, double cellSize = 10.0) :
+	PointCloud(std::vector<std::string>& files) :
 		m_files(files),
 		m_reader(nullptr),
 		m_input(nullptr),
@@ -82,7 +139,7 @@ public:
 		m_final(0),
 		m_rows(0), m_cols(0),
 		m_height(0), m_width(0),
-		m_cellSize(cellSize) {
+		m_resX(0), resY(0) {
 	}
 
 	size_t cols() const {
@@ -93,10 +150,17 @@ public:
 		return m_rows;
 	}
 
-	void init(bool useHeader = true) {
+	void bounds(double* b) const {
+		for(int i = 0; i < 4; ++i)
+			b[i] = m_bounds[i];
+	}
+
+	void init(double radius, double resX, double resY, double* easting, double* northing, bool useHeader = true) {
 
 		liblas::ReaderFactory rf;
 
+		m_resX = resX;
+		m_resY = resY;
 		m_bounds = {G_DBL_MAX_POS, G_DBL_MAX_POS, G_DBL_MAX_NEG, G_DBL_MAX_NEG};
 
 		for(const std::string& filename : m_files) {
@@ -119,11 +183,14 @@ public:
 			}
 		}
 
+		fixBounds(resX, resY, easting, northing);
+
 		m_width = m_bounds[2] - m_bounds[0];
 		m_height = m_bounds[3] - m_bounds[1];
-		m_cols = (size_t) std::ceil(m_width / m_cellSize);
-		m_rows = (size_t) std::ceil(m_height / m_cellSize);
+		m_cols = (size_t) std::ceil(m_width / std::abs(m_resX));
+		m_rows = (size_t) std::ceil(m_height / std::abs(m_resY));
 
+		size_t offset = (size_t) std::ceil(radius / std::max(std::abs(m_resX), std::abs(m_resY)));
 		size_t lidx = 0;
 		std::unordered_map<size_t, size_t> indices;
 		for(const std::string& filename : m_files) {
@@ -131,21 +198,65 @@ public:
 			liblas::Reader rdr = rf.CreateWithStream(str);
 			while(rdr.ReadNextPoint()) {
 				const liblas::Point& pt = rdr.GetPoint();
-				double px = pt.GetX();
-				double py = pt.GetY();
-				size_t col = (size_t) (px - m_bounds[0]) / m_width;
-				size_t row = (size_t) (py - m_bounds[1]) / m_height;
-				size_t idx = (row << 32) | col;
-				indices[idx] = lidx;
+				size_t col = (size_t) (pt.GetX() - m_bounds[0]) / m_width;
+				size_t row = (size_t) (pt.GetY() - m_bounds[1]) / m_height;
+				for(size_t r = std:max(0, row - offset); r < std::min(m_rows, row + offset + 1); ++r) {
+					for(size_t c = std::max(0, col - offset); c < std::min(m_cols, col + offset + 1); ++c)
+						indices[toIndex(col, row)] = lidx;
+				}
 				++lidx;
 			}
 		}
 
 		// Flip the index map; we have cell idx -> file idx.
-		// We want file idx -> cell idx.
+		// We want file idx -> cell idx. The mapping is not 1:1 so
+		// we use a vector.
 		for(const auto& p : indices)
-			m_indices[p.second] = p.first;
+			m_indices[p.second].push_back(p.first);
 
+	}
+
+	void fromIndex(size_t idx, size_t& col, size_t& row) {
+		col = idx & 0xffffffff;
+		row = (idx >> 32) & 0xffffffff;
+	}
+
+	void fromIndex(size_t idx, double& x, double& y) {
+		size_t col = idx & 0xffffffff;
+		size_t row = (idx >> 32) & 0xffffffff;
+		x = m_bounds[0] + resX * col + resX * 0.5;
+		y = m_bounds[1] + resY * row + resY * 0.5;
+	}
+
+	size_t toIndex(size_t col, size_t row) const {
+		return (row << 32)|col;
+	}
+
+	size_t toIndex(const geo::pc::Point& pt) const {
+		return  toIndex(toCol(lpt.GetX()), toRow(lpt.GetY()));
+	}
+
+	size_t toCol(const geo::pc::Point& pt) const {
+		return (size_t) (pt.GetX() - m_bounds[0]) / m_width;
+	}
+
+	size_t toRow(const geo::pc::Point& pt) const {
+		return (size_t) (pt.GetY() - m_bounds[1]) / m_height;
+	}
+
+	int getIndices(const geo::pc::Point& pt, std::vector<size_t>& indices) {
+		double px = pt.GetX();
+		double py = pt.GetY();
+		size_t col = (size_t) (px - m_bounds[0]) / m_width;
+		size_t row = (size_t) (py - m_bounds[1]) / m_height;
+		size_t count = 0;
+		for(size_t r = std:max(0, row - offset); r < std::min(m_rows, row + offset + 1); ++r) {
+			for(size_t c = std::max(0, col - offset); c < std::min(m_cols, col + offset + 1); ++c) {
+				indices.push_back(toIndex(c, r));
+				++count;
+			}
+		}
+		return count;
 	}
 
 	void reset() {
@@ -160,24 +271,13 @@ public:
 	 * If the hasFinal value is true, a cell has been finalized with the reading of
 	 * this point. Use getFinal() to get its index.
 	 */
-	bool next(geo::pc::Point& pt, bool& hasFinal) {
+	bool next(geo::pc::Point& pt, std::vector<size_t>& final) {
 		if(!m_reader && !m_reader->ReadNextPoint() && !loadNext())
 			return false;
-		if(m_indices.find(m_readIdx) != m_indices.end()) {
-			m_final = m_indices[m_readIdx];
-			hasFinal = true;
-		}
+		final.assign(m_indices[m_readIdx]);
 		pt.setPoint(m_reader->GetPoint());
 		++m_readIdx;
 		return true;
-	}
-
-	/**
-	 * If the hasFinal value from next() is true, use getFinal
-	 * to return the index of the cell that is finalized.
-	 */
-	size_t getFinal() const {
-		return m_final;
 	}
 
 	~PointCloud() {

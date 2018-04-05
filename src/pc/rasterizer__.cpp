@@ -19,6 +19,7 @@
 #include "raster.hpp"
 #include "pointcloud.hpp"
 #include "pc_computer.hpp"
+#include "pc_index.hpp"
 
 using namespace geo::raster;
 using namespace geo::pc;
@@ -150,7 +151,7 @@ void rprocess(std::queue<RFinalize>* finalizeQ, std::queue<RWrite>* writeQ,
 			while((*running && finalizeQ->empty()) || writeQ->size() > 5000)
 				fcond->wait(lk);
 			while(!finalizeQ->empty()) {
-				finals.push_back(std::move(finalizeQ->front()));
+				finals.emplace_back(finalizeQ->front());
 				finalizeQ->pop();
 			}
 		}
@@ -163,7 +164,7 @@ void rprocess(std::queue<RFinalize>* finalizeQ, std::queue<RWrite>* writeQ,
 			}
 		}
 		finals.clear();
-		wcond->notify_all();
+		wcond->notify_one();
 	}
 }
 
@@ -176,7 +177,7 @@ void rwrite(std::queue<RWrite>* writeQ, std::vector<std::unique_ptr<MemRaster> >
 			while(*running && writeQ->empty()) 
 				wcond->wait(lk);
 			while(!writeQ->empty()) {
-				writes.push_back(std::move(writeQ->front()));
+				writes.emplace_back(writeQ->front());
 				writeQ->pop();
 			}
 			fcond->notify_all();
@@ -220,63 +221,6 @@ double Rasterizer::density(double resolution, double radius) {
 	return (sum / count) * 1.5 * cell;
 }
 
-void fixBounds(double* bounds, double resX, double resY, double* easting, double* northing) {
-
-	double aresX = std::abs(resX);
-	double aresY = std::abs(resY);
-
-	{
-		int a = 0, b = 2;
-		if(resX < 0)
-			a = 2, b = 0;
-		bounds[a] = std::floor(bounds[a] / resX) * resX;
-		bounds[b] = std::ceil(bounds[b] / resX) * resX;
-		a = 1, b = 3;
-		if(resY < 0)
-			a = 3, b = 1;
-		bounds[a] = std::floor(bounds[a] / resY) * resY;
-		bounds[b] = std::ceil(bounds[b] / resY) * resY;
-	}
-
-	if(!std::isnan(*easting)) {
-		if((resX > 0 && *easting < bounds[0]) || (resX < 0 && *easting > bounds[2]))
-			g_argerr("The easting is within the data boundary.");
-		double w = bounds[2] - bounds[0];
-		if(resX > 0) {
-			while(*easting + w < bounds[2])
-				w += resX;
-			bounds[0] = *easting;
-			bounds[2] = *easting + w;
-		} else {
-			while(*easting - w > bounds[1])
-				w += aresX;
-			bounds[2] = *easting;
-			bounds[0] = *easting - w;
-		}
-	} else {
-		*easting = bounds[resX > 0 ? 0 : 2];
-	}
-
-	if(!std::isnan(*northing)) {
-		if((resY > 0 && *northing < bounds[1]) || (resY < 0 && *northing > bounds[3]))
-			g_argerr("The *northing is within the data boundary.");
-		double h = bounds[3] - bounds[1];
-		if(resY > 0) {
-			while(*northing + h < bounds[3])
-				h += resY;
-			bounds[1] = *northing;
-			bounds[3] = *northing + h;
-		} else {
-			while(*northing - h > bounds[1])
-				h += aresY;
-			bounds[3] = *northing;
-			bounds[1] = *northing - h;
-		}
-	} else {
-		*northing = bounds[resY > 0 ? 1 : 3];
-	}
-}
-
 void Rasterizer::setFilter(PCPointFilter* filter) {
 	//if(m_filter)
 	//	delete m_filter;
@@ -307,27 +251,8 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	for(const std::string& name : types)
 		computers.emplace_back(getComputer(name));
 
-	g_trace("Checking file bounds");
-	double bounds[4] = {G_DBL_MAX_POS, G_DBL_MAX_POS, G_DBL_MIN_POS, G_DBL_MIN_POS};
-	{
-		double fBounds[6];
-		for(PCFile& f: m_files) {
-			f.init(useHeader);
-			f.fileBounds(fBounds);
-			if(fBounds[0] < bounds[0]) bounds[0] = fBounds[0];
-			if(fBounds[1] < bounds[1]) bounds[1] = fBounds[1];
-			if(fBounds[2] > bounds[2]) bounds[2] = fBounds[2];
-			if(fBounds[3] > bounds[3]) bounds[3] = fBounds[3];
-		}
-	}
-
-	g_trace("Fixing bounds")
-	fixBounds(bounds, resX, resY, &easting, &northing);
-	g_trace(" bounds: " << bounds[0] << ", " << bounds[1] << "; " << bounds[2] << ", " << bounds[3])
-
-	int cols = (int) ((bounds[2] - bounds[0]) / std::abs(resX)) + 1;
-	int rows = (int) ((bounds[3] - bounds[1]) / std::abs(resY)) + 1;
-	g_trace(" cols: " << cols << ", rows: " << rows)
+	PointCloud pc(m_files);
+	pc.init(radius, resX, resY, &easting, &northing, useHeader);
 
 	int bandCount = 1;
 	for(const std::unique_ptr<Computer>& comp : computers)
@@ -352,125 +277,26 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	for(int i= 1; i < bandCount; ++i)
 		rasters[i]->fillFloat(NODATA);
 
-	std::unordered_map<size_t, int> counts;
-	{
-		double fBounds[6];
-		int radCols = std::ceil(radius / std::abs(resX));
-		for(PCFile& f: m_files) {
-			f.fileBounds(fBounds);
-			int c0 = std::min(props.toCol(fBounds[0]), props.toCol(fBounds[2])) - radCols;
-			int r0 = std::min(props.toRow(fBounds[1]), props.toRow(fBounds[3])) - radCols;
-			int c1 = std::max(props.toCol(fBounds[0]), props.toCol(fBounds[2])) + radCols;
-			int r1 = std::max(props.toRow(fBounds[1]), props.toRow(fBounds[3])) + radCols;
-			//g_debug("box " << c0 << ", " << r0 << ", " << c1 << ", " << r1 << ", " << radCols)
-			for(int r = r0; r <= r1; ++r) {
-				if(r < 0 || r >= rows) continue;
-				for(int c = c0; c <= c1; ++c) {
-					if(c < 0 || c >= cols) continue;
-					counts[r * cols + c]++;
-				}
-			}
-		}
-	}
+	geo::pc::Point& pt;
+	size_t index;
+	std::vector<size_t> finals;
+	std::unordered_map<size_t, std::vector<RCell> > cells;
 
-	liblas::ReaderFactory fact;
-	CountComputer countComp;
-
-	// The squared radius for comparison.
-	double rad0 = radius * radius;
-
-	// The radius of the "box" of pixels to check for a claim on the current point.
-	int radpx = (int) std::ceil(radius / std::abs(props.resolutionX()));
-	int i = 0;
-
-	std::unordered_map<size_t, RCell> cells;
-	std::queue<RFinalize> finalizeQ;
-	std::queue<RWrite> writeQ;
-	std::mutex fmtx;
-	std::mutex wmtx;
-	std::condition_variable fcond;
-	std::condition_variable wcond;
-	bool frunning = true;
-	bool wrunning = true;
-
-	std::thread processT(rprocess, &finalizeQ, &writeQ, &fcond, &wcond, &fmtx, &wmtx, &frunning);
-	std::thread writeT(rwrite, &writeQ, &rasters, &wcond, &fcond, &wmtx, &wrunning);
-
-	for(PCFile& file : m_files) {
-		while(finalizeQ.size() > 5000 || writeQ.size() > 5000)
-			std::this_thread::sleep_for(std::chrono::milliseconds(100));
-		g_debug("Reading file " << i++ << " of " << m_files.size());
-		std::unordered_set<size_t> indexes;
-		for(const std::string& filename : file.filenames()) {
-			std::ifstream str(filename);
-			liblas::Reader rdr = fact.CreateWithStream(str);
-			while(rdr.ReadNextPoint()) {
-				const geo::pc::Point pt(rdr.GetPoint());
-				double x = pt.x();
-				double y = pt.y();
-				int col = props.toCol(x);
-				int row = props.toRow(y);
-				if(radius == 0) {
-					size_t idx = row * cols + col;
-					cells[idx].values.push_back(pt);
-					indexes.insert(idx);
-				} else {
-					//g_trace(g_max(0, col - radpx) << ", " << g_min(cols, col + radpx + 1) << ", " << g_max(0, row - radpx) << ", " << g_min(rows, row + radpx + 1))
-					for(int r = g_max(0, row - radpx); r < g_min(rows, row + radpx + 1); ++r) {
-						for(int c = g_max(0, col - radpx); c < g_min(cols, col + radpx + 1); ++c) {
-							double cx = props.toCentroidX(c);
-							double cy = props.toCentroidY(r);
-							double dist = std::pow(cx - x, 2.0) + std::pow(cy - y, 2.0);
-							if(dist <= rad0) {
-								size_t idx = r * cols + c;
-								cells[idx].values.push_back(pt);
-								indexes.insert(idx);
-							}
-						}
-					}
-				}
+	while(pc.next(pt, finals)) {
+		for(size_t idx : finals) {
+			for(RCell& cell : cells[idx]) {
+				size_t col, row;
+				double x, y;
+				pc.fromIndex(idx, col, row);
+				pc.fromIndex(idx, x, y);
+				RFinalize rf(col, row, x, y, radius, cell, filter, computers);
+				std::vector<double> output;
+				rf.finalize(output);
+				
 			}
 		}
 
-		for(size_t idx : indexes) {
-			if(counts.find(idx) == counts.end())
-				g_runerr("Col " << (idx % cols) << ", row " << (idx / cols) << " has already been processed.")
-			if(--counts[idx] == 0) {
-				int col = idx % cols;
-				int row = idx / cols;
-				double x = props.toCentroidX(col);
-				double y = props.toCentroidY(row);
-				finalizeQ.emplace(col, row, x, y, radius, cells[idx], m_filter, &computers);
-				counts.erase(idx);
-				cells.erase(idx);
-			}
-		}
-		fcond.notify_all();
 	}
-
-	g_debug("Finalizing the rest " << cells.size())
-	for(auto& item : cells) {
-		size_t idx = item.first;
-		int col = idx % cols;
-		int row = idx / cols;
-		double x = props.toCentroidX(col);
-		double y = props.toCentroidY(row);
-		finalizeQ.emplace(col, row, x, y, radius, cells[idx], m_filter, &computers);
-	}
-	fcond.notify_all();
-	counts.clear();
-	cells.clear();
-
-	g_debug("Shutting down threads")
-	frunning = false;
-	fcond.notify_all();
-	processT.join();
-	g_debug("Finalizer done")
-
-	wrunning = false;
-	wcond.notify_all();
-	writeT.join();
-	g_debug("Writer done")
 
 	Raster outrast(filename, props);
 	for(int band = 1; band <= bandCount; ++band)

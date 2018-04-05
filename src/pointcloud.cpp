@@ -107,6 +107,7 @@ void PCFile::init(bool useHeader) {
 	m_pointCount = 0;
 	liblas::ReaderFactory f;
 	for(const std::string& filename : m_filenames) {
+		//g_debug("PCFile: filename: " << filename);
 		std::ifstream str(filename, std::ios::in | std::ios::binary);
 		liblas::Reader reader = f.CreateWithStream(str);
 		if(useHeader) {
@@ -273,21 +274,25 @@ void PCWriter::deleteOnDestruct(bool dod) {
 }
 
 void PCWriter::close() {
-	if(m_writer) {
-		m_header->SetMin(m_outBounds[0], m_outBounds[1], m_outBounds[4]);
-		m_header->SetMax(m_outBounds[2], m_outBounds[3], m_outBounds[5]);
-		for(int i = 0; i < 5; ++i)
-			m_header->SetPointRecordsByReturnCount(i, m_retNum[i]);
-		m_header->SetPointRecordsCount(m_returns);
-		m_writer->SetHeader(*m_header);
-		m_writer->WriteHeader();
-		m_str.close();
-		delete m_writer;
-		m_writer = nullptr;
+	try {
+		if(m_writer) {
+			m_header->SetMin(m_outBounds[0], m_outBounds[1], m_outBounds[4]);
+			m_header->SetMax(m_outBounds[2], m_outBounds[3], m_outBounds[5]);
+			for(int i = 0; i < 5; ++i)
+				m_header->SetPointRecordsByReturnCount(i, m_retNum[i]);
+			m_header->SetPointRecordsCount(m_returns);
+			m_writer->SetHeader(*m_header);
+			m_writer->WriteHeader();
+			m_str.close();
+			delete m_writer;
+			m_writer = nullptr;
 
-		m_returns = 0;
-		for(int i = 0; i < 5; ++i)
-			m_retNum[i] = 0;
+			m_returns = 0;
+			for(int i = 0; i < 5; ++i)
+				m_retNum[i] = 0;
+		}
+	} catch(const std::exception& ex) {
+		std::cerr << "Fail in close: " << ex.what() << "\n";
 	}
 }
 
@@ -310,7 +315,11 @@ void PCWriter::addPoint(const liblas::Point& pt) {
 	if(z < m_outBounds[4]) m_outBounds[4] = z;
 	if(z > m_outBounds[5]) m_outBounds[5] = z;
 
-	m_writer->WritePoint(pt);
+	try {
+		m_writer->WritePoint(pt);
+	} catch(const std::exception& ex) {
+		std::cerr << "Fail in addPoint: " << ex.what() << "\n";
+	}
 }
 
 size_t PCWriter::count() const {
