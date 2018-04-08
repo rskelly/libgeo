@@ -10,6 +10,7 @@
 using namespace geo::pc;
 
 char* MemGrid::data() {
+	// Return data pointer either from the mapped set or the in-memory set.
 	return m_mem == nullptr ? (char*) m_mapped.data() : m_mem;
 }
 
@@ -40,127 +41,89 @@ void MemGrid::resize(size_t size) {
 	m_totalLength = size;
 }
 
-void MemGrid::writePoint(size_t idx, float x, float y, float z, float intensity, float angle, int cls, int retNum, int numRets, int edge) {
+void MemGrid::writePoint(size_t idx, const geo::pc::Point& pt) { //float x, float y, float z, float intensity, float angle, int cls, int retNum, int numRets, int edge) {
 
 	size_t offset;
-	bool newLine;
 
 	if(m_map.find(idx) != m_map.end()) {
+		// If the index is in the map, find the offset.
 		offset = m_map[idx];
-		newLine = false;
 	} else {
-		if(!m_finalized.empty()) {
-			offset = m_finalized.front();
-			m_finalized.pop_front();
-		} else {
-			offset = m_currentLine++;
-		}
-		m_map[idx] = offset;
-		newLine = true;
+		// The offset is equal to the index * the line length.
+		offset = m_map[idx] = idx;
+		m_countMap[idx] = 0;
 	}
+
+	// Repurpose the offset as a pointer into memory for the current line.
 	offset *= m_lineLength;
 
 	// If the new offset is too far, resize the data.
-	if(offset + m_lineLength >= m_totalLength)
-		resize(m_totalLength * 2);
+	if(offset + m_lineLength > m_totalLength)
+		resize((offset + m_lineLength) * 2);
 
-	MappedPoint mp = {x, y, z, intensity, angle, cls, retNum, numRets, edge};
-	MappedLine ml = {0, 0, 0};
+	size_t count = m_countMap[idx];
+	MappedLine ml = {idx, 0, count};
+	//MappedPoint mp = {x, y, z, intensity, angle, cls, retNum, numRets, edge};
 
-	if(newLine) {
+	// If the line is full, update the nextLine and grab a finalized one or start a new one.
+	if(count == m_lineCount) {
 
-		// There is no record in the points file; start one.
-		ml.idx = idx;
-		ml.count = 1;
-		ml.nextLine = 0;
+		// Update the nextline field and copy the line header to the previous line
+		ml.nextLine = m_currentLine++;
 		std::memcpy(data() + offset, &ml, sizeof(MappedLine));
-		std::memcpy(data() + offset + sizeof(MappedLine), &mp, sizeof(MappedPoint));
+
+		// If the new offset is too far, resize the memory.
+		if(ml.nextLine * m_lineLength + m_lineLength > m_totalLength)
+			resize((ml.nextLine * m_lineLength + m_lineLength) * 2);
+
+		// Create the new line.
+		m_map[idx] = ml.nextLine;
+		offset = ml.nextLine * m_lineLength;
+		ml.nextLine = 0;
+		ml.count = 1;
+		std::memcpy(data() + offset, &ml, sizeof(MappedLine));
+		std::memcpy(data() + offset + sizeof(MappedLine), &pt, sizeof(geo::pc::Point));
+		m_countMap[idx] = 1;
 		++m_pointCount;
 
 	} else {
 
-		// Retrieve the line header at the offset.
-		std::memcpy(&ml, data() + offset, sizeof(MappedLine));
+		// Add the point to the line.
+		ml.count++;
+		std::memcpy(data() + offset, &ml, sizeof(MappedLine));
+		offset += sizeof(MappedLine) + count * sizeof(geo::pc::Point);
+		std::memcpy(data() + offset, &pt, sizeof(geo::pc::Point));
+		++m_countMap[idx];
+		++m_pointCount;
 
-		// Find the last line for this cell.
-		while(ml.nextLine) {
-			offset = ml.nextLine * m_lineLength;
-			std::memcpy(&ml, data() + offset, sizeof(MappedLine));
-		}
-
-		// If the line is full, update the nextLine and grab a finalized one or start a new one.
-		if(ml.count == m_lineCount) {
-
-			if(!m_finalized.empty()) {
-				ml.nextLine = m_finalized.front();
-				m_finalized.pop_front();
-			} else {
-				ml.nextLine = m_currentLine++;
-			}
-
-			// If the new offset is too far, resize the memory.
-			if(ml.nextLine * m_lineLength + m_lineLength >= m_totalLength) {
-				resize(m_totalLength * 2);
-			}
-
-			// Copy the line header to the previous line
-			std::memcpy(data() + offset, &ml, sizeof(MappedLine));
-
-			// Create the new line.
-			offset = ml.nextLine * m_lineLength;
-			ml.nextLine = 0;
-			ml.count = 1;
-			std::memcpy(data() + offset, &ml, sizeof(MappedLine));
-			std::memcpy(data() + offset + sizeof(MappedLine), &mp, sizeof(MappedPoint));
-			++m_pointCount;
-
-		} else {
-
-			// Add the point toe the line.
-			size_t count = ml.count++;
-			std::memcpy(data() + offset, &ml, sizeof(MappedLine));
-			offset += sizeof(MappedLine) + count * sizeof(MappedPoint);
-			std::memcpy(data() + offset, &mp, sizeof(MappedPoint));
-			++m_pointCount;
-
-		}
 	}
+
 }
 
 void MemGrid::finalize(size_t idx) {
-	size_t offset = m_map[idx];
-	m_finalized.push_back(offset);
-	MappedLine ml = {0, 0, 0};
-	std::memcpy(&ml, data() + offset * m_lineLength, sizeof(MappedLine));
-	while(ml.nextLine) {
-		m_finalized.push_back(ml.nextLine);
-		std::memcpy(&ml, data() + ml.nextLine * m_lineLength, sizeof(MappedLine));
-	}
 	m_map.erase(idx);
+	m_countMap.erase(idx);
 }
 
 size_t MemGrid::readPoints(size_t idx, std::vector<geo::pc::Point>& pts, bool final) {
 	if(!hasUnread(idx))
 		return 0; //g_runerr("No unread pixel for that index.");
-	size_t offset = m_map[idx] * m_lineLength;
+	size_t offset = idx * m_lineLength;
 	size_t count = 0;
 	MappedLine ml;
-	MappedPoint mp;
+	std::vector<geo::pc::Point> ptbuf(m_lineCount);
+	std::vector<char> buf(m_lineLength);
 	do {
-		char* buf = data() + offset;
-		std::memcpy(&ml, buf, sizeof(MappedLine));
-		buf += sizeof(MappedLine);
-		for(size_t i = 0; i < ml.count; ++i) {
-			std::memcpy(&mp, buf, sizeof(MappedPoint));
-			pts.emplace_back(mp.x, mp.y, mp.z, mp.intensity, mp.angle, mp.cls, mp.retNum, mp.numRets, mp.edge);
-			buf += sizeof(MappedPoint);
-			++count;
-		}
+		std::memcpy(buf.data(), data() + offset, m_lineLength);
+		std::memcpy(&ml, buf.data(), sizeof(MappedLine));
+		std::memcpy(ptbuf.data(), buf.data() + sizeof(MappedLine), sizeof(geo::pc::Point) * m_lineCount);
+		pts.insert(pts.end(), ptbuf.begin(), ptbuf.begin() + ml.count);
 		offset = ml.nextLine * m_lineLength;
 	} while(ml.nextLine);
-	if(final)
+	if(final) {
 		finalize(idx);
-	m_pointCount -= count;
+		m_pointCount -= count;
+	}
 	return count;
 }
 
@@ -191,13 +154,13 @@ void MemGrid::init(size_t cellCount, size_t memLimit) {
  * @param cellCount An initial estimate of the number of rows.
  */
 void MemGrid::init(const std::string& mapFile, size_t cellCount, size_t memLimit) {
-	m_lineCount = (sysconf(_SC_PAGESIZE) - sizeof(MappedLine)) / sizeof(MappedPoint);
+	m_lineLength = sysconf(_SC_PAGESIZE); //sizeof(MappedLine) + sizeof(MappedPoint) * m_lineCount;
+	m_lineCount = (m_lineLength - sizeof(MappedLine)) / sizeof(geo::pc::Point); // TODO: Compute expected point count for each index to minimize jumping.
 	m_cellCount = cellCount;
-	m_lineLength = sizeof(MappedLine) + sizeof(MappedPoint) * m_lineCount;
 	m_totalLength = cellCount * m_lineLength;
 	m_mapFile = mapFile;
 	m_memLimit = std::max((size_t) 0, memLimit);
-
+	m_currentLine = m_cellCount + 1;
 	g_trace("MemGrid.init: cellCount: " << cellCount << "; lineCount: " << m_lineCount << "; lineLength: " << m_lineLength);
 
 	resize(m_totalLength);
@@ -215,8 +178,14 @@ const std::unordered_map<size_t, size_t>& MemGrid::indexMap() const {
 	return m_map;
 }
 
+/*
 void MemGrid::add(size_t idx, double x, double y, double z, double intensity, double angle, int cls, int retNum, int numRets, int edge) {
 	writePoint(idx, x, y, z, intensity, angle, cls, retNum, numRets, edge);
+}
+*/
+
+void MemGrid::add(size_t idx, const geo::pc::Point& pt) {
+	writePoint(idx, pt);//pt.x(), pt.y(), pt.z(), pt.intensity(), pt.scanAngle(), pt.classId(), pt.returnNum(), pt.numReturns(), pt.isEdge());
 }
 
 size_t MemGrid::get(size_t idx, std::vector<geo::pc::Point>& out, bool final) {

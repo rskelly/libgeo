@@ -26,6 +26,7 @@ typedef struct {
 /**
  * Struct used to store point in the point cache file.
  */
+/*
 typedef struct {
 	float x;
 	float y;
@@ -37,7 +38,7 @@ typedef struct {
 	int numRets;
 	int edge;
 } MappedPoint;
-
+*/
 class MemGrid {
 private:
 	char* m_mem;
@@ -51,7 +52,8 @@ private:
 	size_t m_memLimit;
 	std::string m_mapFile;
 	std::list<size_t> m_finalized; 				// The line offsets of finalized cells available for re-use.
-	std::unordered_map<size_t, size_t> m_map;   // Maps cell indices to line indices.
+	std::unordered_map<size_t, size_t> m_map;   // Maps cell indices to current line indices.
+	std::unordered_map<size_t, size_t> m_countMap; // The number of points in the current row.
 
 	/**
 	 * Resize the mapped file.
@@ -72,7 +74,7 @@ private:
 	 * @param numRets The number of returns.
 	 * @param edge Whether the point is classified as an edge (1) or not (0).
 	 */
-	void writePoint(size_t idx, float x, float y, float z, float intensity, float angle, int cls, int retNum, int numRets, int edge);
+	void writePoint(size_t idx, const geo::pc::Point& pt); //float x, float y, float z, float intensity, float angle, int cls, int retNum, int numRets, int edge);
 
 	/**
 	 * Finalize the cell with the given index. The mapped slot is marked for re-use.
@@ -105,12 +107,14 @@ public:
 	/**
 	 * Construct a MemGrid with the given number of cells.
 	 * @param cellCount The number of cells to start with.
+	 * @param memLimit The amount of memory (bytes) to reserve upfront.
 	 */
 	MemGrid(size_t cellCount, size_t memLimit);
 
 	/**
 	 * Initialize a MemGrid with the given number of cells.
 	 * @param cellCount The number of cells to start with.
+	 * @param memLimit The amount of memory (bytes) to reserve upfront.
 	 */
 	void init(size_t cellCount, size_t memLimit);
 
@@ -119,6 +123,7 @@ public:
 	 * Initialize a MemGrid with the given number of cells.
 	 * @param mapFile The filename of the map file, if there is one. Empty string otherwise.
 	 * @param cellCount The number of cells to start with.
+	 * @param memLimit The amount of memory (bytes) to reserve upfront.
 	 */
 	void init(const std::string& mapFile, size_t cellCount, size_t memLimit);
 
@@ -143,7 +148,7 @@ public:
 
 	/**
 	 * Add a point.
-	 * @param idx The cell index to write the point to.
+	 * @param idx The cell index to write the point to.  This should help with spatial locality, like z-order, etc.
 	 * @param x The x coordinate.
 	 * @param y The y coordinate.
 	 * @param z The z coordinate.
@@ -154,7 +159,12 @@ public:
 	 * @param numRets The number of returns.
 	 * @param edge Whether the point is classified as an edge (1) or not (0).
 	 */
-	void add(size_t idx, double x, double y, double z, double intensity, double angle, int cls, int retNum, int numRets, int edge);
+	//void add(size_t idx, double x, double y, double z, double intensity, double angle, int cls, int retNum, int numRets, int edge);
+
+	void add(size_t idx, const geo::pc::Point& pt);
+
+	//void add(const std::vector<geo::pc::Point>& pts);
+
 
 	/**
 	 * Get the points for the given cell index into the vector. Finalize

@@ -156,25 +156,21 @@ bool PCFile::intersects(double* b) const {
 }
 
 bool PCFile::next(geo::pc::Point& pt) {
-	if(!isReaderOpen() && openReader()) {
-		if(m_reader->ReadNextPoint()) {
-			pt.setPoint(m_reader->GetPoint());
-			return true;
-		} else if(!next(pt)) {
-			return false;
-		}
+	if((isReaderOpen() && m_reader->ReadNextPoint()) || openReader()) {
+		pt.setPoint(m_reader->GetPoint());
+		return true;
 	}
 	return false;
 }
+
 bool PCFile::openReader() {
-	if(isReaderOpen())
-		return true;
-	if(++m_index < m_filenames.size()) {
-		closeReader();
+	closeReader();
+	if(m_index < m_filenames.size()) {
 		m_instr = new std::ifstream(m_filenames[m_index], std::ios::binary | std::ios::in);
 		liblas::ReaderFactory rf;
 		m_reader = new liblas::Reader(rf.CreateWithStream(*m_instr));
-		return true;
+		++m_index;
+		return m_reader->ReadNextPoint();
 	}
 	return false;
 }

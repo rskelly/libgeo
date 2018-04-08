@@ -148,8 +148,9 @@ void PCPointFilter::printHelp(std::ostream& str) {
 		<< " -p:mina <angle>      The minimum scan angle.\n"
 		<< " -p:maxa <angle>      The maximum scan angle.\n"
 		<< " -p:a    <min,max>    The minimum and maximum scan angle threshold.\n"
-		<< " -p:f                 First returns only\n"
-		<< " -p:l                 Last returns only\n";
+		<< " -p:f                 First returns only.\n"
+		<< " -p:l                 Last returns only.\n"
+		<< " -p:e                 Drop edges.\n";
 }
 
 bool PCPointFilter::parseArgs(int& idx, char** argv) {
@@ -170,6 +171,9 @@ bool PCPointFilter::parseArgs(int& idx, char** argv) {
 	} else if(v == "-p:f") {
 		addKeepFirstFilter();
 		found = true;
+	} else if(v == "-p:e") {
+		addRejectEdgeFilter();
+		found = true;
 	} else if(v == "-p:minz") {
 		double minZ = atof(argv[++idx]);
 		addZRangeFilter(minZ, DBL_MAX);
@@ -178,7 +182,7 @@ bool PCPointFilter::parseArgs(int& idx, char** argv) {
 		double maxZ = atof(argv[++idx]);
 		addZRangeFilter(-DBL_MAX, maxZ);
 		found = true;
-	} else if(v == "-p:a") {
+	} else if(v == "-p:z") {
 		std::string arg = argv[++idx];
 		std::vector<std::string> parts;
 		Util::splitString(std::back_inserter(parts), arg);
@@ -249,7 +253,7 @@ void PCPointFilter::addZRangeFilter(double min, double max) {
 }
 
 void PCPointFilter::addScanAngleFilter(double min, double max) {
-	filters.push_back(new PointIntensityFilter(min, max));
+	filters.push_back(new PointScanAngleFilter(min, max));
 }
 
 void PCPointFilter::addKeepLastFilter() {
