@@ -192,33 +192,14 @@ void rwrite(std::queue<RWrite>* writeQ, std::vector<std::unique_ptr<MemRaster> >
 }
 
 Rasterizer::Rasterizer(const std::vector<std::string> filenames) :
-	m_filter(nullptr) {
-	for(const std::string& filename : filenames)
-		m_files.emplace_back(filename);
+	m_filter(nullptr),
+	m_files(filenames) {
+	//for(const std::string& filename : filenames)
+	//	m_files.emplace_back(filename);
 }
 
 const std::unordered_map<std::string, std::string>& Rasterizer::availableComputers() {
 	return computerNames;
-}
-
-double Rasterizer::density(double resolution, double radius) {
-	size_t count = 0;
-	double w, h, cells, sum = 0;
-	double fBounds[6];
-	for(PCFile& f: m_files) {
-		f.init();
-		f.fileBounds(fBounds);
-		w = fBounds[2] - fBounds[0];
-		h = fBounds[3] - fBounds[1];
-		cells = (w * h) / (resolution * resolution);
-		if(cells > 0) {
-			sum += f.pointCount() / cells;
-			++count;
-		}
-	}
-
-	double cell = radius > 0 ? (M_PI * radius * radius) / (resolution * resolution) : 1;
-	return (sum / count) * 1.5 * cell;
 }
 
 void Rasterizer::setFilter(PCPointFilter* filter) {
@@ -233,7 +214,8 @@ Rasterizer::~Rasterizer() {
 }
 
 void Rasterizer::rasterize(const std::string& filename, const std::vector<std::string>& _types,
-		double resX, double resY, double easting, double northing, double radius, int srid, int memory, bool useHeader) {
+		double resX, double resY, double easting, double northing, double radius,
+		int srid, int memory, bool useHeader) {
 
 	if(std::isnan(resX) || std::isnan(resY))
 		g_runerr("Resolution not valid");
@@ -262,7 +244,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	g_trace("Preparing raster")
 	GridProps props;
 	props.setTrans(easting, resX, northing, resY);
-	props.setSize(cols, rows);
+	props.setSize(pc.cols(), pc.rows());
 	props.setNoData(NODATA);
 	props.setDataType(DataType::Float32);
 	props.setSrid(srid);
@@ -277,23 +259,27 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	for(int i= 1; i < bandCount; ++i)
 		rasters[i]->fillFloat(NODATA);
 
-	geo::pc::Point& pt;
-	size_t index;
+	geo::pc::Point pt;
+	std::vector<size_t> indices;
 	std::vector<size_t> finals;
-	std::unordered_map<size_t, std::vector<RCell> > cells;
+	std::unordered_map<size_t, RCell> cells;
+	std::vector<double> output;
 
 	while(pc.next(pt, finals)) {
+		double x, y;
+		int col, row;
+		indices.clear();
+		pc.getIndices(pt, indices);
+		for(size_t idx : indices)
+			cells[idx].values.push_back(pt);
 		for(size_t idx : finals) {
-			for(RCell& cell : cells[idx]) {
-				size_t col, row;
-				double x, y;
-				pc.fromIndex(idx, col, row);
-				pc.fromIndex(idx, x, y);
-				RFinalize rf(col, row, x, y, radius, cell, filter, computers);
-				std::vector<double> output;
-				rf.finalize(output);
-				
-			}
+			const RCell& cell = cells[idx];
+			pc.fromIndex(idx, col, row);
+			pc.fromIndex(idx, x, y);
+			RFinalize rf(col, row, x, y, radius, cell, m_filter, &computers);
+			rf.finalize(output);
+			cells.erase(idx);
+			output.clear();
 		}
 
 	}

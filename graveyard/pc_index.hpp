@@ -36,13 +36,14 @@ private:
 	size_t m_readIdx;								///< The index of the current point.
 	size_t m_fileIdx;								///< The index of the current file.
 
-	size_t m_rows;									///< The number of cells in the finalization grid.
-	size_t m_cols;									///< The number of rows in the finalization grid.
+	int m_rows;									///< The number of cells in the finalization grid.
+	int m_cols;									///< The number of rows in the finalization grid.
 	double m_height;								///< The height of the point cloud (y).
 	double m_width;									///< The width of the point cloud (x).
 	double m_resX;									///< The size of a finalization cell.
 	double m_resY;
 	double m_bounds[4]; // minx, miny, maxx, maxy	///< The bounds of the point cloud.
+	int m_offset;
 
 	/**
 	 * Delete and close the reader and file.
@@ -131,22 +132,22 @@ private:
 
 public:
 
-	PointCloud(std::vector<std::string>& files) :
+	PointCloud(const std::vector<std::string>& files) :
 		m_files(files),
 		m_reader(nullptr),
 		m_input(nullptr),
 		m_readIdx(0), m_fileIdx(0),
-		m_final(0),
 		m_rows(0), m_cols(0),
 		m_height(0), m_width(0),
-		m_resX(0), resY(0) {
+		m_resX(0), m_resY(0),
+		m_offset(0) {
 	}
 
-	size_t cols() const {
+	int cols() const {
 		return m_cols;
 	}
 
-	size_t rows() const {
+	int rows() const {
 		return m_rows;
 	}
 
@@ -161,7 +162,8 @@ public:
 
 		m_resX = resX;
 		m_resY = resY;
-		m_bounds = {G_DBL_MAX_POS, G_DBL_MAX_POS, G_DBL_MAX_NEG, G_DBL_MAX_NEG};
+		m_bounds[0] = m_bounds[1] = G_DBL_MAX_POS;
+		m_bounds[2] = m_bounds[3] = G_DBL_MAX_NEG;
 
 		for(const std::string& filename : m_files) {
 			std::ifstream str(filename, std::ios::binary|std::ios::in);
@@ -171,14 +173,14 @@ public:
 				m_bounds[0] = std::min(hdr.GetMinX(), m_bounds[0]);
 				m_bounds[1] = std::min(hdr.GetMinY(), m_bounds[1]);
 				m_bounds[2] = std::max(hdr.GetMaxX(), m_bounds[2]);
-				m_bounds[3] = std::max(hdr.GetMaxX(), m_bounds[3]);
+				m_bounds[3] = std::max(hdr.GetMaxY(), m_bounds[3]);
 			} else {
 				while(rdr.ReadNextPoint()) {
 					const liblas::Point& pt = rdr.GetPoint();
 					m_bounds[0] = std::min(pt.GetX(), m_bounds[0]);
 					m_bounds[1] = std::min(pt.GetY(), m_bounds[1]);
 					m_bounds[2] = std::max(pt.GetX(), m_bounds[2]);
-					m_bounds[3] = std::max(pt.GetX(), m_bounds[3]);
+					m_bounds[3] = std::max(pt.GetY(), m_bounds[3]);
 				}
 			}
 		}
@@ -187,10 +189,11 @@ public:
 
 		m_width = m_bounds[2] - m_bounds[0];
 		m_height = m_bounds[3] - m_bounds[1];
-		m_cols = (size_t) std::ceil(m_width / std::abs(m_resX));
-		m_rows = (size_t) std::ceil(m_height / std::abs(m_resY));
+		m_cols = (int) std::ceil(m_width / std::abs(m_resX));
+		m_rows = (int) std::ceil(m_height / std::abs(m_resY));
 
-		size_t offset = (size_t) std::ceil(radius / std::max(std::abs(m_resX), std::abs(m_resY)));
+		m_offset = (int) std::ceil(radius / std::max(std::abs(m_resX), std::abs(m_resY)));
+
 		size_t lidx = 0;
 		std::unordered_map<size_t, size_t> indices;
 		for(const std::string& filename : m_files) {
@@ -198,10 +201,10 @@ public:
 			liblas::Reader rdr = rf.CreateWithStream(str);
 			while(rdr.ReadNextPoint()) {
 				const liblas::Point& pt = rdr.GetPoint();
-				size_t col = (size_t) (pt.GetX() - m_bounds[0]) / m_width;
-				size_t row = (size_t) (pt.GetY() - m_bounds[1]) / m_height;
-				for(size_t r = std:max(0, row - offset); r < std::min(m_rows, row + offset + 1); ++r) {
-					for(size_t c = std::max(0, col - offset); c < std::min(m_cols, col + offset + 1); ++c)
+				int col = (int) ((pt.GetX() - m_bounds[0]) / m_width * m_cols);
+				int row = (int) ((pt.GetY() - m_bounds[1]) / m_height * m_rows);
+				for(int r = std::max(0, row - m_offset); r < std::min((int) m_rows, row + m_offset + 1); ++r) {
+					for(int c = std::max(0, col - m_offset); c < std::min((int) m_cols, col + m_offset + 1); ++c)
 						indices[toIndex(col, row)] = lidx;
 				}
 				++lidx;
@@ -216,43 +219,44 @@ public:
 
 	}
 
-	void fromIndex(size_t idx, size_t& col, size_t& row) {
+	void fromIndex(size_t idx, int& col, int& row) {
 		col = idx & 0xffffffff;
 		row = (idx >> 32) & 0xffffffff;
 	}
 
 	void fromIndex(size_t idx, double& x, double& y) {
-		size_t col = idx & 0xffffffff;
-		size_t row = (idx >> 32) & 0xffffffff;
-		x = m_bounds[0] + resX * col + resX * 0.5;
-		y = m_bounds[1] + resY * row + resY * 0.5;
+		int col = idx & 0xffffffff;
+		int row = (idx >> 32) & 0xffffffff;
+		x = m_bounds[0] + m_resX * col + m_resX * 0.5;
+		y = m_bounds[1] + m_resY * row + m_resY * 0.5;
 	}
 
-	size_t toIndex(size_t col, size_t row) const {
-		return (row << 32)|col;
+	size_t toIndex(int col, int row) const {
+		return (((size_t) row) << 32)|col;
 	}
 
 	size_t toIndex(const geo::pc::Point& pt) const {
-		return  toIndex(toCol(lpt.GetX()), toRow(lpt.GetY()));
+		return  toIndex(toCol(pt), toRow(pt));
 	}
 
-	size_t toCol(const geo::pc::Point& pt) const {
-		return (size_t) (pt.GetX() - m_bounds[0]) / m_width;
+	int toCol(const geo::pc::Point& pt) const {
+		return (int) (pt.x() - m_bounds[0]) / m_width;
 	}
 
-	size_t toRow(const geo::pc::Point& pt) const {
-		return (size_t) (pt.GetY() - m_bounds[1]) / m_height;
+	int toRow(const geo::pc::Point& pt) const {
+		return (int) (pt.y() - m_bounds[1]) / m_height;
 	}
 
 	int getIndices(const geo::pc::Point& pt, std::vector<size_t>& indices) {
-		double px = pt.GetX();
-		double py = pt.GetY();
-		size_t col = (size_t) (px - m_bounds[0]) / m_width;
-		size_t row = (size_t) (py - m_bounds[1]) / m_height;
+		double px = pt.x();
+		double py = pt.y();
+		int col = (int) ((px - m_bounds[0]) / m_width * m_cols);
+		int row = (int) ((py - m_bounds[1]) / m_height * m_rows);
 		size_t count = 0;
-		for(size_t r = std:max(0, row - offset); r < std::min(m_rows, row + offset + 1); ++r) {
-			for(size_t c = std::max(0, col - offset); c < std::min(m_cols, col + offset + 1); ++c) {
-				indices.push_back(toIndex(c, r));
+		for(int r = std::max(0, row - m_offset); r < std::min((int) m_rows, row + m_offset + 1); ++r) {
+			for(int c = std::max(0, col - m_offset); c < std::min((int) m_cols, col + m_offset + 1); ++c) {
+				size_t idx = toIndex(c, r);
+				indices.push_back(idx);
 				++count;
 			}
 		}
@@ -272,9 +276,11 @@ public:
 	 * this point. Use getFinal() to get its index.
 	 */
 	bool next(geo::pc::Point& pt, std::vector<size_t>& final) {
-		if(!m_reader && !m_reader->ReadNextPoint() && !loadNext())
+		if((!m_reader || !m_reader->ReadNextPoint()) && !loadNext())
 			return false;
-		final.assign(m_indices[m_readIdx]);
+		final.clear();
+		if(m_indices.find(m_readIdx) != m_indices.end())
+			final.assign(m_indices[m_readIdx].begin(), m_indices[m_readIdx].end());
 		pt.setPoint(m_reader->GetPoint());
 		++m_readIdx;
 		return true;
