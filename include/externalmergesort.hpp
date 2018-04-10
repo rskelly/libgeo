@@ -23,9 +23,9 @@
 using namespace geo::util;
 using namespace geo::pc;
 
-size_t interleave(const geo::pc::Point& a) {
-	int ax = (int) (a.x() / 100.0);
-	int ay = (int) (a.y() / 100.0);
+size_t interleave(double x, double y, double scale) {
+	size_t ax = (size_t) std::round(x / scale);
+	size_t ay = (size_t) std::round(y / scale);
 	size_t out = 0;
 	for(size_t i = 0; i < sizeof(int) * 8; ++i) {
 		out |= ((ax >> i) & 1) << (i * 2);
@@ -34,12 +34,23 @@ size_t interleave(const geo::pc::Point& a) {
 	return out;
 }
 
-bool pointSort(const geo::pc::Point& a, const geo::pc::Point& b) {
-	return interleave(a) < interleave(b);
+void uninterleave(size_t index, double scale, double& x, double& y) {
+	size_t col = 0;
+	size_t row = 0;
+	for(size_t i = 0; i < sizeof(size_t) * 8; i += 2) {
+		col |= ((index >> i) & 1) << (i >> 1);
+		row |= ((index >> (i + 1)) & 1) << (i >> 1);
+	}
+	x = col * scale;
+	y = row * scale;
 }
 
-void sortPoints(std::vector<geo::pc::Point>* pts, size_t begin, size_t end) {
-	std::sort(pts->begin() + begin, pts->begin() + end, pointSort);
+bool pointSort(const geo::pc::Point& a, const geo::pc::Point& b, double scale) {
+	return interleave(a.x(), a.y(), scale) < interleave(b.x(), b.y(), scale);
+}
+
+void sortPoints(std::vector<geo::pc::Point>* pts, size_t begin, size_t end, double scale) {
+	std::sort(pts->begin() + begin, pts->begin() + end, std::bind(pointSort, std::placeholders::_1, std::placeholders::_2, scale));
 }
 
 /**
@@ -175,6 +186,8 @@ private:
 	size_t m_position;
 	size_t m_index;
 
+	double m_scale;
+
 	std::string nextChunkFile() {
 		return Util::pathJoin(m_tmpDir, "chunk_" + std::to_string(++m_chunk) + ".tmp");
 	}
@@ -204,7 +217,7 @@ private:
 				if(a && !minPt) {
 					minPt = a;
 					source = &ps;
-				} else if(a && minPt && pointSort(*a, *minPt)) {
+				} else if(a && minPt && pointSort(*a, *minPt, m_scale)) {
 					minPt = a;
 					source = &ps;
 				}
@@ -258,14 +271,14 @@ private:
 					for(int i = 0; i < size / m_chunkSize; ++i) {
 						size_t begin = i * m_chunkSize;
 						size_t end = std::min(size, (i + 1) * m_chunkSize);
-						threads.emplace_back(sortPoints, &pts, begin, end);
+						threads.emplace_back(sortPoints, &pts, begin, end, m_scale);
 					}
 				} else {
 					break;
 				}
 				for(std::thread& t : threads)
 					t.join();
-				for(int i = 0; i < size / m_chunkSize; ++i) {
+				for(int i = 0; i <= size / m_chunkSize; ++i) {
 					size_t begin = i * m_chunkSize;
 					size_t end = std::min(size, (i + 1) * m_chunkSize);
 					// Create and open an output stream.
@@ -313,7 +326,7 @@ private:
 
 public:
 	ExternalMergeSort(const std::string& outputFile, const std::vector<std::string>& inputFiles,
-			const std::string tmpDir, int chunkSize, int numChunks) :
+			const std::string tmpDir, int chunkSize = 1024 * 1024, int numChunks = 8) :
 		m_outputFile(outputFile),
 		m_inputFiles(inputFiles),
 		m_tmpDir(tmpDir),
@@ -324,7 +337,25 @@ public:
 		m_instr(nullptr),
 		m_count(0),
 		m_position(0),
-		m_index(0) {
+		m_index(0),
+
+		m_scale(2) {
+	}
+
+	size_t index(const geo::pc::Point& pt) const {
+		return interleave(pt.x(), pt.y(), m_scale);
+	}
+
+	size_t index(double x, double y) const {
+		return interleave(x, y, m_scale);
+	}
+
+	double scale() const {
+		return m_scale;
+	}
+
+	void position(size_t index, double& x, double& y) const {
+		uninterleave(index, m_scale, x, y);
 	}
 
 	void sort(bool force) {

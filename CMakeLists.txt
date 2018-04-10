@@ -83,8 +83,8 @@ add_library (georaster SHARED src/geo.cpp src/raster.cpp src/rast/polygonize.cpp
 target_link_libraries (georaster geoutil geodb Threads::Threads ${GEOS_LIBRARY})
 
 file(GLOB PC_COMPUTERS src/pc/computers/*.cpp)
-add_library (geopc SHARED src/geo.cpp src/pointcloud.cpp src/pc/normalizer.cpp src/pc/rasterizer_memgrid.cpp 
-	src/pc/filter.cpp src/pc/memgrid_file.cpp ${PC_COMPUTERS})
+add_library (geopc SHARED src/geo.cpp src/pointcloud.cpp src/pc/normalizer.cpp src/pc/rasterizer_extsort.cpp 
+	src/pc/filter.cpp ${PC_COMPUTERS})
 target_link_libraries (geopc geoutil georaster geoann ${LIBLAS_LIBRARY} ${CGAL_LIBRARY})
 
 add_library (geoann SHARED src/geo.cpp ann/src/ANN.cpp ann/src/brute.cpp ann/src/kd_tree.cpp ann/src/kd_util.cpp 
