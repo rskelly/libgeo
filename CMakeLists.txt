@@ -84,7 +84,7 @@ target_link_libraries (georaster geoutil geodb Threads::Threads ${GEOS_LIBRARY})
 
 file(GLOB PC_COMPUTERS src/pc/computers/*.cpp)
 add_library (geopc SHARED src/geo.cpp src/pointcloud.cpp src/pc/normalizer.cpp src/pc/rasterizer_memgrid.cpp 
-	src/pc/filter.cpp src/pc/memgrid.cpp ${PC_COMPUTERS})
+	src/pc/filter.cpp src/pc/memgrid_file.cpp ${PC_COMPUTERS})
 target_link_libraries (geopc geoutil georaster geoann ${LIBLAS_LIBRARY} ${CGAL_LIBRARY})
 
 add_library (geoann SHARED src/geo.cpp ann/src/ANN.cpp ann/src/brute.cpp ann/src/kd_tree.cpp ann/src/kd_util.cpp 
@@ -127,6 +127,9 @@ target_link_libraries (datumshift geoutil georaster ${GDAL_LIBRARY} ${PROJ_LIBRA
 
 add_executable (sbet2csv src/apps/sbet2csv.cpp)
 target_link_libraries (sbet2csv geoutil ${PROJ_LIBRARY})
+
+add_executable (extmergesort src/apps/externalmergesort.cpp)
+target_link_libraries (extmergesort geoutil geopc ${LIBLAS_LIBRARY})
 
 
 install(TARGETS pc2grid pc2tile geopc georaster geoinfo geoutil geoann RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 

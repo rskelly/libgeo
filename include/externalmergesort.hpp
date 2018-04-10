@@ -12,6 +12,7 @@
 #include <string>
 #include <fstream>
 #include <cstdio>
+#include <thread>
 
 #include <liblas/liblas.hpp>
 
@@ -37,13 +38,30 @@ bool pointSort(const geo::pc::Point& a, const geo::pc::Point& b) {
 	return interleave(a) < interleave(b);
 }
 
+void sortPoints(std::vector<geo::pc::Point>* pts, size_t begin, size_t end) {
+	std::sort(pts->begin() + begin, pts->begin() + end, pointSort);
+}
+
+/**
+ * Abstract class for loading points and returning them as
+ * vectors.
+ */
 class PointLoader {
+public:
+	virtual int getPoints(std::vector<geo::pc::Point>& pts, int count) = 0;
+	virtual ~PointLoader() {}
+};
+
+/**
+ * Implementation of PointLoader to load LAS files.
+ */
+class LASPointLoader : public PointLoader {
 private:
 	liblas::Reader* m_rdr;
 	std::ifstream* m_instr;
 
 public:
-	PointLoader(const std::string& filename) {
+	LASPointLoader(const std::string& filename) {
 		liblas::ReaderFactory rf;
 		m_instr = new std::ifstream(filename, std::ios::binary|std::ios::in);
 		m_rdr = new liblas::Reader(rf.CreateWithStream(*m_instr));
@@ -59,46 +77,60 @@ public:
 		return i;
 	}
 
-	~PointLoader() {
+	~LASPointLoader() {
 		delete m_rdr;
 		delete m_instr;
 	}
 };
 
+/**
+ * Loads a cache file and returns its points one by one.
+ */
 class PointStream {
 private:
-	std::list<geo::pc::Point> m_pts;
-	std::vector<geo::pc::Point> m_tmp;
+	std::vector<geo::pc::Point> m_pts;
 	std::string m_filename;
 	std::ifstream* m_instr;
 	size_t m_size;
 	size_t m_current;
 	size_t m_chunkSize;
+	size_t m_ptr;
 
 	bool loadNext() {
 		if(!m_instr) {
+			// If no stream is active, start one.
 			m_instr = new std::ifstream(m_filename, std::ios::binary|std::ios::in);
 			m_instr->read((char*) &m_size, sizeof(size_t));
+			// Move the pointer ahead past the count element.
 			m_current += sizeof(size_t);
 		}
+		// If past the end of the stream, quit.
 		if(m_current >= m_size)
 			return false;
+		// Get chunk size or number of remaining elements and read into pts.
 		size_t size = m_current + m_chunkSize > m_size ? m_size - m_current : m_chunkSize;
-		m_tmp.resize(size);
-		m_instr->read((char*) m_tmp.data(), size * sizeof(geo::pc::Point));
-		m_pts.assign(m_tmp.begin(), m_tmp.end());
+		m_pts.resize(size);
+		m_instr->read((char*) m_pts.data(), size * sizeof(geo::pc::Point));
+		// Advance the pointer.
 		m_current += size;
+		// Reset the current pointer.
+		m_ptr = 0;
 		return true;
 	}
 
 public:
 
-	PointStream(const std::string& filename) :
+	PointStream(const std::string& filename, size_t chunkSize) :
 		m_filename(filename),
 		m_instr(nullptr),
 		m_size(0),
 		m_current(0),
-		m_chunkSize(1024 * 1024) {
+		m_chunkSize(chunkSize),
+		m_ptr(0) {
+	}
+
+	bool empty() {
+		return m_current >= m_size;
 	}
 
 	~PointStream() {
@@ -106,18 +138,20 @@ public:
 	}
 
 	geo::pc::Point* current() {
-		if(m_pts.empty() && !loadNext())
+		if((m_pts.empty() || m_ptr >= m_pts.size())  && !loadNext())
 			return nullptr;
-		return &(m_pts.front());
+		return &(m_pts[m_ptr]);
 	}
 
 	void pop() {
-		if(!m_pts.empty())
-			m_pts.pop_front();
+		++m_ptr;
 	}
 
 };
 
+/**
+ * Sorts point clouds and provides methods for returning the sorted points.
+ */
 class ExternalMergeSort {
 private:
 	std::vector<std::string> m_inputFiles;
@@ -146,28 +180,30 @@ private:
 		outStream.seekp(sizeof(size_t), std::ios::beg);
 
 		// Create a point stream for each input chunk file.
-		std::vector<PointStream> inStreams;
+		std::list<PointStream> inStreams;
 		for(const std::string& file : chunkFiles)
-			inStreams.emplace_back(file);
+			inStreams.emplace_back(file, m_chunkSize);
 
 		size_t minIdx;
 		size_t count = 0;
 		geo::pc::Point* minPt;
 		std::vector<geo::pc::Point> buffer;
+		PointStream* source;
 		buffer.reserve(m_chunkSize);
 		while(true) {
 			minPt = nullptr;
-			for(size_t i = 0; i < inStreams.size(); ++i) {
-				geo::pc::Point* a = inStreams[i].current();
+			for(PointStream& ps : inStreams) {
+				geo::pc::Point* a = ps.current();
 				if(a && !minPt) {
 					minPt = a;
-					inStreams[i].pop();
+					source = &ps;
 				} else if(a && minPt && pointSort(*a, *minPt)) {
 					minPt = a;
-					inStreams[i].pop();
+					source = &ps;
 				}
 			}
 			if(minPt) {
+				source->pop();
 				// A point was found at the index. Remove it.
 				buffer.push_back(*minPt);
 				if(buffer.size() == m_chunkSize) {
@@ -200,24 +236,39 @@ private:
 	 * and write them to chunk files.
 	 */
 	void phase1() {
-		size_t size;
-		std::vector<geo::pc::Point> pts;
+		int threadCount = 8;
+		int size;
 		// Iterate over the list of source files.
 		for(const std::string& inputFile : m_inputFiles) {
-			PointLoader ldr(inputFile);
-			// Load a section of the file into the vector.
-			while((size = ldr.getPoints(pts, m_chunkSize))) {
-				// Sort the points.
-				//std::sort(pts.begin(), pts.end(), pointSort);
-				// Create and open an output stream.
-				std::string chunkFile = nextChunkFile();
-				std::ofstream ostr(chunkFile, std::ios::binary|std::ios::out);
-				// Write the points to the output stream.
-				ostr.write((char*) &size, sizeof(size_t));
-				ostr.write((char*) pts.data(), pts.size() * sizeof(geo::pc::Point));
-				// Save the chunk file name.
-				m_chunkFiles.push_back(chunkFile);
-				pts.clear();
+			LASPointLoader ldr(inputFile);
+			while(true) {
+				std::list<std::thread> threads;
+				std::vector<geo::pc::Point> pts;
+				pts.reserve(threadCount * m_chunkSize);
+				if((size = ldr.getPoints(pts, threadCount * m_chunkSize))) {
+					for(int i = 0; i < size / m_chunkSize; ++i) {
+						size_t begin = i * m_chunkSize;
+						size_t end = std::min(size, (i + 1) * m_chunkSize);
+						threads.emplace_back(sortPoints, &pts, begin, end);
+					}
+				} else {
+					break;
+				}
+				for(std::thread& t : threads)
+					t.join();
+				for(int i = 0; i < size / m_chunkSize; ++i) {
+					size_t begin = i * m_chunkSize;
+					size_t end = std::min(size, (i + 1) * m_chunkSize);
+					// Create and open an output stream.
+					std::string chunkFile = nextChunkFile();
+					std::ofstream ostr(chunkFile, std::ios::binary|std::ios::out);
+					std::vector<geo::pc::Point> data(pts.begin() + begin, pts.begin() + end);
+					// Write the points to the output stream.
+					ostr.write((char*) &size, sizeof(size_t));
+					ostr.write((char*) data.data(), (end - begin) * sizeof(geo::pc::Point));
+					// Save the chunk file name.
+					m_chunkFiles.push_back(chunkFile);
+				}
 			}
 		}
 	}
