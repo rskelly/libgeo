@@ -566,10 +566,8 @@ geo::pc::Point::Point(double x, double y, double z, double intensity, double ang
 	m_z(z),
 	m_intensity(intensity),
 	m_angle(angle),
-	m_cls(cls),
-	m_returnNum(returnNum),
-	m_numReturns(numReturns),
-	m_isEdge(isEdge) {
+	m_clsEdge((((int) isEdge) << 8) | cls),
+	m_returns((numReturns << 8) | returnNum) {
 }
 
 geo::pc::Point::Point(const liblas::Point& pt) :
@@ -588,10 +586,8 @@ void geo::pc::Point::setPoint(const liblas::Point& pt) {
 	m_z = pt.GetZ();
 	m_intensity = pt.GetIntensity();
 	m_angle = pt.GetScanAngleRank();
-	m_cls = pt.GetClassification().GetClass();
-	m_returnNum = pt.GetReturnNumber();
-	m_numReturns = pt.GetNumberOfReturns();
-	m_isEdge = pt.GetFlightLineEdge();
+	m_clsEdge = (((int) pt.GetFlightLineEdge()) << 8) | pt.GetClassification().GetClass();
+	m_returns = (pt.GetNumberOfReturns() << 8) | pt.GetReturnNumber();
 }
 
 geo::pc::Point::Point(double x, double y, double z) :
@@ -608,14 +604,12 @@ geo::pc::Point::Point() :
 	m_z(0),
 	m_intensity(0),
 	m_angle(0),
-	m_cls(0),
-	m_returnNum(0),
-	m_numReturns(0),
-	m_isEdge(false) {
+	m_clsEdge(0),
+	m_returns(0) {
 }
 
 int geo::pc::Point::classId() const {
-	return m_cls;
+	return m_clsEdge & 0xf;
 }
 
 double geo::pc::Point::operator[](int idx) const {
@@ -653,23 +647,23 @@ double geo::pc::Point::scanAngle() const {
 }
 
 bool geo::pc::Point::isEdge() const {
-	return m_isEdge;
+	return m_clsEdge >> 8;
 }
 
 bool geo::pc::Point::isLast() const {
-	return m_returnNum == m_numReturns;
+	return returnNum() == numReturns();
 }
 
 bool geo::pc::Point::isFirst() const {
-	return m_returnNum == 1;
+	return returnNum() == 1;
 }
 
 int geo::pc::Point::returnNum() const {
-	return m_returnNum;
+	return m_returns & 0xf;
 }
 
 int geo::pc::Point::numReturns() const {
-	return m_numReturns;
+	return m_returns >> 8;
 }
 
 geo::pc::Point::~Point() {

@@ -416,16 +416,13 @@ public:
  */
 class Point {
 private:
-	double m_x; 			///< The x-coordinate.
-	double m_y; 			///< The y-coordinate.
-	double m_z; 			///< The z-coordinate.
-	double m_intensity;
-	double m_angle;
-	int m_cls;
-	int m_returnNum;
-	int m_numReturns;
-	bool m_isEdge;
-	//liblas::Point* m_point;	///< The (optional) liblas::Point instance. Deleted on destruction.
+	float m_x; 			///< The x-coordinate.
+	float m_y; 			///< The y-coordinate.
+	float m_z; 			///< The z-coordinate.
+	float m_intensity;
+	float m_angle;
+	short m_clsEdge; // edge << 8 | class
+	short m_returns; // numReturns << 8 | returns
 
 public:
 
