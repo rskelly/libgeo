@@ -130,11 +130,18 @@ public:
 	}
 
 	bool empty() {
-		return m_current >= m_size;
+		return m_ptr >= m_size;
+	}
+
+	void reset() {
+		m_ptr = 0;
 	}
 
 	~PointStream() {
-		delete m_instr;
+		if(m_instr) {
+			m_instr->close();
+			delete m_instr;
+		}
 	}
 
 	geo::pc::Point* current() {
@@ -208,6 +215,7 @@ private:
 				buffer.push_back(*minPt);
 				if(buffer.size() == m_chunkSize) {
 					// Write the points to the output.
+					g_debug("merge write");
 					outStream.write((char*) buffer.data(), buffer.size() * sizeof(geo::pc::Point));
 					count += buffer.size();
 					buffer.clear();
@@ -219,6 +227,7 @@ private:
 
 		if(!buffer.empty()) {
 			// Write the points to the output.
+			g_debug("merge write final")
 			outStream.write((char*) buffer.data(), buffer.size() * sizeof(geo::pc::Point));
 			count += buffer.size();
 			buffer.clear();
@@ -264,8 +273,9 @@ private:
 					std::ofstream ostr(chunkFile, std::ios::binary|std::ios::out);
 					std::vector<geo::pc::Point> data(pts.begin() + begin, pts.begin() + end);
 					// Write the points to the output stream.
-					ostr.write((char*) &size, sizeof(size_t));
-					ostr.write((char*) data.data(), (end - begin) * sizeof(geo::pc::Point));
+					size_t len = end - begin;
+					ostr.write((char*) &len, sizeof(size_t));
+					ostr.write((char*) data.data(), len * sizeof(geo::pc::Point));
 					// Save the chunk file name.
 					m_chunkFiles.push_back(chunkFile);
 				}
@@ -291,6 +301,7 @@ private:
 					tmp.assign(m_chunkFiles.begin() + i, m_chunkFiles.begin() + i + m_numChunks);
 				}
 				// Merge the chunks into a new chunk.
+				g_debug("merge " << i << "-" << i + m_numChunks << " of " << m_chunkFiles.size())
 				newChunks.push_back(mergeChunks(tmp));
 			}
 			for(const std::string& file : m_chunkFiles)
