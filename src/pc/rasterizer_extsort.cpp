@@ -53,7 +53,7 @@ const std::unordered_map<std::string, std::string> computerNames = {
 
 Computer* getComputer(const std::string& name) {
 	if(name == "min") { 						return new MinComputer();
-	} else if(name == "min") { 					return new MaxComputer();
+	} else if(name == "max") { 					return new MaxComputer();
 	} else if(name == "percentile-5") { 		return new PercentileComputer(0.05);
 	} else if(name == "decile-1") { 			return new PercentileComputer(0.1);
 	} else if(name == "decile-2") { 			return new PercentileComputer(0.2);
