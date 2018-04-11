@@ -23,34 +23,71 @@
 using namespace geo::util;
 using namespace geo::pc;
 
-size_t interleave(double x, double y, double scale) {
-	size_t ax = (size_t) std::round(x / scale);
-	size_t ay = (size_t) std::round(y / scale);
+/**
+ * Interleave the coordinates' bits to produce an index appropriate for z-ordering.
+ *
+ * @param x The x-coordinate. A pre-scaled integer.
+ * @param y The y-coordinate. A pre-scaled integer.
+ * @return The index.
+ */
+size_t interleave(size_t x, size_t y) {
 	size_t out = 0;
 	for(size_t i = 0; i < sizeof(int) * 8; ++i) {
-		out |= ((ax >> i) & 1) << (i * 2);
-		out |= ((ay >> i) & 1) << (i * 2 + 1);
+		out |= ((x >> i) & 1) << (i * 2);
+		out |= ((y >> i) & 1) << (i * 2 + 1);
 	}
 	return out;
 }
 
-void uninterleave(size_t index, double scale, double& x, double& y) {
-	size_t col = 0;
-	size_t row = 0;
+/**
+ * Reverse the interleaving process, converting an index into
+ * scaled x and y coordinates.
+ *
+ * @param index The Morton index.
+ * @param x A reference to the x coordinate.
+ * @param y A reference to the y coordinate.
+ */
+void uninterleave(size_t index, size_t& x, size_t& y) {
+	x = 0; y = 0;
 	for(size_t i = 0; i < sizeof(size_t) * 8; i += 2) {
-		col |= ((index >> i) & 1) << (i >> 1);
-		row |= ((index >> (i + 1)) & 1) << (i >> 1);
+		x |= ((index >> i) & 1) << (i >> 1);
+		y |= ((index >> (i + 1)) & 1) << (i >> 1);
 	}
-	x = col * scale;
-	y = row * scale;
 }
 
-bool pointSort(const geo::pc::Point& a, const geo::pc::Point& b, double scale) {
-	return interleave(a.x(), a.y(), scale) < interleave(b.x(), b.y(), scale);
+/**
+ * Sort function for Points. Uses the Morton index for sorting, using
+ * the normalized and scaled coordinates.
+ *
+ * @param a A Point.
+ * @param b A Point.
+ * @param scale The normalized coordinates are divided by this amount.
+ * @param xmin The minimum x coordinate of the bounding box. Subtracted from x.
+ * @param ymin The minimum y coordinate of the bounding box. Subtracted from y.
+ * @return True if a is "less" than b according to the Morton ordering.
+ */
+bool pointSort(const geo::pc::Point& a, const geo::pc::Point& b,
+		double xscale, double yscale, double xmin, double ymin) {
+	return interleave((a.x() - xmin) / xscale, (a.y() - ymin) / yscale)
+			< interleave((b.x() - xmin) / xscale, (b.y() - ymin) / yscale);
 }
 
-void sortPoints(std::vector<geo::pc::Point>* pts, size_t begin, size_t end, double scale) {
-	std::sort(pts->begin() + begin, pts->begin() + end, std::bind(pointSort, std::placeholders::_1, std::placeholders::_2, scale));
+/**
+ * Sorts the vector of points beginning and ending at the given indices.
+ * Points are normalized and scaled and sorted according to the Morton
+ * ordering.
+ *
+ * @param pts A vector of Points.
+ * @param begin The start index.
+ * @param end The end index.
+ * @param scale The normalized coordinates are divided by this amount.
+ * @param xmin The minimum x coordinate of the bounding box. Subtracted from x.
+ * @param ymin The minimum y coordinate of the bounding box. Subtracted from y.
+ */
+void sortPoints(std::vector<geo::pc::Point>* pts, size_t begin, size_t end,
+		double xscale, double yscale, double xmin, double ymin) {
+	std::sort(pts->begin() + begin, pts->begin() + end,
+			std::bind(pointSort, std::placeholders::_1, std::placeholders::_2, xscale, yscale, xmin, ymin));
 }
 
 /**
@@ -60,6 +97,7 @@ void sortPoints(std::vector<geo::pc::Point>* pts, size_t begin, size_t end, doub
 class PointLoader {
 public:
 	virtual int getPoints(std::vector<geo::pc::Point>& pts, int count) = 0;
+	virtual void computeBounds(double& xmin, double& ymin, bool useHeader) = 0;
 	virtual ~PointLoader() {}
 };
 
@@ -77,6 +115,22 @@ public:
 		m_instr = new std::ifstream(filename, std::ios::binary|std::ios::in);
 		m_rdr = new liblas::Reader(rf.CreateWithStream(*m_instr));
 
+	}
+
+	void computeBounds(double& xmin, double& ymin, bool useHeader) {
+		if(useHeader) {
+			const liblas::Header& hdr = m_rdr->GetHeader();
+			xmin = hdr.GetMinX();
+			ymin = hdr.GetMinY();
+		} else {
+			xmin = G_DBL_MAX_POS;
+			ymin = G_DBL_MAX_POS;
+			while(m_rdr->ReadNextPoint()) {
+				const liblas::Point& pt = m_rdr->GetPoint();
+				xmin = std::min(xmin, pt.GetX());
+				ymin = std::min(ymin, pt.GetY());
+			}
+		}
 	}
 
 	int getPoints(std::vector<geo::pc::Point>& pts, int count) {
@@ -186,12 +240,25 @@ private:
 	size_t m_position;
 	size_t m_index;
 
-	double m_scale;
+	double m_xscale;
+	double m_yscale;
+	double m_xmin;
+	double m_ymin;
 
+	/**
+	 * Return the next available name for a chunk file.
+	 */
 	std::string nextChunkFile() {
 		return Util::pathJoin(m_tmpDir, "chunk_" + std::to_string(++m_chunk) + ".tmp");
 	}
 
+	/**
+	 * Merge the chunks given by the files into a single chunk. The points
+	 * will be merged in order according to their Morton index.
+	 *
+	 * @param chunkFiles A list of point files to merge.
+	 * @return The name of the new merged chunk.
+	 */
 	std::string mergeChunks(const std::vector<std::string>& chunkFiles) {
 		// Get a file name for the output and open a stream.
 		std::string outFile = nextChunkFile();
@@ -217,7 +284,7 @@ private:
 				if(a && !minPt) {
 					minPt = a;
 					source = &ps;
-				} else if(a && minPt && pointSort(*a, *minPt, m_scale)) {
+				} else if(a && minPt && pointSort(*a, *minPt, m_xscale, m_yscale, m_xmin, m_ymin)) {
 					minPt = a;
 					source = &ps;
 				}
@@ -271,7 +338,7 @@ private:
 					for(int i = 0; i < size / m_chunkSize; ++i) {
 						size_t begin = i * m_chunkSize;
 						size_t end = std::min(size, (i + 1) * m_chunkSize);
-						threads.emplace_back(sortPoints, &pts, begin, end, m_scale);
+						threads.emplace_back(sortPoints, &pts, begin, end, m_xscale, m_yscale, m_xmin, m_ymin);
 					}
 				} else {
 					break;
@@ -324,54 +391,9 @@ private:
 		}
 	}
 
-public:
-	ExternalMergeSort(const std::string& outputFile, const std::vector<std::string>& inputFiles,
-			const std::string tmpDir, int chunkSize = 1024 * 1024, int numChunks = 8) :
-		m_outputFile(outputFile),
-		m_inputFiles(inputFiles),
-		m_tmpDir(tmpDir),
-		m_chunkSize(chunkSize),
-		m_numChunks(numChunks),
-		m_chunk(0),
-
-		m_instr(nullptr),
-		m_count(0),
-		m_position(0),
-		m_index(0),
-
-		m_scale(2) {
-	}
-
-	size_t index(const geo::pc::Point& pt) const {
-		return interleave(pt.x(), pt.y(), m_scale);
-	}
-
-	size_t index(double x, double y) const {
-		return interleave(x, y, m_scale);
-	}
-
-	double scale() const {
-		return m_scale;
-	}
-
-	void position(size_t index, double& x, double& y) const {
-		uninterleave(index, m_scale, x, y);
-	}
-
-	void sort(bool force) {
-		if(!Util::exists(m_outputFile) || force) {
-			phase1();
-			phase2();
-		}
-	}
-
-	void reset() {
-		unload();
-		m_instr = new std::ifstream(m_chunkFiles[0], std::ios::binary|std::ios::in);
-		m_instr->read((char*) &m_count, sizeof(size_t));
-		m_position = 0;
-	}
-
+	/**
+	 * Load the next sorted point file and prepare for reading.
+	 */
 	bool loadNext() {
 		if(!m_instr)
 			reset();
@@ -385,6 +407,163 @@ public:
 		return true;
 	}
 
+	/**
+	 * Close and destroy the current stream.
+	 */
+	void unload() {
+		if(m_instr) {
+			m_instr->close();
+			delete m_instr;
+		}
+	}
+
+public:
+
+	/**
+	 * Create a sort object for point clouds.
+	 *
+	 * @param outputFile The final output file.
+	 * @param inputFiles A list of input point cloud files.
+	 * @param tmpDir A directory to store temporary files.
+	 * @param scale A factor by which to scale normalized points. To generate indices,
+	 *              coordinates are normalized to the bounding box, then scaled (divided)
+	 *              and truncated.
+	 * @param xmin The minimum x coordinate for normalizing points.
+	 * @param ymin The minimum y coordinate for normalizing points.
+	 * @param chunkSize The number of points in a chunk. (RAM)
+	 * @param numChunks The number of chunks that can be processed simultaneously. (Processors)
+	 */
+	ExternalMergeSort(const std::string& outputFile, const std::vector<std::string>& inputFiles,
+			const std::string tmpDir, double xscale, double yscale, double xmin = 0, double ymin = 0,
+			int chunkSize = 4 * 1024 * 1024, int numChunks = 4) :
+		m_outputFile(outputFile),
+		m_inputFiles(inputFiles),
+		m_tmpDir(tmpDir),
+		m_chunkSize(chunkSize),
+		m_numChunks(numChunks),
+		m_chunk(0),
+
+		m_instr(nullptr),
+		m_count(0),
+		m_position(0),
+		m_index(0),
+
+		m_xscale(xscale),
+		m_yscale(yscale),
+		m_xmin(xmin),
+		m_ymin(ymin) {
+	}
+
+	/**
+	 * Run over the files and figure out the minimum bounds.
+	 * @param useHeader True if the header can be used to determine bounds. False to
+	 *                  force reading through every file.
+	 */
+	void computeMinimums(bool useHeader = false) {
+		m_xmin = G_DBL_MAX_POS;
+		m_ymin = G_DBL_MAX_POS;
+		double x, y;
+		for(const std::string& f : m_inputFiles) {
+			LASPointLoader ldr(f);
+			ldr.computeBounds(x, y, useHeader);
+			if(x < m_xmin) m_xmin = x;
+			if(y < m_ymin) m_ymin = y;
+		}
+	}
+
+	/**
+	 * Return the Morton index of the Point. The coordinate will be
+	 * normalized and scaled.
+	 *
+	 * @param pt A Point.
+	 * @return The Morton index.
+	 */
+	size_t index(const geo::pc::Point& pt) const {
+		return index(pt.x(), pt.y());
+	}
+
+	/**
+	 * Return the Morton index of the coordinate. The coordinate will be
+	 * normalized and scaled.
+	 *
+	 * @param x The x coordinate.
+	 * @param y The y coordinate.
+	 * @return The Morton index.
+	 */
+	size_t index(double x, double y) const {
+		return interleave((x - m_xmin) / m_xscale, (y - m_ymin) / m_yscale);
+	}
+
+	/**
+	 * Return the scale value.
+	 * @return The scale value.
+	 */
+	double xscale() const {
+		return m_xscale;
+	}
+
+	double yscale() const {
+		return m_yscale;
+	}
+
+	/**
+	 * Restores the un-scaled and un-normalized coordinate that
+	 * was used to create the Morton index. May lose some precision.
+	 *
+	 * @param index The index.
+	 * @param x The original x-coordinate (out).
+	 * @param y The original y-coordinate (out).
+	 */
+	void position(size_t index, double& x, double& y) const {
+		size_t ax, ay;
+		uninterleave(index, ax, ay);
+		x = (ax * m_xscale) + m_xmin;
+		y = (ay * m_yscale) + m_ymin;
+	}
+
+	/**
+	 * Restores the scaled and normalized coordinate that
+	 * was used to create the Morton index. Essentially a column
+	 * and row.
+	 *
+	 * @param index The index.
+	 * @param col The column (out).
+	 * @param row The row (out).
+	 */
+	void position(size_t index, size_t& col, size_t& row) const {
+		uninterleave(index, col, row);
+	}
+
+	/**
+	 * Sort the point cloud.
+	 *
+	 * @param force If true, forces the entire process, ignoring
+	 * any intermediate state.
+	 */
+	void sort(bool force) {
+		if(!Util::exists(m_outputFile) || force) {
+			phase1();
+			phase2();
+		}
+	}
+
+	/**
+	 * Reset the point reader.
+	 */
+	void reset() {
+		unload();
+		m_instr = new std::ifstream(m_chunkFiles[0], std::ios::binary|std::ios::in);
+		m_instr->read((char*) &m_count, sizeof(size_t));
+		m_position = 0;
+	}
+
+	/**
+	 * Populate the given point with the data from the next point. Return
+	 * true on success, false otherwise (e.g. if there are no more points.)
+	 *
+	 * @param pt A point (will be modified.)
+	 * @return True if there was a point available and it was successfuly copied.
+	 */
 	bool next(geo::pc::Point& pt) {
 		if(m_index >= m_buffer.size() && !loadNext()) {
 			return false;
@@ -392,13 +571,6 @@ public:
 			std::memcpy(&pt, &m_buffer[m_index], sizeof(geo::pc::Point));
 			++m_index;
 			return true;
-		}
-	}
-
-	void unload() {
-		if(m_instr) {
-			m_instr->close();
-			delete m_instr;
 		}
 	}
 

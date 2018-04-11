@@ -714,6 +714,11 @@ private:
 	std::vector<PCFile> m_files;		///< A list of PCFile instances.
 	PCPointFilter* m_filter;
 
+	void finalize(int col, int row, double x, double y, double radius,
+			const std::vector<geo::pc::Point>& points,
+			std::vector<std::unique_ptr<geo::raster::MemRaster> >& rasters,
+			std::vector<std::unique_ptr<Computer> >& computers);
+
 public:
 
 	/**
