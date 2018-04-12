@@ -9,6 +9,7 @@
 
 int main(int argc, char** argv) {
 
+	/*
 	std::string tmpDir = argv[1];
 	std::string outFile = argv[2];
 	std::vector<std::string> inFiles;
@@ -34,4 +35,5 @@ int main(int argc, char** argv) {
 			std::cerr << "bounds: " << bounds[0] << ", " << bounds[1] << ", " << bounds[2] << ", " << bounds[3] << "\n";
 	}
 	std::cerr << "total: " << i;
+	*/
 }

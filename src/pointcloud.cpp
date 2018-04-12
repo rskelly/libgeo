@@ -559,15 +559,16 @@ void Tiler::tile(const std::string& outdir, double size, double buffer, int srid
 
 Tiler::~Tiler() {}
 
-
 geo::pc::Point::Point(double x, double y, double z, double intensity, double angle, int cls, int returnNum, int numReturns, bool isEdge) :
 	m_x(x),
 	m_y(y),
 	m_z(z),
 	m_intensity(intensity),
 	m_angle(angle),
-	m_clsEdge((((int) isEdge) << 8) | cls),
-	m_returns((numReturns << 8) | returnNum) {
+	m_cls(cls),
+	m_edge(isEdge),
+	m_numReturns(numReturns),
+	m_returnNum(returnNum) {
 }
 
 geo::pc::Point::Point(const liblas::Point& pt) :
@@ -586,8 +587,10 @@ void geo::pc::Point::setPoint(const liblas::Point& pt) {
 	m_z = pt.GetZ();
 	m_intensity = pt.GetIntensity();
 	m_angle = pt.GetScanAngleRank();
-	m_clsEdge = (((int) pt.GetFlightLineEdge()) << 8) | pt.GetClassification().GetClass();
-	m_returns = (pt.GetNumberOfReturns() << 8) | pt.GetReturnNumber();
+	m_cls = pt.GetClassification().GetClass();
+	m_edge = pt.GetFlightLineEdge();
+	m_numReturns = pt.GetNumberOfReturns();
+	m_returnNum = pt.GetReturnNumber();
 }
 
 geo::pc::Point::Point(double x, double y, double z) :
@@ -604,12 +607,14 @@ geo::pc::Point::Point() :
 	m_z(0),
 	m_intensity(0),
 	m_angle(0),
-	m_clsEdge(0),
-	m_returns(0) {
+	m_cls(0),
+	m_edge(0),
+	m_numReturns(0),
+	m_returnNum(0) {
 }
 
 int geo::pc::Point::classId() const {
-	return m_clsEdge & 0xf;
+	return m_cls;
 }
 
 double geo::pc::Point::operator[](int idx) const {
@@ -647,7 +652,7 @@ double geo::pc::Point::scanAngle() const {
 }
 
 bool geo::pc::Point::isEdge() const {
-	return m_clsEdge >> 8;
+	return m_edge == 1;
 }
 
 bool geo::pc::Point::isLast() const {
@@ -659,11 +664,11 @@ bool geo::pc::Point::isFirst() const {
 }
 
 int geo::pc::Point::returnNum() const {
-	return m_returns & 0xf;
+	return m_returnNum;
 }
 
 int geo::pc::Point::numReturns() const {
-	return m_returns >> 8;
+	return m_numReturns;
 }
 
 geo::pc::Point::~Point() {

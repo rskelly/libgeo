@@ -416,13 +416,15 @@ public:
  */
 class Point {
 private:
-	float m_x; 			///< The x-coordinate.
-	float m_y; 			///< The y-coordinate.
-	float m_z; 			///< The z-coordinate.
+	double m_x; 			///< The x-coordinate.
+	double m_y; 			///< The y-coordinate.
+	double m_z; 			///< The z-coordinate.
 	float m_intensity;
 	float m_angle;
-	short m_clsEdge; // edge << 8 | class
-	short m_returns; // numReturns << 8 | returns
+	char m_cls;
+	char m_edge;
+	char m_numReturns;
+	char m_returnNum;
 
 public:
 
@@ -636,12 +638,11 @@ public:
 	template <class T, class U>
 	int filter(T begin, T end, U iter) const {
 		int i = 0;
-		while(begin != end) {
+		for(;begin != end; ++begin) {
 			if(keep(*begin)) {
 				iter = *begin;
 				++i;
 			}
-			++begin;
 		}
 		return i;
 	}

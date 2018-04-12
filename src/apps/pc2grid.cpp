@@ -34,8 +34,6 @@ void usage() {
 			<< "                  For percentile, use the form, 'percenile:n', where\n"
 			<< "                  n is the percentile (no % sign); 1 - 99.\n"
 			<< " -v               Verbose. Enable debug and warning messages.\n"
-			<< " -l <memory>      The memory limit in bytes, where working memory is moved from main\n"
-			<< "                  memory (RAM) to disk. Disk is slow, so use the highest reasonable value.\n"
 			<< " -h               If given *do not* trust the LAS file headers to contain\n"
 			<< "                  good bounds (etc.) info\n";
 

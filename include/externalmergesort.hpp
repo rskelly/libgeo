@@ -19,9 +19,11 @@
 #include "pointcloud.hpp"
 #include "util.hpp"
 #include "geo.hpp"
+#include "raster.hpp"
 
 using namespace geo::util;
 using namespace geo::pc;
+using namespace geo::raster;
 
 /**
  * Interleave the coordinates' bits to produce an index appropriate for z-ordering.
@@ -55,6 +57,15 @@ void uninterleave(size_t index, size_t& x, size_t& y) {
 	}
 }
 
+size_t toIdx(int col, int row, int cols) {
+	return row * cols + col;
+}
+
+void fromIdx(size_t idx, int cols, int& col, int& row) {
+	col = idx % cols;
+	row = idx / cols;
+}
+
 /**
  * Sort function for Points. Uses the Morton index for sorting, using
  * the normalized and scaled coordinates.
@@ -66,10 +77,8 @@ void uninterleave(size_t index, size_t& x, size_t& y) {
  * @param ymin The minimum y coordinate of the bounding box. Subtracted from y.
  * @return True if a is "less" than b according to the Morton ordering.
  */
-bool pointSort(const geo::pc::Point& a, const geo::pc::Point& b,
-		double xscale, double yscale, double xmin, double ymin) {
-	return interleave((a.x() - xmin) / xscale, (a.y() - ymin) / yscale)
-			< interleave((b.x() - xmin) / xscale, (b.y() - ymin) / yscale);
+bool pointSort(const geo::pc::Point& a, const geo::pc::Point& b, const GridProps& props) {
+	return toIdx(props.toCol(a.x()), props.toRow(a.y()), props.cols()) < toIdx(props.toCol(b.x()), props.toRow(b.y()), props.cols());
 }
 
 /**
@@ -84,10 +93,9 @@ bool pointSort(const geo::pc::Point& a, const geo::pc::Point& b,
  * @param xmin The minimum x coordinate of the bounding box. Subtracted from x.
  * @param ymin The minimum y coordinate of the bounding box. Subtracted from y.
  */
-void sortPoints(std::vector<geo::pc::Point>* pts, size_t begin, size_t end,
-		double xscale, double yscale, double xmin, double ymin) {
+void sortPoints(std::vector<geo::pc::Point>* pts, size_t begin, size_t end, const GridProps& props) {
 	std::sort(pts->begin() + begin, pts->begin() + end,
-			std::bind(pointSort, std::placeholders::_1, std::placeholders::_2, xscale, yscale, xmin, ymin));
+			std::bind(pointSort, std::placeholders::_1, std::placeholders::_2, props));
 }
 
 /**
@@ -103,6 +111,7 @@ public:
 
 /**
  * Implementation of PointLoader to load LAS files.
+ * TODO: Duplicate of PFile.
  */
 class LASPointLoader : public PointLoader {
 private:
@@ -240,10 +249,7 @@ private:
 	size_t m_position;
 	size_t m_index;
 
-	double m_xscale;
-	double m_yscale;
-	double m_xmin;
-	double m_ymin;
+	GridProps m_props;
 
 	/**
 	 * Return the next available name for a chunk file.
@@ -284,7 +290,7 @@ private:
 				if(a && !minPt) {
 					minPt = a;
 					source = &ps;
-				} else if(a && minPt && pointSort(*a, *minPt, m_xscale, m_yscale, m_xmin, m_ymin)) {
+				} else if(a && minPt && pointSort(*a, *minPt, m_props)) {
 					minPt = a;
 					source = &ps;
 				}
@@ -338,7 +344,7 @@ private:
 					for(int i = 0; i < size / m_chunkSize; ++i) {
 						size_t begin = i * m_chunkSize;
 						size_t end = std::min(size, (i + 1) * m_chunkSize);
-						threads.emplace_back(sortPoints, &pts, begin, end, m_xscale, m_yscale, m_xmin, m_ymin);
+						threads.emplace_back(sortPoints, &pts, begin, end, m_props);
 					}
 				} else {
 					break;
@@ -434,7 +440,7 @@ public:
 	 * @param numChunks The number of chunks that can be processed simultaneously. (Processors)
 	 */
 	ExternalMergeSort(const std::string& outputFile, const std::vector<std::string>& inputFiles,
-			const std::string tmpDir, double xscale, double yscale, double xmin = 0, double ymin = 0,
+			const std::string tmpDir, const GridProps& props,
 			int chunkSize = 4 * 1024 * 1024, int numChunks = 4) :
 		m_outputFile(outputFile),
 		m_inputFiles(inputFiles),
@@ -448,10 +454,7 @@ public:
 		m_position(0),
 		m_index(0),
 
-		m_xscale(xscale),
-		m_yscale(yscale),
-		m_xmin(xmin),
-		m_ymin(ymin) {
+		m_props(props) {
 	}
 
 	/**
@@ -459,6 +462,7 @@ public:
 	 * @param useHeader True if the header can be used to determine bounds. False to
 	 *                  force reading through every file.
 	 */
+	/*
 	void computeMinimums(bool useHeader = false) {
 		m_xmin = G_DBL_MAX_POS;
 		m_ymin = G_DBL_MAX_POS;
@@ -470,6 +474,7 @@ public:
 			if(y < m_ymin) m_ymin = y;
 		}
 	}
+	*/
 
 	/**
 	 * Return the Morton index of the Point. The coordinate will be
@@ -491,20 +496,18 @@ public:
 	 * @return The Morton index.
 	 */
 	size_t index(double x, double y) const {
-		return interleave((x - m_xmin) / m_xscale, (y - m_ymin) / m_yscale);
+		return toIdx(m_props.toCol(x), m_props.toRow(y), m_props.cols());
 	}
 
 	/**
 	 * Return the scale value.
 	 * @return The scale value.
 	 */
+	/*
 	double xscale() const {
-		return m_xscale;
+		return m_scale;
 	}
-
-	double yscale() const {
-		return m_yscale;
-	}
+	*/
 
 	/**
 	 * Restores the un-scaled and un-normalized coordinate that
@@ -514,12 +517,14 @@ public:
 	 * @param x The original x-coordinate (out).
 	 * @param y The original y-coordinate (out).
 	 */
+	/*
 	void position(size_t index, double& x, double& y) const {
 		size_t ax, ay;
 		uninterleave(index, ax, ay);
-		x = (ax * m_xscale) + m_xmin;
-		y = (ay * m_yscale) + m_ymin;
+		x = ax / m_scale;
+		y = ay / m_scale;
 	}
+	*/
 
 	/**
 	 * Restores the scaled and normalized coordinate that
