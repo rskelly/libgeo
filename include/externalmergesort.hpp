@@ -19,11 +19,26 @@
 #include "pointcloud.hpp"
 #include "util.hpp"
 #include "geo.hpp"
-#include "raster.hpp"
 
 using namespace geo::util;
 using namespace geo::pc;
-using namespace geo::raster;
+
+class PointTransformer {
+public:
+	double xScale;
+	double yScale;
+	double xOffset;
+	double yOffset;
+	PointTransformer() :
+		PointTransformer(1, 1, 0, 0) {}
+	PointTransformer(double xScale, double yScale, double xOffset, double yOffset) :
+		xScale(xScale), yScale(yScale),
+		xOffset(xOffset), yOffset(yOffset) {}
+	void transform(const geo::pc::Point& pt, int& x, int& y) const {
+		x = (pt.x() - xOffset) * xScale;
+		y = (pt.y() - yOffset) * yScale;
+	}
+};
 
 /**
  * Interleave the coordinates' bits to produce an index appropriate for z-ordering.
@@ -57,15 +72,6 @@ void uninterleave(size_t index, size_t& x, size_t& y) {
 	}
 }
 
-size_t toIdx(int col, int row, int cols) {
-	return row * cols + col;
-}
-
-void fromIdx(size_t idx, int cols, int& col, int& row) {
-	col = idx % cols;
-	row = idx / cols;
-}
-
 /**
  * Sort function for Points. Uses the Morton index for sorting, using
  * the normalized and scaled coordinates.
@@ -77,8 +83,11 @@ void fromIdx(size_t idx, int cols, int& col, int& row) {
  * @param ymin The minimum y coordinate of the bounding box. Subtracted from y.
  * @return True if a is "less" than b according to the Morton ordering.
  */
-bool pointSort(const geo::pc::Point& a, const geo::pc::Point& b, const GridProps& props) {
-	return toIdx(props.toCol(a.x()), props.toRow(a.y()), props.cols()) < toIdx(props.toCol(b.x()), props.toRow(b.y()), props.cols());
+bool pointSort(const geo::pc::Point& a, const geo::pc::Point& b, const PointTransformer& trans) {
+	int ax, ay, bx, by;
+	trans.transform(a, ax, ay);
+	trans.transform(b, bx, by);
+	return ax < bx || (ax == bx && ay < by); //interleave(ax, ay) < interleave(bx, by);
 }
 
 /**
@@ -93,9 +102,9 @@ bool pointSort(const geo::pc::Point& a, const geo::pc::Point& b, const GridProps
  * @param xmin The minimum x coordinate of the bounding box. Subtracted from x.
  * @param ymin The minimum y coordinate of the bounding box. Subtracted from y.
  */
-void sortPoints(std::vector<geo::pc::Point>* pts, size_t begin, size_t end, const GridProps& props) {
+void sortPoints(std::vector<geo::pc::Point>* pts, size_t begin, size_t end, const PointTransformer& trans) {
 	std::sort(pts->begin() + begin, pts->begin() + end,
-			std::bind(pointSort, std::placeholders::_1, std::placeholders::_2, props));
+			std::bind(pointSort, std::placeholders::_1, std::placeholders::_2, trans));
 }
 
 /**
@@ -243,13 +252,13 @@ private:
 	int m_numChunks;						///< The number of chunks to process simultaneously.
 	int m_chunk; 							///< The ID of the current chunk file.
 
+	PointTransformer m_trans;
+
 	std::vector<geo::pc::Point> m_buffer;
 	std::ifstream* m_instr;
 	size_t m_count;
 	size_t m_position;
 	size_t m_index;
-
-	GridProps m_props;
 
 	/**
 	 * Return the next available name for a chunk file.
@@ -282,6 +291,7 @@ private:
 		geo::pc::Point* minPt;
 		std::vector<geo::pc::Point> buffer;
 		PointStream* source;
+
 		buffer.reserve(m_chunkSize);
 		while(true) {
 			minPt = nullptr;
@@ -290,7 +300,7 @@ private:
 				if(a && !minPt) {
 					minPt = a;
 					source = &ps;
-				} else if(a && minPt && pointSort(*a, *minPt, m_props)) {
+				} else if(a && minPt && pointSort(*a, *minPt, m_trans)) {
 					minPt = a;
 					source = &ps;
 				}
@@ -331,7 +341,6 @@ private:
 	 * and write them to chunk files.
 	 */
 	void phase1() {
-		int threadCount = 8;
 		int size;
 		// Iterate over the list of source files.
 		for(const std::string& inputFile : m_inputFiles) {
@@ -339,12 +348,12 @@ private:
 			while(true) {
 				std::list<std::thread> threads;
 				std::vector<geo::pc::Point> pts;
-				pts.reserve(threadCount * m_chunkSize);
-				if((size = ldr.getPoints(pts, threadCount * m_chunkSize))) {
+				pts.reserve(m_numChunks * m_chunkSize);
+				if((size = ldr.getPoints(pts, m_numChunks * m_chunkSize))) {
 					for(int i = 0; i < size / m_chunkSize; ++i) {
 						size_t begin = i * m_chunkSize;
 						size_t end = std::min(size, (i + 1) * m_chunkSize);
-						threads.emplace_back(sortPoints, &pts, begin, end, m_props);
+						threads.emplace_back(sortPoints, &pts, begin, end, m_trans);
 					}
 				} else {
 					break;
@@ -440,41 +449,26 @@ public:
 	 * @param numChunks The number of chunks that can be processed simultaneously. (Processors)
 	 */
 	ExternalMergeSort(const std::string& outputFile, const std::vector<std::string>& inputFiles,
-			const std::string tmpDir, const GridProps& props,
-			int chunkSize = 4 * 1024 * 1024, int numChunks = 4) :
+			const std::string tmpDir,
+			double xOffset = 0, double yOffset = 0,
+			double xScale = 1, double yScale = 1,
+			int chunkSize = 1024 * 1024, int numChunks = 4) :
 		m_outputFile(outputFile),
 		m_inputFiles(inputFiles),
 		m_tmpDir(tmpDir),
 		m_chunkSize(chunkSize),
 		m_numChunks(numChunks),
 		m_chunk(0),
-
 		m_instr(nullptr),
 		m_count(0),
 		m_position(0),
-		m_index(0),
+		m_index(0) {
 
-		m_props(props) {
+		m_trans.xOffset = xOffset;
+		m_trans.yOffset = yOffset;
+		m_trans.xScale = xScale;
+		m_trans.yScale = yScale;
 	}
-
-	/**
-	 * Run over the files and figure out the minimum bounds.
-	 * @param useHeader True if the header can be used to determine bounds. False to
-	 *                  force reading through every file.
-	 */
-	/*
-	void computeMinimums(bool useHeader = false) {
-		m_xmin = G_DBL_MAX_POS;
-		m_ymin = G_DBL_MAX_POS;
-		double x, y;
-		for(const std::string& f : m_inputFiles) {
-			LASPointLoader ldr(f);
-			ldr.computeBounds(x, y, useHeader);
-			if(x < m_xmin) m_xmin = x;
-			if(y < m_ymin) m_ymin = y;
-		}
-	}
-	*/
 
 	/**
 	 * Return the Morton index of the Point. The coordinate will be
@@ -484,59 +478,9 @@ public:
 	 * @return The Morton index.
 	 */
 	size_t index(const geo::pc::Point& pt) const {
-		return index(pt.x(), pt.y());
-	}
-
-	/**
-	 * Return the Morton index of the coordinate. The coordinate will be
-	 * normalized and scaled.
-	 *
-	 * @param x The x coordinate.
-	 * @param y The y coordinate.
-	 * @return The Morton index.
-	 */
-	size_t index(double x, double y) const {
-		return toIdx(m_props.toCol(x), m_props.toRow(y), m_props.cols());
-	}
-
-	/**
-	 * Return the scale value.
-	 * @return The scale value.
-	 */
-	/*
-	double xscale() const {
-		return m_scale;
-	}
-	*/
-
-	/**
-	 * Restores the un-scaled and un-normalized coordinate that
-	 * was used to create the Morton index. May lose some precision.
-	 *
-	 * @param index The index.
-	 * @param x The original x-coordinate (out).
-	 * @param y The original y-coordinate (out).
-	 */
-	/*
-	void position(size_t index, double& x, double& y) const {
-		size_t ax, ay;
-		uninterleave(index, ax, ay);
-		x = ax / m_scale;
-		y = ay / m_scale;
-	}
-	*/
-
-	/**
-	 * Restores the scaled and normalized coordinate that
-	 * was used to create the Morton index. Essentially a column
-	 * and row.
-	 *
-	 * @param index The index.
-	 * @param col The column (out).
-	 * @param row The row (out).
-	 */
-	void position(size_t index, size_t& col, size_t& row) const {
-		uninterleave(index, col, row);
+		int x, y;
+		m_trans.transform(pt, x, y);
+		return interleave(x, y);
 	}
 
 	/**

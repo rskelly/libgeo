@@ -559,7 +559,8 @@ void Tiler::tile(const std::string& outdir, double size, double buffer, int srid
 
 Tiler::~Tiler() {}
 
-geo::pc::Point::Point(double x, double y, double z, double intensity, double angle, int cls, int returnNum, int numReturns, bool isEdge) :
+geo::pc::Point::Point(double x, double y, double z, double intensity, double angle,
+		int cls, int returnNum, int numReturns, bool isEdge) :
 	m_x(x),
 	m_y(y),
 	m_z(z),
@@ -595,7 +596,6 @@ void geo::pc::Point::setPoint(const liblas::Point& pt) {
 
 geo::pc::Point::Point(double x, double y, double z) :
 	geo::pc::Point() {
-
 	m_x = x;
 	m_y = y;
 	m_z = z;
@@ -640,7 +640,7 @@ double geo::pc::Point::z() const {
 }
 
 double geo::pc::Point::value() const {
-	return m_z;
+	return z();
 }
 
 double geo::pc::Point::intensity() const {

@@ -416,9 +416,9 @@ public:
  */
 class Point {
 private:
-	double m_x; 			///< The x-coordinate.
-	double m_y; 			///< The y-coordinate.
-	double m_z; 			///< The z-coordinate.
+	float m_x; 			///< The x-coordinate.
+	float m_y; 			///< The y-coordinate.
+	float m_z; 			///< The z-coordinate.
 	float m_intensity;
 	float m_angle;
 	char m_cls;
@@ -450,7 +450,8 @@ public:
 	 * @param y The y-coordinate.
 	 * @param z The z-coordinate.
 	 */
-	Point(double x, double y, double z, double intensity, double angle, int cls, int returnNum, int numReturns, bool isEdge);
+	Point(double x, double y, double z, double intensity, double angle,
+			int cls, int returnNum, int numReturns, bool isEdge);
 
 	/**
 	 * Construct an empty point.
