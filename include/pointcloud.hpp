@@ -720,11 +720,11 @@ private:
 	std::vector<std::unique_ptr<Computer> > m_computers;
 	std::vector<geo::raster::MemRaster> m_rasters;
 	std::vector<geo::pc::Point> m_filtered;
-	std::vector<double> m_write;
 	std::vector<double> m_out;
 
-	void finalize(int col, int row, double x, double y, double radius,
-			const std::vector<geo::pc::Point>& points);
+	void finalize(int row, double radius,
+			std::unordered_map<size_t, std::vector<geo::pc::Point> >& cells,
+			geo::raster::Raster& outrast);
 
 public:
 
