@@ -110,61 +110,56 @@ double Rasterizer::density(double resolution, double radius) {
 	return (sum / count) * 1.5 * cell;
 }
 
-void fixBounds(double* bounds, double resX, double resY, double* easting, double* northing) {
+void fixBounds(double* bounds, double resX, double resY, double& easting, double& northing) {
 
-	double aresX = std::abs(resX);
-	double aresY = std::abs(resY);
+	double rx = std::abs(resX);
+	double ry = std::abs(resY);
 
-	{
-		int a = 0, b = 2;
-		if(resX < 0)
-			a = 2, b = 0;
-		bounds[a] = std::floor(bounds[a] / resX) * resX;
-		bounds[b] = std::ceil(bounds[b] / resX) * resX;
-		a = 1, b = 3;
-		if(resY < 0)
-			a = 3, b = 1;
-		bounds[a] = std::floor(bounds[a] / resY) * resY;
-		bounds[b] = std::ceil(bounds[b] / resY) * resY;
-	}
+	double xmin = std::floor(std::min(bounds[0], bounds[2]) / rx) * rx;
+	double ymin = std::floor(std::min(bounds[1], bounds[3]) / ry) * ry;
+	double xmax = std::ceil(std::max(bounds[0], bounds[2]) / rx) * rx;
+	double ymax = std::ceil(std::max(bounds[1], bounds[3]) / ry) * ry;
 
-	if(!std::isnan(*easting)) {
-		if((resX > 0 && *easting < bounds[0]) || (resX < 0 && *easting > bounds[2]))
-			g_argerr("The easting is within the data boundary.");
-		double w = bounds[2] - bounds[0];
+	if(std::isnan(easting)) {
+		xmin -= rx;
+		xmax += rx;
+		easting = resX > 0 ? xmin : xmax;
+	} else {
 		if(resX > 0) {
-			while(*easting + w < bounds[2])
-				w += resX;
-			bounds[0] = *easting;
-			bounds[2] = *easting + w;
+			if(easting > xmin)
+				g_argerr("Easting must be to the West of the boundary.")
+			xmin = easting;
+			xmax += rx;
 		} else {
-			while(*easting - w > bounds[1])
-				w += aresX;
-			bounds[2] = *easting;
-			bounds[0] = *easting - w;
+			if(easting < xmax)
+				g_argerr("Easting must be to the West of the boundary.")
+			xmax = easting;
+			xmin -= rx;
 		}
+	}
+	if(std::isnan(northing)) {
+		ymin -= ry;
+		ymax += ry;
+		northing = resY > 0 ? ymin : ymax;
 	} else {
-		*easting = bounds[resX > 0 ? 0 : 2];
+		if(resY > 0) {
+			if(northing > ymin)
+				g_argerr("Easting must be to the North of the boundary.")
+			ymin = northing;
+			ymax += ry;
+		} else {
+			if(northing < ymax)
+				g_argerr("Northing must be to the North of the boundary.")
+			ymax = northing;
+			ymin -= ry;
+		}
 	}
 
-	if(!std::isnan(*northing)) {
-		if((resY > 0 && *northing < bounds[1]) || (resY < 0 && *northing > bounds[3]))
-			g_argerr("The *northing is within the data boundary.");
-		double h = bounds[3] - bounds[1];
-		if(resY > 0) {
-			while(*northing + h < bounds[3])
-				h += resY;
-			bounds[1] = *northing;
-			bounds[3] = *northing + h;
-		} else {
-			while(*northing - h > bounds[1])
-				h += aresY;
-			bounds[3] = *northing;
-			bounds[1] = *northing - h;
-		}
-	} else {
-		*northing = bounds[resY > 0 ? 1 : 3];
-	}
+	bounds[resX > 0 ? 0 : 2] = xmin;
+	bounds[resY > 0 ? 1 : 3] = ymin;
+	bounds[resX > 0 ? 2 : 1] = xmax;
+	bounds[resY > 0 ? 3 : 1] = ymax;
+
 }
 
 void Rasterizer::setFilter(PCPointFilter* filter) {
@@ -216,11 +211,11 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	}
 
 	g_trace("Fixing bounds ")
-	fixBounds(bounds, resX, resY, &easting, &northing);
+	fixBounds(bounds, resX, resY, easting, northing);
 	g_trace(" bounds: " << bounds[0] << ", " << bounds[1] << "; " << bounds[2] << ", " << bounds[3])
 
-	int cols = (int) ((bounds[2] - bounds[0]) / std::abs(resX)) + 1;
-	int rows = (int) ((bounds[3] - bounds[1]) / std::abs(resY)) + 1;
+	int cols = (int) std::ceil((bounds[2] - bounds[0]) / resX);
+	int rows = (int) std::ceil((bounds[3] - bounds[1]) / resY);
 	g_trace(" cols: " << cols << ", rows: " << rows)
 
 	int bandCount = 1;
@@ -246,50 +241,67 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	for(int i= 1; i < bandCount; ++i)
 		rasters[i]->fillFloat(NODATA);
 
-	ExternalMergeSort es(filename, filenames, "/tmp",
-			resX > 0 ? bounds[0] : bounds[2],
-			resY > 0 ? bounds[1] : bounds[3],
-			1 / resX, 1 / resY);
+	ExternalMergeSort es(filename, filenames, "/tmp", easting, northing, resX, resY);
 	CountComputer countComp;
 
 	es.sort(true);
 
+	// The last finalized row.
+	int lastR = 0;
+	// The squared radius for distance comparisons without sqrt.
+	double radiusSq = radius * radius;
+	// Radius in pixel coords.
+	int rad = (int) std::ceil(radius / std::max(std::abs(resX), std::abs(resY)));
+	// Dictionary of cells/points.
 	std::unordered_map<size_t, std::vector<geo::pc::Point> > cells;
-	std::vector<geo::pc::Point> points;
-	std::vector<bool> completed(cols * rows);
+	// List of populated cells.
+	std::vector<bool> populated(cols * rows);
+	// List of cells to remove from the dictionary.
+	std::list<size_t> remove;
 
 	geo::pc::Point pt;
 
-	int rad = (int) std::ceil(radius / std::max(std::abs(resX), std::abs(resY)));
-	int lastC = 0;
-	int lastR = 0;
-	std::list<size_t> remove;
-
 	while(es.next(pt)) {
 
-		int col = props.toCol(pt.x());
-		int row = props.toRow(pt.y());
+		double px = pt.x();
+		double py = pt.y();
+		int col = props.toCol(px);
+		int row = props.toRow(py);
+		size_t idx = row * cols + col;
+
 		if(rad) {
 			for(int r = std::max(0, row - rad); r < std::min(rows, row + rad + 1); ++r) {
-				for(int c = std::max(0, col - rad); c < std::min(cols, col + rad + 1); ++c)
-					cells[r * cols + c].push_back(std::move(pt));
-			}
-		} else {
-			cells[row * cols + col].push_back(std::move(pt));
-		}
-
-		if(col - rad > lastC && row - rad > lastR) {
-			for(int r = lastR; r < row - rad; ++r) {
-				for(int c = lastC; c < col - rad; ++c) {
-					const std::vector<geo::pc::Point>& pts = cells[r * cols + c];
-					finalize(c, r, props.toCentroidX(c), props.toCentroidY(c), radius, pts, rasters, computers);
-					remove.push_back(r * cols + c);
+				for(int c = std::max(0, col - rad); c < std::min(cols, col + rad + 1); ++c) {
+					double cx = props.toCentroidX(c);
+					double cy = props.toCentroidY(r);
+					if(std::pow(px - cx, 2) + std::pow(py - cy, 2) <= radiusSq) {
+						size_t i = r * cols + c;
+						cells[i].push_back(std::move(pt));
+						populated[i] = true;
+					}
 				}
 			}
-			lastC = col - rad;
+		} else {
+			cells[idx].push_back(std::move(pt));
+			populated[idx] = true;
+		}
+
+		if(row - rad > lastR) {
+			for(int r = lastR; r < row - rad; ++r) {
+				for(int c = 0; c < cols; ++c) {
+					size_t i = r * cols + c;
+					if(populated[i]) {
+						const std::vector<geo::pc::Point>& pts = cells[i];
+						finalize(c, r, props.toCentroidX(c), props.toCentroidY(r), radius, pts, rasters, computers);
+						remove.push_back(i);
+					}
+				}
+			}
 			lastR = row - rad;
-			for(const size_t& i : remove)
+			for(const size_t& i : remove) {
 				cells.erase(i);
+				populated[i] = false;
+			}
 			remove.clear();
 		}
 	}
@@ -315,11 +327,7 @@ std::vector<double> _out;
 void Rasterizer::finalize(int col, int row, double x, double y, double radius,
 		const std::vector<geo::pc::Point>& points, std::vector<std::unique_ptr<MemRaster> >& rasters,
 		std::vector<std::unique_ptr<Computer> >& computers) {
-	/*
-	std::vector<geo::pc::Point> filtered;
-	std::vector<double> write;
-	std::vector<double> out;
-	*/
+
 	size_t count = points.size();
 	if(count)
 		count = m_filter->filter(points.begin(), points.end(), std::back_inserter(_filtered));

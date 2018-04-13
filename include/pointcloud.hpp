@@ -416,9 +416,9 @@ public:
  */
 class Point {
 private:
-	float m_x; 			///< The x-coordinate.
-	float m_y; 			///< The y-coordinate.
-	float m_z; 			///< The z-coordinate.
+	double m_x; 			///< The x-coordinate.
+	double m_y; 			///< The y-coordinate.
+	double m_z; 			///< The z-coordinate.
 	float m_intensity;
 	float m_angle;
 	char m_cls;

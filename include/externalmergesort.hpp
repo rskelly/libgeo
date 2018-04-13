@@ -35,8 +35,8 @@ public:
 		xScale(xScale), yScale(yScale),
 		xOffset(xOffset), yOffset(yOffset) {}
 	void transform(const geo::pc::Point& pt, int& x, int& y) const {
-		x = (pt.x() - xOffset) * xScale;
-		y = (pt.y() - yOffset) * yScale;
+		x = (pt.x() - xOffset) / xScale;
+		y = (pt.y() - yOffset) / yScale;
 	}
 };
 
@@ -87,7 +87,7 @@ bool pointSort(const geo::pc::Point& a, const geo::pc::Point& b, const PointTran
 	int ax, ay, bx, by;
 	trans.transform(a, ax, ay);
 	trans.transform(b, bx, by);
-	return ax < bx || (ax == bx && ay < by); //interleave(ax, ay) < interleave(bx, by);
+	return ay < by || (ay == by && ax < bx);
 }
 
 /**
