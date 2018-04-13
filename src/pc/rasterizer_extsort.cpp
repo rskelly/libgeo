@@ -24,6 +24,7 @@
 using namespace geo::raster;
 using namespace geo::pc;
 using namespace geo::pc::compute;
+using namespace geo::pc::sort;
 
 const std::unordered_map<std::string, std::string> computerNames = {
 		{"min", "The minimum value"},
@@ -144,7 +145,7 @@ void fixBounds(double* bounds, double resX, double resY, double& easting, double
 	} else {
 		if(resY > 0) {
 			if(northing > ymin)
-				g_argerr("Easting must be to the North of the boundary.")
+				g_argerr("Northing must be to the North of the boundary.")
 			ymin = northing;
 			ymax += ry;
 		} else {
@@ -163,19 +164,16 @@ void fixBounds(double* bounds, double resX, double resY, double& easting, double
 }
 
 void Rasterizer::setFilter(PCPointFilter* filter) {
-	//if(m_filter)
-	//	delete m_filter;
 	m_filter = filter;
 }
 
 Rasterizer::~Rasterizer() {
-	//if(m_filter)
-	//	delete m_filter;
 }
 
 
-void Rasterizer::rasterize(const std::string& filename, const std::vector<std::string>& _types,
-		double resX, double resY, double easting, double northing, double radius, int srid, int memory, bool useHeader) {
+void Rasterizer::rasterize(const std::string& filename, const std::vector<std::string>& types,
+		double resX, double resY, double easting, double northing, double radius, 
+		int srid, int memory, bool useHeader) {
 
 	if(std::isnan(resX) || std::isnan(resY))
 		g_runerr("Resolution not valid");
@@ -185,13 +183,12 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 		g_warn("Invalid radius; using " << radius);
 	}
 
-	std::vector<std::string> types(_types);
 	if(types.empty())
 		g_argerr("No methods given; defaulting to mean");
 
-	std::vector<std::unique_ptr<Computer> > computers;
+	m_computers.clear();
 	for(const std::string& name : types)
-		computers.emplace_back(getComputer(name));
+		m_computers.emplace_back(getComputer(name));
 
 	g_trace("Checking file bounds");
 	std::vector<std::string> filenames;
@@ -219,7 +216,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	g_trace(" cols: " << cols << ", rows: " << rows)
 
 	int bandCount = 1;
-	for(const std::unique_ptr<Computer>& comp : computers)
+	for(const std::unique_ptr<Computer>& comp : m_computers)
 		bandCount += comp->bandCount();
 	g_trace(" bands: " << bandCount)
 
@@ -233,17 +230,18 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	props.setWritable(true);
 	props.setBands(bandCount);
 
-	std::vector<std::unique_ptr<MemRaster> > rasters;
-	for(int band = 1; band <= bandCount; ++band)
-		rasters.emplace_back(new MemRaster(props, true));
+	m_rasters.clear();
+	m_rasters.resize(bandCount); // Constructs the default MemRasters.
+	for(int i = 0; i < bandCount; ++i) {
+		m_rasters[i].init(props, true);
+		m_rasters[i].fillFloat(NODATA);
+	}
 
-	rasters[0]->fillFloat(0);
-	for(int i= 1; i < bandCount; ++i)
-		rasters[i]->fillFloat(NODATA);
-
-	ExternalMergeSort es(filename, filenames, "/tmp", easting, northing, resX, resY);
+	ExternalMergeSort es(filename, filenames, "/tmp");
 	CountComputer countComp;
 
+	es.setTransformer(new PointTransformer(easting, northing, resX, resY));
+	es.setLoader(new LASPointLoader());
 	es.sort(true);
 
 	// The last finalized row.
@@ -254,13 +252,10 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	int rad = (int) std::ceil(radius / std::max(std::abs(resX), std::abs(resY)));
 	// Dictionary of cells/points.
 	std::unordered_map<size_t, std::vector<geo::pc::Point> > cells;
-	// List of populated cells.
-	std::vector<bool> populated(cols * rows);
 	// List of cells to remove from the dictionary.
 	std::list<size_t> remove;
 
 	geo::pc::Point pt;
-
 	while(es.next(pt)) {
 
 		double px = pt.x();
@@ -274,34 +269,32 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 				for(int c = std::max(0, col - rad); c < std::min(cols, col + rad + 1); ++c) {
 					double cx = props.toCentroidX(c);
 					double cy = props.toCentroidY(r);
-					if(std::pow(px - cx, 2) + std::pow(py - cy, 2) <= radiusSq) {
-						size_t i = r * cols + c;
-						cells[i].push_back(std::move(pt));
-						populated[i] = true;
-					}
+					if(std::pow(px - cx, 2) + std::pow(py - cy, 2) <= radiusSq)
+						cells[r * cols + c].push_back(std::move(pt));
 				}
 			}
 		} else {
 			cells[idx].push_back(std::move(pt));
-			populated[idx] = true;
 		}
 
 		if(row - rad > lastR) {
+			// If the row counter is at least rad greater than the last
+			// finalized row, finalize the rows.
 			for(int r = lastR; r < row - rad; ++r) {
 				for(int c = 0; c < cols; ++c) {
 					size_t i = r * cols + c;
-					if(populated[i]) {
+					if(cells.find(i) != cells.end()) {
 						const std::vector<geo::pc::Point>& pts = cells[i];
-						finalize(c, r, props.toCentroidX(c), props.toCentroidY(r), radius, pts, rasters, computers);
+						finalize(c, r, props.toCentroidX(c), props.toCentroidY(r), radius, pts);
 						remove.push_back(i);
 					}
 				}
 			}
 			lastR = row - rad;
-			for(const size_t& i : remove) {
+			// Remove processed cells.
+			for(const size_t& i : remove)
 				cells.erase(i);
-				populated[i] = false;
-			}
+			g_debug("Finalized " << remove.size() << " cells")
 			remove.clear();
 		}
 	}
@@ -310,45 +303,40 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	for(auto& pair : cells) {
 		int col = pair.first % cols;
 		int row = pair.first / cols;
-		finalize(col, row, props.toCentroidX(col), props.toCentroidY(row), radius, pair.second, rasters, computers);
+		finalize(col, row, props.toCentroidX(col), props.toCentroidY(row), radius, pair.second);
 	}
 
 	Raster outrast(filename, props);
-	for(int band = 1; band <= bandCount; ++band)
-		rasters[band - 1]->writeTo(outrast, props.cols(), props.rows(), 0, 0, 0, 0, 1, band);
+	for(int i = 0; i < bandCount; ++i)
+		m_rasters[i].writeTo(outrast, props.cols(), props.rows(), 0, 0, 0, 0, 1, i + 1);
 
 	g_debug("Done")
 }
 
-std::vector<geo::pc::Point> _filtered;
-std::vector<double> _write;
-std::vector<double> _out;
-
 void Rasterizer::finalize(int col, int row, double x, double y, double radius,
-		const std::vector<geo::pc::Point>& points, std::vector<std::unique_ptr<MemRaster> >& rasters,
-		std::vector<std::unique_ptr<Computer> >& computers) {
+		const std::vector<geo::pc::Point>& points) {
 
 	size_t count = points.size();
 	if(count)
-		count = m_filter->filter(points.begin(), points.end(), std::back_inserter(_filtered));
-	_write.push_back(count);
+		count = m_filter->filter(points.begin(), points.end(), std::back_inserter(m_filtered));
+	m_write.push_back(count);
 	if(count) {
-		for(size_t i = 0; i < computers.size(); ++i) {
-			computers[i]->compute(x, y, points, _filtered, radius, _out);
-			for(double val : _out)
-				_write.push_back(std::isnan(val) ? NODATA : val);
+		for(size_t i = 0; i < m_computers.size(); ++i) {
+			m_computers[i]->compute(x, y, points, m_filtered, radius, m_out);
+			for(double val : m_out)
+				m_write.push_back(std::isnan(val) ? NODATA : val);
 		}
 	} else {
-		for(size_t i = 0; i < computers.size(); ++i) {
-			for(int j = 0; j < computers[i]->bandCount(); ++j)
-				_write.push_back(NODATA);
+		for(size_t i = 0; i < m_computers.size(); ++i) {
+			for(int j = 0; j < m_computers[i]->bandCount(); ++j)
+				m_write.push_back(NODATA);
 		}
 	}
 
-	for(size_t i = 0; i < _write.size(); ++i)
-		rasters.at(i)->setFloat(col, row, _write[i]);
+	for(size_t i = 0; i < m_write.size(); ++i)
+		m_rasters[i].setFloat(col, row, m_write[i]);
 
-	_write.clear();
-	_filtered.clear();
-	_out.clear();
+	m_write.clear();
+	m_filtered.clear();
+	m_out.clear();
 }

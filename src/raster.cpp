@@ -839,9 +839,15 @@ void MemRaster::checkInit() const {
 		g_runerr("This instance has not been initialized.");
 }
 
-MemRaster::MemRaster() :
+MemRaster::MemRaster() : 
 	m_grid(nullptr),
 	m_mmapped(false) {
+}
+
+MemRaster::MemRaster(const MemRaster& other) :
+	m_grid(nullptr),
+	m_mmapped(false) {
+	init(other.props(), other.mmapped());
 }
 
 MemRaster::MemRaster(const GridProps &props, bool mapped) :

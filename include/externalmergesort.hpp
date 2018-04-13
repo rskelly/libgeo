@@ -23,89 +23,33 @@
 using namespace geo::util;
 using namespace geo::pc;
 
+
+namespace geo {
+namespace pc {
+namespace sort {
+
+/**
+ * Holds offset and scale information for transforming
+ * points to a sortable representation.
+ */
 class PointTransformer {
+private:
+	double m_x;
+	double m_y;
+	double m_xscale;
+	double m_yscale;
 public:
-	double xScale;
-	double yScale;
-	double xOffset;
-	double yOffset;
 	PointTransformer() :
-		PointTransformer(1, 1, 0, 0) {}
-	PointTransformer(double xScale, double yScale, double xOffset, double yOffset) :
-		xScale(xScale), yScale(yScale),
-		xOffset(xOffset), yOffset(yOffset) {}
-	void transform(const geo::pc::Point& pt, int& x, int& y) const {
-		x = (pt.x() - xOffset) / xScale;
-		y = (pt.y() - yOffset) / yScale;
+		PointTransformer(0, 0, 1, 1) {}
+	PointTransformer(double x, double y, double xscale, double yscale) :
+		m_x(x), m_y(y),
+		m_xscale(xscale), m_yscale(yscale) {}
+	void transform(const geo::pc::Point& pt, double& x, double& y) const {
+		x = (pt.x() - m_x) / m_xscale;
+		y = (pt.y() - m_y) / m_yscale;
 	}
 };
 
-/**
- * Interleave the coordinates' bits to produce an index appropriate for z-ordering.
- *
- * @param x The x-coordinate. A pre-scaled integer.
- * @param y The y-coordinate. A pre-scaled integer.
- * @return The index.
- */
-size_t interleave(size_t x, size_t y) {
-	size_t out = 0;
-	for(size_t i = 0; i < sizeof(int) * 8; ++i) {
-		out |= ((x >> i) & 1) << (i * 2);
-		out |= ((y >> i) & 1) << (i * 2 + 1);
-	}
-	return out;
-}
-
-/**
- * Reverse the interleaving process, converting an index into
- * scaled x and y coordinates.
- *
- * @param index The Morton index.
- * @param x A reference to the x coordinate.
- * @param y A reference to the y coordinate.
- */
-void uninterleave(size_t index, size_t& x, size_t& y) {
-	x = 0; y = 0;
-	for(size_t i = 0; i < sizeof(size_t) * 8; i += 2) {
-		x |= ((index >> i) & 1) << (i >> 1);
-		y |= ((index >> (i + 1)) & 1) << (i >> 1);
-	}
-}
-
-/**
- * Sort function for Points. Uses the Morton index for sorting, using
- * the normalized and scaled coordinates.
- *
- * @param a A Point.
- * @param b A Point.
- * @param scale The normalized coordinates are divided by this amount.
- * @param xmin The minimum x coordinate of the bounding box. Subtracted from x.
- * @param ymin The minimum y coordinate of the bounding box. Subtracted from y.
- * @return True if a is "less" than b according to the Morton ordering.
- */
-bool pointSort(const geo::pc::Point& a, const geo::pc::Point& b, const PointTransformer& trans) {
-	int ax, ay, bx, by;
-	trans.transform(a, ax, ay);
-	trans.transform(b, bx, by);
-	return ay < by || (ay == by && ax < bx);
-}
-
-/**
- * Sorts the vector of points beginning and ending at the given indices.
- * Points are normalized and scaled and sorted according to the Morton
- * ordering.
- *
- * @param pts A vector of Points.
- * @param begin The start index.
- * @param end The end index.
- * @param scale The normalized coordinates are divided by this amount.
- * @param xmin The minimum x coordinate of the bounding box. Subtracted from x.
- * @param ymin The minimum y coordinate of the bounding box. Subtracted from y.
- */
-void sortPoints(std::vector<geo::pc::Point>* pts, size_t begin, size_t end, const PointTransformer& trans) {
-	std::sort(pts->begin() + begin, pts->begin() + end,
-			std::bind(pointSort, std::placeholders::_1, std::placeholders::_2, trans));
-}
 
 /**
  * Abstract class for loading points and returning them as
@@ -114,41 +58,55 @@ void sortPoints(std::vector<geo::pc::Point>* pts, size_t begin, size_t end, cons
 class PointLoader {
 public:
 	virtual int getPoints(std::vector<geo::pc::Point>& pts, int count) = 0;
-	virtual void computeBounds(double& xmin, double& ymin, bool useHeader) = 0;
+	virtual void load(const std::string& filename) = 0;
 	virtual ~PointLoader() {}
 };
 
+
 /**
  * Implementation of PointLoader to load LAS files.
- * TODO: Duplicate of PFile.
  */
 class LASPointLoader : public PointLoader {
 private:
+
 	liblas::Reader* m_rdr;
 	std::ifstream* m_instr;
 
+	double m_xscale;
+	double m_yscale;
+	double m_zscale;
+
 public:
-	LASPointLoader(const std::string& filename) {
+
+	LASPointLoader() :
+		m_rdr(nullptr),
+		m_instr(nullptr),
+		m_xscale(1),
+		m_yscale(1),
+		m_zscale(1) {
+	}
+
+	void load(const std::string& filename) {
+		// Set up the reader.
 		liblas::ReaderFactory rf;
 		m_instr = new std::ifstream(filename, std::ios::binary|std::ios::in);
 		m_rdr = new liblas::Reader(rf.CreateWithStream(*m_instr));
-
+		const liblas::Header& hdr = m_rdr->GetHeader();
+		m_xscale = hdr.GetScaleX();
+		m_yscale = hdr.GetScaleY();
+		m_zscale = hdr.GetScaleZ();
 	}
 
-	void computeBounds(double& xmin, double& ymin, bool useHeader) {
-		if(useHeader) {
-			const liblas::Header& hdr = m_rdr->GetHeader();
-			xmin = hdr.GetMinX();
-			ymin = hdr.GetMinY();
-		} else {
-			xmin = G_DBL_MAX_POS;
-			ymin = G_DBL_MAX_POS;
-			while(m_rdr->ReadNextPoint()) {
-				const liblas::Point& pt = m_rdr->GetPoint();
-				xmin = std::min(xmin, pt.GetX());
-				ymin = std::min(ymin, pt.GetY());
-			}
-		}
+	double xscale() const {
+		return m_xscale;
+	}
+
+	double yscale() const {
+		return m_yscale;
+	}
+
+	double zscale() const {
+		return m_zscale;
 	}
 
 	int getPoints(std::vector<geo::pc::Point>& pts, int count) {
@@ -165,6 +123,7 @@ public:
 		delete m_instr;
 	}
 };
+
 
 /**
  * Loads a cache file and returns its points one by one.
@@ -212,10 +171,17 @@ public:
 		m_ptr(0) {
 	}
 
+	/**
+	 * Returns true if there are no (more) points in the list.
+	 * @return True if there are no (more) points in the list.
+	 */
 	bool empty() {
 		return m_ptr >= m_size;
 	}
 
+	/**
+	 * Reset the pointer to the beginning of the list.
+	 */
 	void reset() {
 		m_ptr = 0;
 	}
@@ -227,17 +193,55 @@ public:
 		}
 	}
 
+	/**
+	 * Return the point currently at the front of the list.
+	 * @return nullptr if there are no more points.
+	 */
 	geo::pc::Point* current() {
 		if((m_pts.empty() || m_ptr >= m_pts.size())  && !loadNext())
 			return nullptr;
 		return &(m_pts[m_ptr]);
 	}
 
+	/**
+	 * Remove the point at the front of the list.
+	 */
 	void pop() {
 		++m_ptr;
 	}
 
 };
+
+
+/**
+ * Sort function for Points. Points will be transformed before sorting.
+ *
+ * @param a A Point.
+ * @param b A Point.
+ * @param trans A PointTransformer.
+ * @return True if a is "less" than b.
+ */
+bool pointSort(const geo::pc::Point& a, const geo::pc::Point& b, PointTransformer* trans) {
+	double ax, ay, bx, by;
+	trans->transform(a, ax, ay);
+	trans->transform(b, bx, by);
+	return ay < by || (ay == by && ax < bx);
+}
+
+/**
+ * Sorts the vector of points beginning and ending at the given indices.
+ *
+ * @param pts A vector of Points.
+ * @param begin The start index.
+ * @param end The end index.
+ * @param trans a PointTransformer.
+ */
+void sortPoints(std::vector<geo::pc::Point>* pts, size_t begin, size_t end, PointTransformer* trans) {
+	std::sort(pts->begin() + begin, pts->begin() + end,
+			std::bind(pointSort, std::placeholders::_1, std::placeholders::_2, trans));
+}
+
+
 
 /**
  * Sorts point clouds and provides methods for returning the sorted points.
@@ -252,7 +256,8 @@ private:
 	int m_numChunks;						///< The number of chunks to process simultaneously.
 	int m_chunk; 							///< The ID of the current chunk file.
 
-	PointTransformer m_trans;
+	PointLoader* m_loader;
+	PointTransformer* m_trans;
 
 	std::vector<geo::pc::Point> m_buffer;
 	std::ifstream* m_instr;
@@ -286,47 +291,41 @@ private:
 		for(const std::string& file : chunkFiles)
 			inStreams.emplace_back(file, m_chunkSize);
 
-		size_t minIdx;
 		size_t count = 0;
+		PointStream* source; // The source that produced minPt.
 		geo::pc::Point* minPt;
 		std::vector<geo::pc::Point> buffer;
-		PointStream* source;
-
 		buffer.reserve(m_chunkSize);
+
 		while(true) {
 			minPt = nullptr;
 			for(PointStream& ps : inStreams) {
 				geo::pc::Point* a = ps.current();
-				if(a && !minPt) {
-					minPt = a;
-					source = &ps;
-				} else if(a && minPt && pointSort(*a, *minPt, m_trans)) {
+				if(a && (!minPt || pointSort(*a, *minPt, m_trans))) {
 					minPt = a;
 					source = &ps;
 				}
 			}
 			if(minPt) {
+				// A point was found. Remove it from the source and add to the buffer.
 				source->pop();
-				// A point was found at the index. Remove it.
 				buffer.push_back(*minPt);
 				if(buffer.size() == m_chunkSize) {
 					// Write the points to the output.
-					g_debug("merge write");
 					outStream.write((char*) buffer.data(), buffer.size() * sizeof(geo::pc::Point));
 					count += buffer.size();
 					buffer.clear();
 				}
 			} else {
+				// All the sources are empty.
 				break;
 			}
 		}
 
 		if(!buffer.empty()) {
 			// Write the points to the output.
-			g_debug("merge write final")
 			outStream.write((char*) buffer.data(), buffer.size() * sizeof(geo::pc::Point));
 			count += buffer.size();
-			buffer.clear();
 		}
 
 		// Write the final point count.
@@ -344,13 +343,13 @@ private:
 		int size;
 		// Iterate over the list of source files.
 		for(const std::string& inputFile : m_inputFiles) {
-			LASPointLoader ldr(inputFile);
+			m_loader->load(inputFile);
 			while(true) {
 				std::list<std::thread> threads;
 				std::vector<geo::pc::Point> pts;
 				pts.reserve(m_numChunks * m_chunkSize);
-				if((size = ldr.getPoints(pts, m_numChunks * m_chunkSize))) {
-					for(int i = 0; i < size / m_chunkSize; ++i) {
+				if((size = m_loader->getPoints(pts, m_numChunks * m_chunkSize))) {
+					for(int i = 0; i < (int) std::ceil((double) size / m_chunkSize); ++i) {
 						size_t begin = i * m_chunkSize;
 						size_t end = std::min(size, (i + 1) * m_chunkSize);
 						threads.emplace_back(sortPoints, &pts, begin, end, m_trans);
@@ -360,7 +359,7 @@ private:
 				}
 				for(std::thread& t : threads)
 					t.join();
-				for(int i = 0; i <= size / m_chunkSize; ++i) {
+				for(int i = 0; i < (int) std::ceil((double) size / m_chunkSize); ++i) {
 					size_t begin = i * m_chunkSize;
 					size_t end = std::min(size, (i + 1) * m_chunkSize);
 					// Create and open an output stream.
@@ -396,7 +395,6 @@ private:
 					tmp.assign(m_chunkFiles.begin() + i, m_chunkFiles.begin() + i + m_numChunks);
 				}
 				// Merge the chunks into a new chunk.
-				g_debug("merge " << i << "-" << i + m_numChunks << " of " << m_chunkFiles.size())
 				newChunks.push_back(mergeChunks(tmp));
 			}
 			for(const std::string& file : m_chunkFiles)
@@ -449,38 +447,36 @@ public:
 	 * @param numChunks The number of chunks that can be processed simultaneously. (Processors)
 	 */
 	ExternalMergeSort(const std::string& outputFile, const std::vector<std::string>& inputFiles,
-			const std::string tmpDir,
-			double xOffset = 0, double yOffset = 0,
-			double xScale = 1, double yScale = 1,
-			int chunkSize = 1024 * 1024, int numChunks = 4) :
+			const std::string tmpDir, int chunkSize = 1024 * 1024, int numChunks = 4) :
 		m_outputFile(outputFile),
 		m_inputFiles(inputFiles),
 		m_tmpDir(tmpDir),
 		m_chunkSize(chunkSize),
 		m_numChunks(numChunks),
 		m_chunk(0),
+		m_loader(nullptr),
+		m_trans(new PointTransformer()),
 		m_instr(nullptr),
 		m_count(0),
 		m_position(0),
 		m_index(0) {
-
-		m_trans.xOffset = xOffset;
-		m_trans.yOffset = yOffset;
-		m_trans.xScale = xScale;
-		m_trans.yScale = yScale;
 	}
 
 	/**
-	 * Return the Morton index of the Point. The coordinate will be
-	 * normalized and scaled.
-	 *
-	 * @param pt A Point.
-	 * @return The Morton index.
+	 * Set the PointLoader. This class takes ownership and
+	 * will destroy the loader when finished.
+	 * @param loader A PointLoader.
 	 */
-	size_t index(const geo::pc::Point& pt) const {
-		int x, y;
-		m_trans.transform(pt, x, y);
-		return interleave(x, y);
+	void setLoader(PointLoader* loader) {
+		if(m_loader && m_loader != loader)
+			delete m_loader;
+		m_loader = loader;
+	}
+
+	void setTransformer(PointTransformer* trans) {
+		if(m_trans && m_trans != trans)
+			delete m_trans;
+		m_trans = trans;
 	}
 
 	/**
@@ -491,6 +487,10 @@ public:
 	 */
 	void sort(bool force) {
 		if(!Util::exists(m_outputFile) || force) {
+			if(!m_loader)
+				g_runerr("No point loader has been configured.")
+			if(!m_trans)
+				g_runerr("No point transformer has been configured.")
 			phase1();
 			phase2();
 		}
@@ -525,9 +525,16 @@ public:
 
 	~ExternalMergeSort() {
 		unload();
+		if(m_loader)
+			delete m_loader;
+		if(m_trans)
+			delete m_trans;
 	}
+
 };
 
-
+} // sort
+} // pc
+} // geo
 
 #endif /* INCLUDE_EXTERNALMERGESORT_HPP_ */

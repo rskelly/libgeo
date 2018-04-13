@@ -1041,7 +1041,6 @@ namespace geo {
             bool m_mmapped;
             GridProps m_props;
             std::unique_ptr<geo::util::MappedFile> m_mappedFile;
-            std::mutex m_mtx;
 
             // Checks if the grid has been initialized. Throws exception otherwise.
             void checkInit() const;
@@ -1049,8 +1048,11 @@ namespace geo {
             void freeMem();
 
         public:
+
             MemRaster();
 
+            MemRaster(const MemRaster& other);
+            
             MemRaster(const GridProps &props, bool mapped = false);
 
             ~MemRaster();
