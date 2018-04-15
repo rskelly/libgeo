@@ -32,3 +32,4 @@ makefiles
 /.cproject
 /.project
 .settings
+/build/
