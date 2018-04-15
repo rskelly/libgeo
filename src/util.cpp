@@ -4,9 +4,16 @@
 
 #include <ogr_spatialref.h>
 
+#include <boost/interprocess/mapped_region.hpp>
+#include <boost/interprocess/shared_memory_object.hpp>
+#include <boost/interprocess/file_mapping.hpp>
 #include <boost/filesystem.hpp>
+#include <boost/algorithm/string/join.hpp>
+#include <boost/algorithm/string/case_conv.hpp>
+#include <boost/algorithm/string/predicate.hpp>
 
 #include "crypto/md5.hpp"
+#include "crypto/uuid.hpp"
 #include "util.hpp"
 
 using namespace geo::util;
@@ -103,32 +110,30 @@ Point::Point() :
 }
 
 Bounds::Bounds() :
-		m_minx(G_DBL_MAX_POS), m_miny(G_DBL_MAX_POS), m_minz(G_DBL_MAX_POS), m_maxx(
-				G_DBL_MAX_NEG), m_maxy(G_DBL_MAX_NEG), m_maxz(G_DBL_MAX_NEG) {
+	Bounds(G_DBL_MAX_POS, G_DBL_MAX_POS, G_DBL_MAX_NEG, G_DBL_MAX_NEG, G_DBL_MAX_POS, G_DBL_MAX_NEG) {
 }
 
 Bounds::Bounds(double minx, double miny, double maxx, double maxy) :
-		m_minx(minx), m_miny(miny), m_minz(G_DBL_MAX_NEG), m_maxx(maxx), m_maxy(
-				maxy), m_maxz(G_DBL_MAX_POS) {
+	Bounds(minx, miny, maxx, maxy, G_DBL_MAX_POS, G_DBL_MAX_NEG) {
 }
 
-Bounds::Bounds(double minx, double miny, double maxx, double maxy, double minz,
-		double maxz) :
-		m_minx(minx), m_miny(miny), m_minz(minz), m_maxx(maxx), m_maxy(maxy), m_maxz(
-				maxz) {
+Bounds::Bounds(double minx, double miny, double maxx, double maxy, double minz, double maxz) :
+		m_minx(std::min(minx, maxx)), m_miny(std::min(miny, maxy)),
+		m_maxx(std::max(minx, maxx)), m_maxy(std::max(miny, maxy)),
+		m_minz(std::min(minz, maxz)), m_maxz(std::min(minz, maxz)) {
 }
 
 void Bounds::assign(const Bounds& bounds) {
 	set(bounds.minx(), bounds.miny() , bounds.maxx(), bounds.maxy(), bounds.minz(), bounds.maxz());
 }
 
-void Bounds::set(double _minx, double _miny, double _maxx, double _maxy, double _minz, double _maxz) {
-	m_minx = _minx;
-	m_miny = _miny;
-	m_minz = _minz;
-	m_maxx = _maxx;
-	m_maxy = _maxy;
-	m_maxz = _maxz;
+void Bounds::set(double minx, double miny, double maxx, double maxy, double minz, double maxz) {
+	m_minx = std::min(minx, maxx);
+	m_miny = std::min(miny, maxy);
+	m_minz = std::min(minz, maxz);
+	m_maxx = std::max(minx, maxx);
+	m_maxy = std::max(miny, maxy);
+	m_maxz = std::max(minz, maxz);
 }
 
 bool Bounds::contains(double x, double y) const {
@@ -435,36 +440,6 @@ double Util::computeArea(double x1, double y1, double z1, double x2, double y2,
 	return std::sqrt(s * (s - side0) * (s - side1) * (s - side2));
 }
 
-std::vector<std::pair<int, int> > Util::circularKernel(int outerRadius, int innerRadius, bool includeCenter) {
-	double outr = g_sq((double) outerRadius) + 1.0;
-	double inr = g_sq((double) innerRadius);
-	std::vector<std::pair<int, int> > offsets;
-	for(int r = -outerRadius; r < outerRadius + 1; ++r) {
-		for(int c = -outerRadius; c < outerRadius + 1; ++c) {
-			double d0 = g_sq((double) c) + g_sq((double) r);
-			if((d0 <= outr && d0 >= inr) || (includeCenter && r == 0 && c == 0)) {
-				offsets.push_back(std::make_pair(c, r));
-				std::cerr << "x ";
-			} else {
-				std::cerr << "  ";
-			}
-		}
-		std::cerr << "\n";
-	}
-	return offsets;
-}
-
-std::vector<std::pair<int, int> > Util::squareKernel(int size, bool includeCenter) {
-	std::vector<std::pair<int, int> > offsets;
-	for(int r = -size / 2; r < size / 2 + 1; ++r) {
-		for(int c = -size / 2; c < size / 2 + 1; ++c) {
-			if(includeCenter || !(r == 0 && c == 0))
-				offsets.push_back(std::make_pair(c, r));
-		}
-	}
-	return offsets;
-}
-
 void Util::copyfile(const std::string &srcfile, const std::string &dstfile) {
 	std::ifstream src(srcfile.c_str(), std::ios::binary);
 	std::ofstream dst(dstfile.c_str(), std::ios::binary);
@@ -479,6 +454,11 @@ bool Util::exists(const std::string &name) {
 std::string Util::basename(const std::string &filename) {
 	boost::filesystem::path p(filename);
 	return boost::filesystem::basename(filename);
+}
+
+std::string Util::filename(const std::string &filename) {
+	boost::filesystem::path p(filename);
+	return p.filename().string();
 }
 
 std::string Util::pathJoin(const std::string& a, const std::string& b) {
@@ -510,6 +490,18 @@ bool Util::mkdir(const std::string &dir) {
 	if (!boost::filesystem::exists(bdir))
 		return create_directories(bdir);
 	return true;
+}
+
+bool Util::isDir(const std::string& path) {
+	boost::filesystem::path p(path);
+	return boost::filesystem::is_directory(p);
+
+}
+
+bool Util::isFile(const std::string& path) {
+	boost::filesystem::path p(path);
+	return boost::filesystem::is_regular(p);
+
 }
 
 std::string Util::parent(const std::string& file) {
@@ -573,34 +565,102 @@ std::string Util::md5(const std::string& input) {
 	return m.hexdigest();
 }
 
-MappedFile::MappedFile(const std::string& name, uint64_t size, bool mapped) :
-	m_mapped(mapped),
+#include "openssl/sha.h"
+
+std::string Util::sha256(const std::string& input) {
+	const char* str = input.c_str();
+	char outputBuffer[65];
+	unsigned char hash[SHA256_DIGEST_LENGTH];
+	SHA256_CTX sha256;
+	SHA256_Init(&sha256);
+	SHA256_Update(&sha256, str, strlen(str));
+	SHA256_Final(hash, &sha256);
+	for(int i = 0; i < SHA256_DIGEST_LENGTH; i++)
+		sprintf(outputBuffer + (i * 2), "%02x", hash[i]);
+	outputBuffer[64] = 0;
+	return std::string(outputBuffer);
+}
+
+std::string Util::sha256File(const std::string& file) {
+	const char *path = file.c_str();
+	char outputBuffer[65];
+	std::FILE *f = std::fopen(path, "rb");
+	if(!f)
+		throw std::runtime_error("Failed to open file for hashing.");
+	unsigned char hash[SHA256_DIGEST_LENGTH];
+	SHA256_CTX sha256;
+	SHA256_Init(&sha256);
+	const int bufSize = 32768;
+	char *buffer = (char*) malloc(bufSize);
+	if(!buffer)
+		throw std::runtime_error("Failed to allocate buffer for hashing.");
+	int bytesRead = 0;
+	while((bytesRead = std::fread(buffer, 1, bufSize, f)))
+		SHA256_Update(&sha256, buffer, bytesRead);
+	std::fclose(f);
+	SHA256_Final(hash, &sha256);
+	for(int i = 0; i < SHA256_DIGEST_LENGTH; i++)
+		sprintf(outputBuffer + (i * 2), "%02x", hash[i]);
+	free(buffer);
+	return std::string(outputBuffer);
+}
+
+
+using namespace boost::interprocess;
+
+std::string mapName() {
+	return Util::pathJoin(Util::tmpDir(), "geo_util_mapped_" + geo::crypto::UUID::uuid());
+}
+
+MappedFile::MappedFile() :
+		MappedFile(0, false, false) {
+}
+
+MappedFile::MappedFile(uint64_t size, bool fileBacked, bool deleteOnDestruct) :
+		MappedFile(mapName(), size, fileBacked, deleteOnDestruct) {
+}
+
+MappedFile::MappedFile(const std::string& name, uint64_t size, bool fileBacked, bool deleteOnDestruct) :
 	m_size(0),
-	m_name("dijital"),
+	m_name(name),
 	m_region(nullptr),
-	m_file(nullptr) {
+	m_shm(nullptr),
+	m_fm(nullptr),
+	m_fileBacked(fileBacked),
+	m_deleteOnDestruct(deleteOnDestruct),
+	m_fileExists(false),
+	m_fileInited(false) {
+
+	if(m_fileBacked && Util::exists(name)) {
+		m_fileExists = true;
+		m_deleteOnDestruct = false;
+	}
 
 	if (size > 0)
 		reset(size);
 }
 
-MappedFile::MappedFile(uint64_t size, bool mapped) :
-	m_mapped(mapped),
-	m_size(0),
-	m_name("dijital"),
-	m_region(nullptr),
-	m_file(nullptr) {
-
-	if (size > 0)
-		reset(size);
+void MappedFile::flush() {
+	if(m_region)
+		m_region->flush();
 }
 
-MappedFile::MappedFile(bool mapped) :
-	m_mapped(mapped),
-	m_size(0),
-	m_name("dijital"),
-	m_region(nullptr),
-	m_file(nullptr) {
+void MappedFile::init(size_t size, bool fileBacked, bool deleteOnDestruct) {
+	init(mapName(), size, fileBacked, deleteOnDestruct);
+}
+
+void MappedFile::init(const std::string& name, size_t size, bool fileBacked, bool deleteOnDestruct) {
+	m_name = name;
+	m_fileBacked = fileBacked;
+	m_deleteOnDestruct = deleteOnDestruct;
+
+	if(m_fileBacked && Util::exists(name)) {
+		m_fileExists = true;
+		m_deleteOnDestruct = false;
+	}
+
+	if(size > 0)
+		reset(size);
 }
 
 const std::string& MappedFile::name() const {
@@ -630,69 +690,48 @@ bool MappedFile::read(void* output, uint64_t position, uint64_t length) {
     return true;
 }
 
-static uint64_t s_mappedIdx = 0;
-
 void MappedFile::reset(uint64_t size) {
-	using namespace boost::interprocess;
-	#pragma omp critical(__mapped_file_reset__)
-	{
-		size = fixSize(size);
-		if(m_size > 0 && size > m_size) {
-			uint64_t oldSize = m_size;
-			m_size = size;
-			if(m_mapped) {
-				if (m_region) {
-					m_region->flush();
-					delete m_region;
-				}
-				if (m_file)
-					delete m_file;
+	size = fixSize(size);
+	if(size < m_size)
+		g_runerr("Cannot shrink mapped files.");
+	if(size != 0 && size != m_size) {
+		m_size = size;
+		if (m_region) {
+			m_region->flush();
+			delete m_region;
+		}
 
-				std::FILE* f = std::fopen(m_shmemName.c_str(), "w+");
-				if(f) {
-					char buf = 0;
-					std::fseek(f, m_size, SEEK_SET);
-					std::fwrite(&buf, m_size, 1, f);
-					std::fclose(f);
-					m_file = new file_mapping(m_shmemName.c_str(), read_write);
-					m_region = new mapped_region(*m_file, read_write);
+		if(m_fileBacked) {
+			if(!m_fileExists) {
+				if(!m_fileInited) {
+					std::filebuf fbuf;
+					fbuf.open(m_name, std::ios_base::in | std::ios_base::out | std::ios_base::trunc | std::ios_base::binary);
+					fbuf.pubseekoff(m_size - 1, std::ios_base::beg);
+					fbuf.sputc(0);
+					m_fileInited = true;
+				} else {
+					std::filebuf fbuf;
+					fbuf.open(m_name, std::ios_base::in | std::ios_base::out | std::ios_base::binary);
+					fbuf.pubseekoff(m_size - 1, std::ios_base::beg);
+					fbuf.sputc(0);
 				}
-			} else {
-				std::unique_ptr<Buffer> buf(new Buffer(m_size));
-				if(m_data.get())
-					std::memcpy(buf->buf, m_data->buf, oldSize);
-				m_data.reset(buf.release());
 			}
+			if (m_fm)
+				delete m_fm;
+			m_fm = new file_mapping(m_name.c_str(), read_write);
+			m_region = new mapped_region(*m_fm, read_write, 0, m_size);
 		} else {
-			m_size = size;
-			if(m_mapped) {
-				if (m_region) {
-					m_region->flush();
-					delete m_region;
-				}
-				if (m_file)
-					delete m_file;
-
-				std::stringstream ss;
-				ss << m_name << "_" << s_mappedIdx++;
-				m_shmemName = Util::pathJoin(Util::tmpDir(), ss.str().c_str());
-				{
-					 file_mapping::remove(m_shmemName.c_str());
-					 std::filebuf fbuf;
-					 fbuf.open(m_shmemName.c_str(), std::ios_base::in | std::ios_base::out | std::ios_base::trunc | std::ios_base::binary);
-					 fbuf.pubseekoff(m_size - 1, std::ios_base::beg);
-					 fbuf.sputc(0);
-				}
-				m_file = new file_mapping(m_shmemName.c_str(), read_write);
-				m_region = new mapped_region(*m_file, read_write);
-			} else {
-				m_data.reset(new Buffer(m_size));
-			}
+			if (m_shm)
+				delete m_shm;
+			m_shm = new shared_memory_object(open_or_create, m_name.c_str(), read_write);
+			m_shm->truncate(m_size);
+			m_region = new mapped_region(*m_shm, read_write);
 		}
 	}
 }
+
 void* MappedFile::data() {
-	return m_mapped ? (m_region ? m_region->get_address() : nullptr) : m_data->buf;
+	return m_region ? m_region->get_address() : nullptr;
 }
 
 
@@ -705,11 +744,18 @@ size_t MappedFile::pageSize() {
 }
 
 MappedFile::~MappedFile() {
-	if(m_mapped && m_region) {
+	if(m_region) {
 		m_region->flush();
-		boost::interprocess::file_mapping::remove(m_shmemName.c_str());
+		if(m_fm) {
+			if(m_deleteOnDestruct)
+				file_mapping::remove(m_name.c_str());
+			delete m_fm;
+		}
+		if(m_shm) {
+			m_shm->remove(name().c_str());
+			delete m_shm;
+		}
 		delete m_region;
-		delete m_file;
 	}
 }
 

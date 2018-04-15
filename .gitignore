@@ -28,8 +28,9 @@
 *.out
 *.app
 .DS_Store
-makefiles
 /.cproject
 /.project
-.settings
+/.settings
 /build/
+/data/
+/docs/
