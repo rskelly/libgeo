@@ -26,23 +26,41 @@ if (${APPLE})
 	set (CMAKE_CXX_COMPILER /usr/local/bin/clang-omp++ CACHE STRING "C++ compiler" FORCE)
 	set (CMAKE_SHARED_LIBRARY_CREATE_CXX_FLAGS "${CMAKE_SHARED_LIBRARY_CREATE_CXX_FLAGS} -undefined dynamic_lookup")
 elseif(${WIN32})
+	# Boost is installed from source using bjam, etc.
 	set (Boost_COMPILER -vc141)
 	set (BOOST_INCLUDEDIR "C:/Users/IEUser/dev/boost_1_66_0")
 	set (BOOST_LIBRARYDIR "C:/Users/IEUser/dev/boost_1_66_0/stage/lib")
+
+	# OSGeo is installed to the usual location.
 	set (OSGEO_LIBRARYDIR "C:/OSGeo4W64/bin")
 	set (OSGEO_INCLUDEDIR "C:/OSGeo4W64/include")
-	set (QT_LIBRARYDIR "C:/Qt/5.10.1/msvc2017_64")
+	# GDAL is in the OSGeo folder, but the latest version is
+	# off in its own folder, "apps."
 	set (GDAL_INCLUDE_DIR "C:/OSGeo4W64/apps/gdal-dev/include")
 	set (GDAL_LIBRARYDIR "C:/OSGeo4W64/apps/gdal-dev/lib")
 	set (GDAL_LIBRARY gdal_i)
+	# Eigen is in the OSGeo install.
 	set (EIGEN_INCLUDEDIR "${OSGEO_INCLUDEDIR}/eigen3")
+
+	# Qt is installed minimally in the usual location.
+	set (QT_LIBRARYDIR "C:/Qt/5.10.1/msvc2017_64")
+	
+	# GEOS is built and installed from source, must be version
+	# 3.6.x, but this is likely to change.
 	set (GEOS_INCLUDEDIR "C:/Users/IEUser/dev/build/include")
 	set (GEOS_LIBRARYDIR "C:/Users/IEUser/dev/build/lib")
+	
+	# Crypto is really openssl, built and installed from 
+	# github.
 	set (CRYPTO_LIBRARYDIR "C:/Users/IEUser/dev/git/openssl")
 	set (CRYPTO_INCLUDEDIR "C:/Users/IEUser/dev/git/openssl/include")
+	
+	# Liblas?
 	#set (libLAS_INCLUDE_DIR "C:\\dev\\gisinternals\\include")
 	#set (libLAS_LIBRARY_DIRS "C:\\dev\\gisinternals\\lib")
-	set (CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH};${QT_LIBRARYDIR};${CRYPTO_LIBRARYDIR}")
+	
+	# Qt should be added to the prefix dir.
+	set (CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH};${QT_LIBRARYDIR}")
 else()
 	set (EIGEN_INCLUDEDIR "/usr/include/eigen3")
 endif()
@@ -93,11 +111,11 @@ target_link_libraries (georaster geoutil geodb Threads::Threads ${GEOS_LIBRARY})
 #	src/pc/filter.cpp ${PC_COMPUTERS})
 #target_link_libraries (geopc geoutil georaster geoann ${LIBLAS_LIBRARY} ${CGAL_LIBRARY})
 
-add_library (geoann SHARED src/geo.cpp ann/src/ANN.cpp ann/src/brute.cpp ann/src/kd_tree.cpp ann/src/kd_util.cpp 
-	ann/src/kd_split.cpp ann/src/kd_dump.cpp ann/src/kd_search.cpp ann/src/kd_pr_search.cpp 
-	ann/src/kd_fix_rad_search.cpp ann/src/bd_tree.cpp ann/src/bd_search.cpp ann/src/bd_pr_search.cpp 
-	ann/src/bd_fix_rad_search.cpp ann/src/perf.cpp)
-target_link_libraries (geoann geoutil)
+#add_library (geoann SHARED src/geo.cpp ann/src/ANN.cpp ann/src/brute.cpp ann/src/kd_tree.cpp ann/src/kd_util.cpp 
+#	ann/src/kd_split.cpp ann/src/kd_dump.cpp ann/src/kd_search.cpp ann/src/kd_pr_search.cpp 
+#	ann/src/kd_fix_rad_search.cpp ann/src/bd_tree.cpp ann/src/bd_search.cpp ann/src/bd_pr_search.cpp 
+#	ann/src/bd_fix_rad_search.cpp ann/src/perf.cpp)
+#target_link_libraries (geoann geoutil)
 
 # Applications ##################################################################################################
 
