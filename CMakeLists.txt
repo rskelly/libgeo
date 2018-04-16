@@ -63,6 +63,9 @@ elseif(${WIN32})
 	set (CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH};${QT_LIBRARYDIR}")
 else()
 	set (EIGEN_INCLUDEDIR "/usr/include/eigen3")
+	set (BOOST_INCLUDEDIR "/usr/include")
+	set (BOOST_LIBRARYDIR "/usr/lib/x86_64-linux-gnu")
+	set (JSON_INCLUDEDIR "/usr/include/jsoncpp")
 endif()
 
 set (THREADS_PREFER_PTHREAD_FLAG ON)
@@ -91,7 +94,7 @@ project (libgeo)
 
 include_directories(BEFORE SYSTEM ./include ./ann/include /opt/include
 	${GEOS_INCLUDEDIR} ${OSGEO_INCLUDEDIR} ${GDAL_INCLUDE_DIR} ${PCL_INCLUDE_DIRS} 
-	${Boost_INCLUDE_DIRS} ${CRYPTO_INCLUDEDIR} ${EIGEN_INCLUDEDIR}) 
+	${Boost_INCLUDE_DIRS} ${CRYPTO_INCLUDEDIR} ${EIGEN_INCLUDEDIR} ${JSON_INCLUDEDIR}) 
 link_directories(. /opt/lib ${Boost_LIBRARY_DIRS} ${GDAL_LIBRARYDIR} ${PCL_LIBRARY_DIRS})
 
 # Build support libraries ################################################################################
@@ -106,16 +109,21 @@ target_link_libraries (geodb geoutil)
 add_library (georaster SHARED src/geo.cpp src/raster.cpp src/rast/polygonize.cpp)
 target_link_libraries (georaster geoutil geodb Threads::Threads ${GEOS_LIBRARY})
 
-#file(GLOB PC_COMPUTERS src/pc/computers/*.cpp)
-#add_library (geopc SHARED src/geo.cpp src/pointcloud.cpp src/pc/normalizer.cpp src/pc/rasterizer_extsort.cpp 
-#	src/pc/filter.cpp ${PC_COMPUTERS})
-#target_link_libraries (geopc geoutil georaster geoann ${LIBLAS_LIBRARY} ${CGAL_LIBRARY})
+if (${BUILD_APPS})
 
-#add_library (geoann SHARED src/geo.cpp ann/src/ANN.cpp ann/src/brute.cpp ann/src/kd_tree.cpp ann/src/kd_util.cpp 
-#	ann/src/kd_split.cpp ann/src/kd_dump.cpp ann/src/kd_search.cpp ann/src/kd_pr_search.cpp 
-#	ann/src/kd_fix_rad_search.cpp ann/src/bd_tree.cpp ann/src/bd_search.cpp ann/src/bd_pr_search.cpp 
-#	ann/src/bd_fix_rad_search.cpp ann/src/perf.cpp)
-#target_link_libraries (geoann geoutil)
+	file(GLOB PC_COMPUTERS src/pc/computers/*.cpp)
+	add_library (geopc SHARED src/geo.cpp src/pointcloud.cpp src/pc/normalizer.cpp src/pc/rasterizer_extsort.cpp 
+		src/pc/filter.cpp ${PC_COMPUTERS})
+	target_link_libraries (geopc geoutil georaster geoann ${LIBLAS_LIBRARY} ${CGAL_LIBRARY})
+
+	add_library (geoann SHARED src/geo.cpp ann/src/ANN.cpp ann/src/brute.cpp 
+		ann/src/kd_tree.cpp ann/src/kd_util.cpp 
+		ann/src/kd_split.cpp ann/src/kd_dump.cpp ann/src/kd_search.cpp ann/src/kd_pr_search.cpp 
+		ann/src/kd_fix_rad_search.cpp ann/src/bd_tree.cpp ann/src/bd_search.cpp ann/src/bd_pr_search.cpp 
+		ann/src/bd_fix_rad_search.cpp ann/src/perf.cpp)
+	target_link_libraries (geoann geoutil)
+
+endif()
 
 # Applications ##################################################################################################
 
@@ -148,14 +156,11 @@ if(${BUILD_APPS})
 	add_executable (datumshift src/apps/datumshift.cpp)
 	target_link_libraries (datumshift geoutil georaster ${GDAL_LIBRARY} ${PROJ_LIBRARY})
 
-	add_executable (sbet2csv src/apps/sbet2csv.cpp)
-	target_link_libraries (sbet2csv geoutil ${PROJ_LIBRARY})
-
 	add_executable (extmergesort src/apps/externalmergesort.cpp)
 	target_link_libraries (extmergesort geoutil geopc ${LIBLAS_LIBRARY})
 
 	add_executable (sbet2csv src/apps/sbet2csv.cpp)
-	target_link_libraries (sbet2csv geo geoutil ${PROJ_LIBRARY})
+	target_link_libraries (sbet2csv geoutil ${PROJ_LIBRARY})
 
 	install(TARGETS pc2grid pc2tile geopc georaster geoinfo geoutil geoann RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
 
