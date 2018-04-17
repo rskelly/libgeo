@@ -162,6 +162,9 @@ if(${BUILD_APPS})
 	add_executable (sbet2csv src/apps/sbet2csv.cpp)
 	target_link_libraries (sbet2csv geoutil ${PROJ_LIBRARY})
 
+	add_executable (groundassign src/apps/groundassign.cpp)
+	target_link_libraries (groundassign ${LIBLAS_LIBRARY})
+
 	install(TARGETS pc2grid pc2tile geopc georaster geoinfo geoutil geoann RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
 
 else()
