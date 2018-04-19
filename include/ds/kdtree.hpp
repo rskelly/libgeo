@@ -243,7 +243,7 @@ public:
 		std::vector<ANNdist> dist(maxCount);
 
 		// Perform search.
-		m_tree->annkFRSearch(static_cast<ANNpoint>(pt.data()), radius, maxCount,
+		m_tree->annkFRSearch(static_cast<ANNpoint>(pt.data()), radius * radius, maxCount,
 				static_cast<ANNidxArray>(idx.data()), static_cast<ANNdistArray>(dist.data()), eps);
 
 		// Populate output iterators.
