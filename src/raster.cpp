@@ -215,6 +215,13 @@ void GridProps::bounds(double* bounds) const {
 	bounds[3] = g_max(y0, y1);
 }
 
+void GridProps::setBounds(const Bounds& bounds) {
+	m_trans[0] = m_trans[1] > 0 ? bounds.minx() : bounds.maxx();
+	m_trans[3] = m_trans[5] > 0 ? bounds.miny() : bounds.maxy();
+	m_cols = (int) std::ceil(bounds.width() / std::abs(m_trans[1]));
+	m_rows = (int) std::ceil(bounds.height() / std::abs(m_trans[5]));
+}
+
 Bounds GridProps::bounds() const {
 	double x0 = m_trans[0];
 	double y0 = m_trans[3];
