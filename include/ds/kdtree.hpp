@@ -18,6 +18,8 @@
 #include "geo.hpp"
 #include "util.hpp"
 
+#define EPS std::numeric_limits<double>::epsilon()
+
 using namespace geo::util;
 
 namespace geo {
@@ -170,7 +172,7 @@ public:
 	 * @param eps The allowable error bound.
 	 */
 	template <class TIter, class DIter>
-	int knn(const T& item, size_t count, TIter titer, DIter diter, double eps = 0.0) {
+	int knn(const T& item, size_t count, TIter titer, DIter diter, double eps = EPS) const {
 
 		if(!m_tree) {
 			g_warn("Tree not built. Forget to call build?");
@@ -221,7 +223,7 @@ public:
 	 * @param eps The error bound.
 	 */
 	template <class TIter, class DIter>
-	int radSearch(const T& item, double radius, int maxCount, TIter titer, DIter diter, double eps = 0.0) {
+	int radSearch(const T& item, double radius, int maxCount, TIter titer, DIter diter, double eps = EPS) const {
 
 		if(!m_tree) {
 			g_warn("Tree not built. Forget to call build?");
