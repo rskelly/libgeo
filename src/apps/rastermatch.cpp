@@ -7,6 +7,7 @@
 
 #include <iostream>
 #include <vector>
+#include <algorithm>
 
 #include "raster.hpp"
 #include "ds/kdtree.hpp"
@@ -38,41 +39,53 @@ public:
 	}
 };
 
-void getDiffs(std::vector<Pt>& pts,
+void getDiffs(std::vector<Pt>& pts, 
 		const std::vector<std::string>& anchors, const std::vector<int>& abands,
 		const std::string& target, int tband, double difflimit) {
 
-	Raster trast(target, false);
-	const GridProps& tprops = trast.props();
+	std::cerr << "get diffs\n";
+
+	Raster traster(target, false);
+	GridProps tprops(traster.props());
+	tprops.setBands(1);
+	tprops.setWritable(true);
+	MemRaster trast(tprops);
+	traster.writeTo(trast, tprops.cols(), tprops.rows(), 0, 0, 0, 0, tband, 1);
+
 	const Bounds& tbounds = tprops.bounds();
 
-	std::vector<Raster> arast;
-	for(const std::string& a : anchors)
-		arast.emplace_back(a, false);
+	for(int i = 0; i < anchors.size(); ++i) {
+		
+		std::cerr << "anchor: " << anchors[i] << "\n";
+		Raster araster(anchors[i], false);
+		int aband = abands[i];
+		
+		GridProps aprops(araster.props());
+		aprops.setBands(1);
+		aprops.setWritable(true);
+		MemRaster arast(aprops);
+		araster.writeTo(arast, aprops.cols(), aprops.rows(), 0, 0, 0, 0, aband, 1);
 
-	for(int i = 0; i < arast.size(); ++i) {
-		Raster& ar  = arast[i];
-		int ab = abands[i];
-		const GridProps& aprops = ar.props();
 		const Bounds& abounds = aprops.bounds();
-
+		
 		double x, y;
 		for(int row = 0; row < aprops.rows(); ++row) {
+			std::cerr << "row " << row << "\n";
 			for(int col = 0; col < aprops.cols(); ++col) {
 				double x = aprops.toCentroidX(col);
 				double y = aprops.toCentroidY(row);
 				if(tprops.hasCell(x, y) && aprops.hasCell(x, y)) {
 					int tc = tprops.toCol(x);
 					int tr = tprops.toRow(y);
-					double a = ar.getFloat(col, row, ab);
+					double a = arast.getFloat(col, row);
 					if(a == aprops.nodata()) // || ar.getInt(col, row, 1) < 100)
 						continue;
-					double b = trast.getFloat(tc, tr, tband);
+					double b = trast.getFloat(tc, tr);
 					if(b == tprops.nodata()) // || trast.getInt(tc, tr, 1) < 100)
 						continue;
 					double diff = a - b;
-					if(std::abs(diff) > difflimit)
-						continue;
+					//if(std::abs(diff) > difflimit)
+					//	continue;
 					pts.emplace_back(x, y, diff);
 				}
 			}
@@ -84,70 +97,128 @@ void buildSurface(std::vector<Pt>& pts, KDTree<Pt>& tree,
 		const std::vector<std::string>& anchors, const std::vector<int>& abands,
 		const std::string& target, int tband, const std::string& adjustment) {
 
-	// Open the target raster and get properties.
-	Raster trast(target, false);
-	const GridProps& tprops = trast.props();
+	// Get the props and bounds for the target.
+	Raster traster(target, false);
+	GridProps tprops(traster.props());
 	const Bounds& tbounds = tprops.bounds();
 
 	// Create props and bounds for the adjustment raster.
 	GridProps adjprops(tprops);
 	Bounds adjbounds = adjprops.bounds();
 
-	// Create the anchor rasters list.
-	std::vector<Raster> arast;
-	for(const std::string& a : anchors)
-		arast.emplace_back(a, false);
-
-	// Extend the adjustment raster's bounds.
-	for(Raster& ar : arast)
-		adjbounds.extend(ar.props().bounds());
+	// Build the list of props for anchors and extent
+	// the adjustment bounds.
+	std::vector<GridProps> apropss;
+	for(const std::string& a : anchors) {
+		Raster arast(a, false);
+		const GridProps& props = arast.props();
+		adjbounds.extend(props.bounds());
+		apropss.push_back(props);
+	}
 
 	// Create the adjustment raster.
 	adjprops.setBounds(adjbounds);
 	adjprops.setWritable(true);
 	adjprops.setBands(1);
-	Raster adjraster(adjustment, adjprops);
 	MemRaster adjmem(adjprops, false);
-	//Raster difraster("diffs.tif", adjprops);
 
-	// Iterate over the anchors...
 	std::vector<Pt> out;
 	std::vector<double> dist;
-	for(int i = 0; i < arast.size(); ++i) {
-		Raster& ar  = arast[i];
-		int ab = abands[i];
-		const GridProps& aprops = ar.props();
-		const Bounds& abounds = aprops.bounds();
 
+	/*
+	std::cerr << "set up avg tree\n";
+	KDTree<Pt> avgTree(3);
+	std::vector<Pt> apts;
+	int i = 0;
+	for(const Pt& pt : pts) {
+		if(i++ % 1000 == 0)
+			std::cerr << " " << ((double) i++) / pts.size() << "\n";
+		tree.knn(pt, 16, std::back_inserter(out), std::back_inserter(dist));
+		double s = 0;
+		for(Pt& p : out)
+			s += p.z;
+		apts.emplace_back(pt.x, pt.y, s / out.size());
+		out.clear();
+		dist.clear();
+	}
+	avgTree.add(apts.begin(), apts.end());
+	avgTree.build();
+	std::cerr << "done avg tree\n";
+	*/
+
+	out.clear();
+	dist.clear();
+
+	double zerodist = 1500;
+
+	// Iterate over the anchors...
+	for(int i = 0; i < apropss.size(); ++i) {
+		
+		const GridProps& aprops = apropss[i];
+		
 		// Iterate over the cells in the adj raster.
 		for(int row = 0; row < adjprops.rows(); ++row) {
+			std::cerr << "row " << row << "\n";
 			for(int col = 0; col < adjprops.cols(); ++col) {
 				double x = adjprops.toCentroidX(col);
 				double y = adjprops.toCentroidY(row);
-				// If the coord is in the target and the anchor, process the cell.
-				if(tprops.hasCell(x, y) && aprops.hasCell(x, y)) {
-					// Get the n nearest points to the cell centre.
-					tree.knn(Pt(x, y, 0), 30, std::back_inserter(out), std::back_inserter(dist));
-					double ta = 0;
-					double tb = 0;
+				// Get the n nearest points to the cell centre.
+				//tree.knn(Pt(x, y, 0), 16, std::back_inserter(out), std::back_inserter(dist));
+				tree.radSearch(Pt(x, y, 0), 500, 1000, std::back_inserter(out), std::back_inserter(dist));
+
+				double ta = 0;
+				double tb = 0;
+				/*
+				bool idw = true;
+
+				if(zerodist) {
+					double maxdist = 0;
+					for(double d : dist)
+						maxdist = d > maxdist ? d : maxdist;
+					if(maxdist > zerodist) {
+						ta = 0;
+						tb = 1;
+						idw = false;
+					} else {
+						out.push_back(Pt(x + (zerodist - maxdist), y, 0));
+						dist.push_back(zerodist - maxdist);
+					}
+				}
+
+				if(idw) {
 					for(size_t i = 0; i < dist.size(); ++i) {
 						if(dist[i] == 0) {
 							ta = out[i].z;
 							tb = 1;
 							break;
+						} else {
+							// IDW calculation.
+							double w = 1 / std::pow(dist[i], 2);
+							ta += out[i].z * w;
+							tb += w;
 						}
-						double w = 1 / std::pow(dist[i], 2);
-						ta += out[i].z * w;
-						tb += w;
 					}
-					adjmem.setFloat(adjprops.toCol(x), adjprops.toRow(y), ta / tb);
-					out.clear();
-					dist.clear();
 				}
+				*/
+
+				double val = 0;
+				for(size_t i = 0; i < dist.size(); ++i) {
+					//double v = out[i].z * std::sqrt(std::pow(1.0 + dist[i], 2) + 0.000001); // multiquadratic
+					double v = out[i].z * std::pow(dist[i], 2) * std::log(dist[i]); // TPS
+					//std::cerr << v << "\n";
+					ta += v;
+				}
+				tb = dist.size();
+
+				// Set the adjustment value on the output 
+				adjmem.setFloat(adjprops.toCol(x), adjprops.toRow(y), ta / tb);
+				out.clear();
+				dist.clear();
 			}
 		}
 	}
 
+	Raster adjraster(adjustment, adjprops);
 	adjmem.writeTo(adjraster);
 }
 
@@ -185,24 +256,35 @@ int main(int argc, char** argv) {
 		}
 		switch(mode) {
 		case 1:
+			std::cerr << "anchor " << arg << ", " << argv[i + 1] << "\n";
 			anchors.push_back(arg);
 			abands.push_back(atoi(argv[++i]));
 			break;
 		case 2:
+			std::cerr << "target " << arg << ", " << argv[i + 1] << "\n";
 			target = arg;
 			tband = atoi(argv[++i]);
 			break;
 		case 3:
+			std::cerr << "adjusted " << arg << "\n";
 			adjusted = arg;
 			break;
 		case 4:
+			std::cerr << "adjustment " << arg << "\n";
 			adjustment = arg;
 			break;
 		}
 	}
 
 	std::vector<Pt> pts;
-	getDiffs(pts, anchors, abands, target, tband, difflimit);
+	{
+		std::vector<Pt> tmp;
+		getDiffs(tmp, anchors, abands, target, tband, difflimit);
+		std::random_shuffle(tmp.begin(), tmp.end());
+		size_t count = std::min(tmp.size(), (size_t) 10000);
+		pts.assign(tmp.begin(), tmp.begin() + count);
+		std::cerr << pts.size() << " points from " << tmp.size() << "\n";
+	}
 
 	KDTree<Pt> tree(3);
 	tree.add(pts.begin(), pts.end());

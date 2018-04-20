@@ -168,7 +168,7 @@ if(${BUILD_APPS})
 	add_executable (rastermatch src/apps/rastermatch.cpp)
 	target_link_libraries (rastermatch geoutil geoann georaster ${GDAL_LIBRARY})
 
-	install(TARGETS pc2grid pc2tile geopc georaster geoinfo geoutil geoann RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
+	install(TARGETS pc2grid pc2tile rastermatch geopc georaster geoinfo geoutil geoann RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
 
 else()
 

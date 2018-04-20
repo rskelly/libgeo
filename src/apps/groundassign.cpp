@@ -4,6 +4,15 @@
 
 int main(int argc, char** argv) {
 	
+	if(argc < 4) {
+		std::cerr << "Usage: groundassign <input file> <ground file> <output file>\n"
+			<< " Input file has all the points, but no ground classification.\n"
+			<< " Ground file has only ground points, but not tagged.\n"
+			<< " Output file will have all points from input with all\n"
+			<< " Point shared between input and ground classed as ground.\n";
+		return 1;
+	}
+
 	std::string infile = argv[1];
 	std::string gndfile = argv[2];
 	std::string outfile = argv[3];

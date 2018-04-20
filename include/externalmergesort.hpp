@@ -221,11 +221,36 @@ public:
  * @param trans A PointTransformer.
  * @return True if a is "less" than b.
  */
-bool pointSort(const geo::pc::Point& a, const geo::pc::Point& b, PointTransformer* trans) {
+bool rowSort(const geo::pc::Point& a, const geo::pc::Point& b, PointTransformer* trans) {
 	double ax, ay, bx, by;
 	trans->transform(a, ax, ay);
 	trans->transform(b, bx, by);
 	return ay < by || (ay == by && ax < bx);
+}
+
+/**
+ * Produces a single index to represent a coordinate, appropriate
+ * for Morton sorting.
+ */
+bool interleave(long a, long b) {
+	long i = 0;
+	for(int i = 0; i < 32; ++i) {
+		i |= ((a >> i) & 1) << (i * 2);
+		i |= ((b >> i) & 1) << (i * 2 + 1);
+	}
+	return i;
+}
+
+/**
+ * Sort according to the z or Morton order.
+ */
+bool zSort(const geo::pc::Point& a, const geo::pc::Point& b, PointTransformer* trans) {
+	double ax, ay, bx, by;
+	trans->transform(a, ax, ay);
+	trans->transform(b, bx, by);
+	long ai = interleave((long) ax, (long) ay);
+	long bi = interleave((long) bx, (long) by);
+	return ai < bi;
 }
 
 /**
@@ -236,12 +261,29 @@ bool pointSort(const geo::pc::Point& a, const geo::pc::Point& b, PointTransforme
  * @param end The end index.
  * @param trans a PointTransformer.
  */
-void sortPoints(std::vector<geo::pc::Point>* pts, size_t begin, size_t end, PointTransformer* trans) {
+void sortPointsRow(std::vector<geo::pc::Point>* pts, size_t begin, size_t end, PointTransformer* trans) {
 	std::sort(pts->begin() + begin, pts->begin() + end,
-			std::bind(pointSort, std::placeholders::_1, std::placeholders::_2, trans));
+			std::bind(rowSort, std::placeholders::_1, std::placeholders::_2, trans));
 }
 
 
+/**
+ * Sorts the vector of points beginning and ending at the given indices.
+ *
+ * @param pts A vector of Points.
+ * @param begin The start index.
+ * @param end The end index.
+ * @param trans a PointTransformer.
+ */
+void sortPointsZ(std::vector<geo::pc::Point>* pts, size_t begin, size_t end, PointTransformer* trans) {
+	std::sort(pts->begin() + begin, pts->begin() + end,
+			std::bind(zSort, std::placeholders::_1, std::placeholders::_2, trans));
+}
+
+enum SortType {
+	Morton,
+	Row
+};
 
 /**
  * Sorts point clouds and provides methods for returning the sorted points.
@@ -264,6 +306,8 @@ private:
 	size_t m_count;
 	size_t m_position;
 	size_t m_index;
+
+	SortType m_sortType;
 
 	/**
 	 * Return the next available name for a chunk file.
@@ -301,7 +345,8 @@ private:
 			minPt = nullptr;
 			for(PointStream& ps : inStreams) {
 				geo::pc::Point* a = ps.current();
-				if(a && (!minPt || pointSort(*a, *minPt, m_trans))) {
+				// TODO: Clean this up
+				if(a && (!minPt || (m_sortType == Morton ? zSort(*a, *minPt, m_trans) : rowSort(*a, *minPt, m_trans)))) {
 					minPt = a;
 					source = &ps;
 				}
@@ -352,7 +397,11 @@ private:
 					for(int i = 0; i < (int) std::ceil((double) size / m_chunkSize); ++i) {
 						size_t begin = i * m_chunkSize;
 						size_t end = std::min(size, (i + 1) * m_chunkSize);
-						threads.emplace_back(sortPoints, &pts, begin, end, m_trans);
+						if(m_sortType == SortType::Morton) {
+							threads.emplace_back(sortPointsZ, &pts, begin, end, m_trans);	
+						} else {
+							threads.emplace_back(sortPointsRow, &pts, begin, end, m_trans);
+						}
 					}
 				} else {
 					break;
@@ -459,7 +508,8 @@ public:
 		m_instr(nullptr),
 		m_count(0),
 		m_position(0),
-		m_index(0) {
+		m_index(0),
+		m_sortType(SortType::Row) {
 	}
 
 	/**
@@ -473,10 +523,23 @@ public:
 		m_loader = loader;
 	}
 
+	/**
+	 * Sets the transformer that will transform point
+	 * positions into a sortable range. This is useful for UTM
+	 * points which increase northwards.
+	 */
 	void setTransformer(PointTransformer* trans) {
 		if(m_trans && m_trans != trans)
 			delete m_trans;
 		m_trans = trans;
+	}
+
+	/**
+	 * Set the sort type. Currently Morton or Row order.
+	 * Use row for computing stats.
+	 */
+	void setSortType(SortType type) {
+		m_sortType = type;
 	}
 
 	/**
