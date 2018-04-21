@@ -12,28 +12,66 @@
 #include <Eigen/Core>
 #include <Eigen/LU>
 
-// Arcgis (http://www.spatialanalysisonline.com/HTML/index.html?radial_basis_and_spline_functi.htm)
+#define EPS std::numeric_limits<double>::epsilon()
+
+/**
+ * Calculate the thin plate spline per
+ * Arcgis (http://www.spatialanalysisonline.com/HTML/index.html?radial_basis_and_spline_functi.htm)
+ * @param r The norm.
+ * @param c The smoothing parameter.
+ */
 double tps0(double r, double c) {
 	return c * c * r * r * std::log(c * r);
 }
 
+/**
+ * Calculate the thin plate spline per
+ * Surfer (http://www.spatialanalysisonline.com/HTML/index.html?radial_basis_and_spline_functi.htm)
+ * @param r The norm.
+ * @param c The smoothing parameter.
+ */
 double tps1(double r, double c) {
 	return c * c * r * r * std::log(c * c + r * r);
 }
 
+/**
+ * Calculate the multiquadratic per
+ * http://www.spatialanalysisonline.com/HTML/index.html?radial_basis_and_spline_functi.htm
+ * @param r The norm.
+ * @param c The smoothing parameter.
+ */
 double multiquad(double r, double c) {
 	return std::sqrt(r * r + c * c);
 }
 
+/**
+ * Calculate the inverse multiquadratic per
+ * http://www.spatialanalysisonline.com/HTML/index.html?radial_basis_and_spline_functi.htm
+ * @param r The norm.
+ * @param c The smoothing parameter.
+ */
 double invmultiquad(double r, double c) {
 	return 1.0 / std::sqrt(r * r + c * c);
 }
 
+/**
+ * Calculate the distance between points represented by T.
+ * Implementations of T must returns coordinates from the []
+ * operator: 0 for x, 1 for y and 2 for z.
+ * @param a A point.
+ * @param b A point.
+ */
 template <class T>
 double dist(const T& a, const T& b) {
-	return std::pow(a[0] - b[0], 2) + std::pow(a[1] - b[1], 2) + 0.00000001;
+	return std::pow(a[0] - b[0], 2) + std::pow(a[1] - b[1], 2) + EPS;
 }
 
+namespace geo {
+namespace interp {
+
+/**
+ * The radial basis function calculator.
+ */
 template <class T>
 class RBF {
 private:
@@ -41,7 +79,6 @@ private:
 	double m_smoothing;
 	double (*m_rbf)(double, double);
 	std::vector<T> m_pts;
-	Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> m_A;
 	Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> m_Ai;
 	Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> m_c;
 
@@ -56,6 +93,13 @@ public:
 		//NaturalCubicSpline
 	};
 
+	/**
+	 * Build a radial basis function caclulator of the given type
+	 * with the given smoothing. Smoothing is specific to the chosen method:
+	 * for some, 0 implies no smoothing, for others it causes a discontinuity.
+	 * @param type The basis function.
+	 * @param smoothing The smoothing parameter.
+	 */
 	RBF(Type type, double smoothing) :
 		m_built(false),
 		m_smoothing(smoothing),
@@ -79,23 +123,36 @@ public:
 		}
 	}
 
+	/**
+	 * Add points to the calculator.
+	 * @param begin A beginning iterator into a container of points.
+	 * @param end An ending iterator.
+	 */
 	template <class I>
 	void add(I begin, I end) {
 		m_built = false;
 		m_pts.insert(m_pts.begin(), begin, end);
 	}
 
+	/**
+	 * Add a point to the calculator.
+	 * @param pt A point.
+	 */
 	void add(const T& pt) {
 		m_built = false;
 		m_pts.push_back(pt);
 	}
 
-	// http://www.spatialanalysisonline.com/HTML/index.html?radial_basis_and_spline_functi.htm
+	/**
+	 * Build the matrices required to calculate the RBF per
+	 * http://www.spatialanalysisonline.com/HTML/index.html?radial_basis_and_spline_functi.htm.
+	 */
 	void build() {
 
 		size_t size = m_pts.size();
 
-		m_A.resize(size + 1, size + 1);
+		Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> A(size + 1, size + 1);
+
 		m_c.resize(size + 1, 1);
 
 		for(size_t i = 0; i < size; ++i) {
@@ -103,25 +160,33 @@ public:
 			for(size_t j = 0; j < size; ++j) {
 				const T& b = m_pts[j];
 				double z = (*m_rbf)(dist(a, b), m_smoothing);
-				m_A(i, j) = z;
+				A(i, j) = z;
 			}
 		}
 
 		for(size_t i = 0; i < size; ++i) {
-			m_A(size, i) = 1;
-			m_A(i, size) = 1;
+			A(size, i) = 1;
+			A(i, size) = 1;
 		}
 
-		m_A(size, size) = 0;
-		m_Ai = m_A.inverse();
+		A(size, size) = 0;
+		m_Ai = A.inverse();
 		m_built = true;
 	}
 
+	/**
+	 * Clear the points list and reset. A rebuild is required.
+	 */
 	void clear() {
 		m_pts.clear();
 		m_built = false;
 	}
 
+	/**
+	 * Calculate the radial basis function at the given point.
+	 * @param pt A point.
+	 * @return The value of the function at this point.
+	 */
 	double compute(const T& pt) {
 		if(!m_built)
 			build();
@@ -145,5 +210,7 @@ public:
 
 };
 
+} // interp
+} // geo
 
 #endif /* INCLUDE_RBF_HPP_ */
