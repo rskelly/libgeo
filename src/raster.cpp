@@ -1246,6 +1246,8 @@ Raster::Raster(const std::string &filename, const GridProps &props) :
 	std::string drvName = m_props.driver();
 	if(drvName.empty())
 		drvName = getDriverForFilename(m_filename);
+	if(drvName.empty())
+		g_runerr("Couldn't find driver for: " << m_filename)
 	GDALDriver *drv = GetGDALDriverManager()->GetDriverByName(drvName.c_str());
 	const char *create = drv->GetMetadataItem(GDAL_DCAP_CREATE);
 	if(create == NULL || std::strncmp(create, "YES", 3) != 0)
