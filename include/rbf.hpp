@@ -9,8 +9,11 @@
 #define INCLUDE_RBF_HPP_
 
 #include <vector>
+
 #include <Eigen/Core>
 #include <Eigen/LU>
+
+#include "geo.hpp"
 
 #define EPS std::numeric_limits<double>::epsilon()
 
@@ -119,7 +122,7 @@ public:
 			m_rbf = &tps1;
 			break;
 		default:
-			g_argerr("Unknown type: " << type);
+			g_argerr("Unknown type");
 		}
 	}
 
