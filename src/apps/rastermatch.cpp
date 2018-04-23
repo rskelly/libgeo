@@ -33,11 +33,17 @@ public:
 		x(x), y(y), z(z) {}
 	double operator[](size_t idx) const {
 		switch(idx % 3) {
-		case 0: return x;
 		case 1: return y;
 		case 2: return z;
+		default: return x;
 		}
-		return 0;
+	}
+	double& operator[](size_t idx) {
+		switch(idx % 3) {
+		case 1: return y;
+		case 2: return z;
+		default: return x;
+		}
 	}
 };
 
@@ -95,14 +101,12 @@ void getDiffs(std::vector<Pt>& pts,
 	}
 }
 
-void surfaceWork(int span, std::list<std::pair<int, int> >* spans, const std::vector<Pt>* pts,
+void surfaceWork(int span, std::list<std::pair<int, int> >* spans, const std::vector<Pt>* pts, 
 	const GridProps* adjprops, MemRaster* adjmem, std::mutex* mtx) {
 
-	KDTree<Pt> tree(3);
-	tree.add(pts->begin(), pts->end());
-	tree.build();
-
-	RBF<Pt> rbf(RBF<Pt>::Type::ThinPlateSpline, 1);
+	RBF<Pt> rbf(RBF<Pt>::Type::Gaussian, 100, 1);
+	rbf.add(pts->begin(), pts->end());
+	rbf.build();
 
 	while(true) {
 		int scol, srow;
@@ -117,25 +121,6 @@ void surfaceWork(int span, std::list<std::pair<int, int> >* spans, const std::ve
 
 		std::cerr << "scol " << scol << ", " << srow << "\n";
 
-		scol *= span;
-		srow *= span;
-
-		std::vector<Pt> pts;
-		std::vector<double> dist;
-		
-		double x = adjprops->toCentroidX(scol + span / 2);
-		double y = adjprops->toCentroidY(srow + span / 2);
-
-		int count = tree.radSearch(Pt(x, y, 0), span * std::abs(adjprops->resolutionX()) * 2, 9999, 
-			std::back_inserter(pts), std::back_inserter(dist));
-		std::cerr << "found " << count << " within " << (span * std::abs(adjprops->resolutionX()) * 2) << " of " << x << ", " << y << "\n";
-		if(32 > count)
-			continue;
-
-		rbf.clear();
-		rbf.add(pts.begin(), pts.end());
-		rbf.build();
-
 		std::list<std::tuple<double, double, double> > out;
 
 		// Iterate over the cells in the adj raster.
@@ -148,12 +133,12 @@ void surfaceWork(int span, std::list<std::pair<int, int> >* spans, const std::ve
 				//std::cerr << x << ", " << y << ", " << z << "\n";
 				out.push_back(std::make_tuple(x, y, z));
 			}
-			{
-				std::lock_guard<std::mutex> lk(*mtx);
-				for(auto& p : out)
-					adjmem->setFloat(adjprops->toCol(std::get<0>(p)), adjprops->toRow(std::get<1>(p)), std::get<2>(p));
-				out.clear();
-			}
+		}
+		{
+			std::lock_guard<std::mutex> lk(*mtx);
+			for(auto& p : out)
+				adjmem->setFloat(adjprops->toCol(std::get<0>(p)), adjprops->toRow(std::get<1>(p)), std::get<2>(p));
+			out.clear();
 		}
 	}
 }
@@ -190,11 +175,17 @@ void buildSurface(std::vector<Pt>& pts,
 	std::mutex mtx;
 	std::vector<std::thread> threads;
 
-	int threadCount = 8;
-	int span = (int) std::ceil((double) adjprops.rows() / threadCount);
+	/*
+	KDTree<Pt> tree(3);
+	tree.add(pts.begin(), pts.end());
+	tree.build();
+	*/
+
+	int threadCount = 1;
+	int span = 256;//(int) std::ceil((double) adjprops.rows() / threadCount);
 	std::list<std::pair<int, int> > spans;
-	for(int r = 0; r < threadCount; ++r) {
-		for(int c = 0; c < threadCount; ++c)
+	for(int r = 1024; r < 2048 /*adjprops.rows()*/; r += span) {
+		for(int c = 512; c < 1024 /*adjprops.cols()*/; c += span)
 			spans.push_back(std::make_pair(r, c));
 	}
 	for(int i = 0; i < threadCount; ++i)
@@ -265,7 +256,7 @@ int main(int argc, char** argv) {
 		std::vector<Pt> tmp;
 		getDiffs(tmp, anchors, abands, target, tband, difflimit);
 		std::random_shuffle(tmp.begin(), tmp.end());
-		size_t count = std::min(tmp.size(), (size_t) 10000);
+		size_t count = std::min(tmp.size(), (size_t) 1000);
 		pts.assign(tmp.begin(), tmp.begin() + count);
 		std::cerr << pts.size() << " points from " << tmp.size() << "\n";
 		std::ofstream of("pts.csv");
