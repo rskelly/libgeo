@@ -101,12 +101,8 @@ void getDiffs(std::vector<Pt>& pts,
 	}
 }
 
-void surfaceWork(int span, std::list<std::pair<int, int> >* spans, const std::vector<Pt>* pts, 
+void surfaceWork(int span, std::list<std::pair<int, int> >* spans, const std::vector<Pt>* pts, RBF<Pt>* rbf,
 	const GridProps* adjprops, MemRaster* adjmem, std::mutex* mtx) {
-
-	RBF<Pt> rbf(RBF<Pt>::Type::Gaussian, 100, 1);
-	rbf.add(pts->begin(), pts->end());
-	rbf.build();
 
 	while(true) {
 		int scol, srow;
@@ -129,7 +125,7 @@ void surfaceWork(int span, std::list<std::pair<int, int> >* spans, const std::ve
 			for(int col = scol; col < std::min(scol + span, adjprops->cols()); ++col) {
 				double x = adjprops->toCentroidX(col);
 				double y = adjprops->toCentroidY(row);
-				double z = rbf.compute(Pt(x, y, 0));
+				double z = rbf->compute(Pt(x, y, 0));
 				//std::cerr << x << ", " << y << ", " << z << "\n";
 				out.push_back(std::make_tuple(x, y, z));
 			}
@@ -175,21 +171,25 @@ void buildSurface(std::vector<Pt>& pts,
 	std::mutex mtx;
 	std::vector<std::thread> threads;
 
-	/*
-	KDTree<Pt> tree(3);
-	tree.add(pts.begin(), pts.end());
-	tree.build();
-	*/
+	RBF<Pt> rbf(RBF<Pt>::Type::Gaussian);
+	rbf.setRange(500);
+	rbf.setSigma(0.8);
+	//rbf.setSmoothing(1);
+	rbf.setClusters(1000);
+	//rbf.setSamples(1000);
 
-	int threadCount = 1;
+	rbf.add(pts.begin(), pts.end());
+	rbf.build();
+
+	int threadCount = 4;
 	int span = 256;//(int) std::ceil((double) adjprops.rows() / threadCount);
 	std::list<std::pair<int, int> > spans;
 	for(int r = 1024; r < 2048 /*adjprops.rows()*/; r += span) {
-		for(int c = 512; c < 1024 /*adjprops.cols()*/; c += span)
+		for(int c = 1024; c < 2048 /*adjprops.cols()*/; c += span)
 			spans.push_back(std::make_pair(r, c));
 	}
 	for(int i = 0; i < threadCount; ++i)
-		threads.emplace_back(surfaceWork, span, &spans, &pts, &adjprops, &adjmem, &mtx);
+		threads.emplace_back(surfaceWork, span, &spans, &pts, &rbf, &adjprops, &adjmem, &mtx);
 	for(std::thread& t : threads)
 		t.join();
 
@@ -255,8 +255,8 @@ int main(int argc, char** argv) {
 	{
 		std::vector<Pt> tmp;
 		getDiffs(tmp, anchors, abands, target, tband, difflimit);
-		std::random_shuffle(tmp.begin(), tmp.end());
-		size_t count = std::min(tmp.size(), (size_t) 1000);
+		//std::random_shuffle(tmp.begin(), tmp.end());
+		size_t count = tmp.size();//std::min(tmp.size(), (size_t) 1000);
 		pts.assign(tmp.begin(), tmp.begin() + count);
 		std::cerr << pts.size() << " points from " << tmp.size() << "\n";
 		std::ofstream of("pts.csv");

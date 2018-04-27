@@ -9,11 +9,24 @@
 #define INCLUDE_RBF_HPP_
 
 #include <vector>
+#include <mutex>
+
 #include <Eigen/Core>
 #include <Eigen/LU>
 
+#include "ds/kdtree.hpp"
+#include "kmeans.hpp"
+
 #define PI 3.141592653589793
 #define INF std::numeric_limits<double>::infinity()
+#define EPS std::numeric_limits<double>::epsilon()
+
+
+using namespace geo::ds;
+
+
+std::mutex __mtx;
+
 
 // Arcgis (http://www.spatialanalysisonline.com/HTML/index.html?radial_basis_and_spline_functi.htm)
 double tps0(double r, double sigma, double smoothing) {
@@ -34,82 +47,14 @@ double invmultiquad(double r, double sigma, double smoothing) {
 
 double gaussian(double r, double sigma, double smoothing) {
 	return (1.0 / (sigma * std::sqrt(2 * PI))) * std::exp(-0.5 * std::pow(r / sigma, 2));
+	//return std::exp(-r*r);
 }
 
 template <class T>
 double dist(const T& a, const T& b) {
-	return std::pow(a[0] - b[0], 2) + std::pow(a[1] - b[1], 2) + 0.00000001;
+	return std::sqrt(std::pow(a[0] - b[0], 2) + std::pow(a[1] - b[1], 2));
 }
 
-template <class T>
-void kmeans(std::vector<T>& pts, int n, 
-	std::vector<T>& means, std::unordered_map<size_t, std::list<T> >& clusters) {
-
-	if(n > pts.size())
-		g_runerr("Too few points for meaningful clustering.")
-
-	// Random shuffle and take the first n as cluster means.
-	std::random_shuffle(pts.begin(), pts.end());
-	means.assign(pts.begin(), pts.begin() + n);
-
-	// Assign each point to the correct initial cluster.
-	for(const T& p : pts) {
-		double d0, d = INF;
-		size_t idx = 0;
-		for(size_t i = 0; i < means.size(); ++i) {
-			if((d0 = dist(means[i], p)) < d) {
-				d = d0;
-				idx = i;
-			}
-		}
-		clusters[idx].emplace_back(p);
-	}
-
-	// Iterate over the entire point set, assigning each point to 
-	// the nearest mean.
-	int changed;
-	std::unordered_map<size_t, std::list<T> > clusters0;
-	do {
-		changed = 0;
-		// Re-compute the means of the cluters and update the means list.
-		g_debug("means")
-		for(auto& pair : clusters) {
-			double x = 0;
-			double y = 0;
-			for(const T& p : pair.second) {
-				x += p[0];
-				y += p[1];
-			}
-			// Update the 2d position in the means list.
-			means[pair.first][0] = x / pair.second.size();
-			means[pair.first][1] = y / pair.second.size();
-		}
-		// Iterate over the cluster member points and reassign to
-		// the new cluster. Count each reassignment.
-		g_debug("reassign")
-		for(auto& pair : clusters) {
-			for(const T& p : pair.second) {
-				double d0, d = INF;
-				size_t i = 0, idx = 0;
-				for(const T& p0 : means) {
-					if((d0 = dist(p0, p)) < d) {
-						idx = i;
-						d = d0;
-					}
-					++i;
-				}
-				// Transfer the point to the correct cluster.
-				clusters0[idx].emplace_back(p);
-				if(idx != pair.first)
-					++changed;
-			}
-		}
-		clusters.swap(clusters0);
-		for(auto& pair : clusters0)
-			pair.second.clear();
-		g_debug("kmeans changed " << changed)
-	} while(changed);
-}
 
 typedef Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> RBFMatrix;
 
@@ -117,19 +62,27 @@ template <class T>
 class RBF {
 private:
 	bool m_built;
+	double m_range;
 	double m_sigma;
 	double m_smoothing;
+	int m_clusters;
+	int m_samples;
 
 	double (*m_rbf)(double, double, double);
 	
 	std::vector<T> m_pts;
-	RBFMatrix m_Ai;
-	RBFMatrix m_c;
-
-	// Map for weights matrices for each cluster.
-	std::unordered_map<size_t, RBFMatrix> m_clusterWeights;
 	// Cluster centres.
 	std::vector<T> m_clusterMeans;
+
+	RBFMatrix m_Ai;
+	RBFMatrix m_c;
+	KDTree<T> m_tree;
+
+
+	double computeR(const T& a, const T& b) {
+		double r = dist(a, b) / m_range;
+		return r <=0 ? EPS : r;
+	}
 
 public:
 
@@ -143,10 +96,12 @@ public:
 		//NaturalCubicSpline
 	};
 
-	RBF(Type type, double sigma, double smoothing) :
+	RBF(Type type) :
 		m_built(false),
-		m_sigma(sigma),
-		m_smoothing(smoothing),
+		m_range(0),
+		m_sigma(0),
+		m_smoothing(0),
+		m_clusters(0),
 		m_rbf(nullptr) {
 
 		switch(type) {
@@ -170,6 +125,46 @@ public:
 		}
 	}
 
+	void setRange(double range) {
+		m_range = range;
+	}
+
+	double range() const {
+		return m_range;
+	}
+
+	void setSigma(double sigma) {
+		m_sigma = sigma;
+	}
+
+	double sigma() const {
+		return m_sigma;
+	}
+
+	void setSmoothing(double smoothing) {
+		m_smoothing = smoothing;
+	}
+
+	double smoothing() const {
+		return m_smoothing;
+	}
+
+	void setSamples(int samples) {
+		m_samples = samples;
+	}
+
+	int samples() const {
+		return m_samples;
+	}
+
+	void setClusters(int clusters) {
+		m_clusters = clusters;
+	}
+
+	int clusters() const {
+		return m_clusters;
+	}
+
 	template <class I>
 	void add(I begin, I end) {
 		m_built = false;
@@ -184,7 +179,29 @@ public:
 	// http://www.spatialanalysisonline.com/HTML/index.html?radial_basis_and_spline_functi.htm
 	void build() {
 
-		size_t size = m_pts.size();
+		m_clusterMeans.clear();
+
+		if(m_clusters < 0)
+			g_runerr("Clusters must be greater than zero.")
+		if(m_samples < 0)
+			g_runerr("Samples must be greater than zero.")
+		if(m_samples && m_clusters)
+			g_runerr("Only use one of samples or clusters.")
+		
+		if(m_clusters) {
+			std::unordered_map<size_t, std::list<T> > clusters;
+			kmeans(m_pts, m_clusters, m_clusterMeans, clusters);
+		} else if(m_samples) {
+			m_clusterMeans.assign(m_pts.begin(), m_pts.begin() + std::min(m_pts.size(), (size_t) m_samples));
+		} else {
+			m_clusterMeans.assign(m_pts.begin(), m_pts.end());
+		}
+
+		size_t size = m_clusterMeans.size();
+
+		m_tree.destroy();
+		m_tree.add(m_clusterMeans.begin(), m_clusterMeans.end());
+		m_tree.build();
 
 		g_debug("building matrices")
 		{
@@ -192,11 +209,11 @@ public:
 			m_c.resize(size + 1, 1);
 
 			for(size_t i = 0; i < size; ++i) {
-				const T& a = m_pts[i];
+				const T& a = m_clusterMeans[i];
 				for(size_t j = 0; j < size; ++j) {
-					const T& b = m_pts[j];
-					double d = dist(a, b);
-					double z = (*m_rbf)(d, m_sigma, m_smoothing);
+					const T& b = m_clusterMeans[j];
+					double r = computeR(a, b);
+					double z = (*m_rbf)(r, m_sigma, m_smoothing);
 					A(i, j) = z;
 				}
 			}
@@ -211,37 +228,12 @@ public:
 		}
 		g_debug("done building")
 
-		/*
-		g_debug("clustering")
-		{
-			// Perform kmeans to get cluster centres.
-			m_clusterMeans.clear();
-			std::unordered_map<size_t, std::list<T> > clusters;
-			kmeans(m_pts, 20, m_clusterMeans, clusters);
-
-			// Calculate the weights for each cluster.
-			for(size_t i = 0; i < m_clusterMeans.size(); ++i) {
-				const T& p0 = m_clusterMeans[i];
-				RBFMatrix c(size + 1, 1);
-				size_t j = 0;
-				for(const T& p : clusters[i]) {
-					double d = dist(p0, p);
-					double z = (*m_rbf)(d, m_sigma, m_smoothing);
-					c(j++, 0) = z;
-				}
-				c(size, 0) = 1;
-				// Save the cluster weights.
-				m_clusterWeights[i] = m_Ai * c;
-			}
-		}
-		g_debug("done clustering")
-		*/
-
 		m_built = true;
 	}
 
 	void clear() {
 		m_pts.clear();
+		m_clusterMeans.clear();
 		m_built = false;
 	}
 
@@ -249,32 +241,29 @@ public:
 		if(!m_built)
 			build();
 
-		size_t size = m_pts.size();
-		/*
-		size_t idx;
-		double d0, d = INF;
-		for(size_t i = 0; i < m_clusterMeans.size(); ++i) {
-			if((d0 = dist(pt, m_clusterMeans[i])) < d) {
-				d = d0;
-				idx = i;
-			}
+		size_t size = m_clusterMeans.size();
+
+		int count = 0;
+		double dst = INF;
+		{
+			std::vector<T> pts;
+			std::vector<double> dsts;
+			std::lock_guard<std::mutex> lk(__mtx);
+			if((count = m_tree.knn(pt, 1, std::back_inserter(pts), std::back_inserter(dsts))))
+				dst = dsts[0];
 		}
 
-		RBFMatrix D = m_clusterWeights[idx];
+		if(!count || dst > m_range * 3)
+			return 0;
 
-		double z = 0;
-		for(size_t i = 0; i < size; ++i)
-			z += D(i, 0) * pt.z;
-		*/
+		RBFMatrix c(size + 1, 1);
+		c(size, 0) = 1;
 
-		RBFMatrix c(m_pts.size() + 1, 1);
-		c(m_pts.size(), 0) = 1;
-
-		double d, z;
+		double r, z;
 		size_t i = 0;
-		for(const T& p : m_pts) {
-			d = dist(p, pt);
-			z = (*m_rbf)(d, m_sigma, m_smoothing);
+		for(const T& p : m_clusterMeans) {
+			r = computeR(p, pt);
+			z = (*m_rbf)(r, m_sigma, m_smoothing);
 			c(i++, 0) = z;
 		}
 
@@ -282,7 +271,7 @@ public:
 
 		z = 0;
 		i = 0;
-		for(const T& p : m_pts)
+		for(const T& p : m_clusterMeans)
 			z += b(i++, 0) * p.z;
 
 		return z;

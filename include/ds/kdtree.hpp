@@ -79,7 +79,7 @@ public:
 	/**
 	 * Construct the KDTree with the given number of dimensions.
 	 */
-	KDTree(size_t dims) :
+	KDTree(size_t dims = 3) :
 		m_pts(nullptr),
 		m_tree(nullptr),
 		m_dims(dims) {
