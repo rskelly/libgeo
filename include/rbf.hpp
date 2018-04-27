@@ -102,6 +102,7 @@ public:
 		m_sigma(0),
 		m_smoothing(0),
 		m_clusters(0),
+		m_samples(0),
 		m_rbf(nullptr) {
 
 		switch(type) {
@@ -181,13 +182,13 @@ public:
 
 		m_clusterMeans.clear();
 
+		if(m_samples && m_clusters)
+			g_runerr("Only use one of samples or clusters.")
 		if(m_clusters < 0)
 			g_runerr("Clusters must be greater than zero.")
 		if(m_samples < 0)
 			g_runerr("Samples must be greater than zero.")
-		if(m_samples && m_clusters)
-			g_runerr("Only use one of samples or clusters.")
-		
+
 		if(m_clusters) {
 			std::unordered_map<size_t, std::list<T> > clusters;
 			kmeans(m_pts, m_clusters, m_clusterMeans, clusters);
