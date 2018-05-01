@@ -9,6 +9,20 @@
 #include <vector>
 #include <algorithm>
 #include <thread>
+#include <iomanip>
+
+#include <geos/geom/PrecisionModel.h>
+#include <geos/geom/GeometryFactory.h>
+#include <geos/geom/CoordinateSequenceFactory.h>
+#include <geos/geom/CoordinateArraySequence.h>
+#include <geos/geom/Geometry.h>
+#include <geos/geom/Polygon.h>
+#include <geos/geom/MultiPolygon.h>
+#include <geos/geom/Point.h>
+#include <geos/geom/LinearRing.h>
+#include <geos/geom/CoordinateSequence.h>
+#include <geos/operation/union/CascadedPolygonUnion.h>
+#include <geos/linearref/LengthIndexedLine.h>
 
 #include "raster.hpp"
 #include "ds/kdtree.hpp"
@@ -19,7 +33,12 @@ using namespace geo::ds;
 using namespace geo::interp;
 
 void usage() {
-	std::cerr << "Usage: rastermatch -a <anchor files [anchor files [...]]> -t <target file> [-o <adjusted file>] [-f <adjustment file>]\n"
+	std::cerr << "Usage: rastermatch <options>\n"
+			<< " -a <anchor files [anchor files [...]]>\n"
+			<< " -t <target file>\n"
+			<< " -o [adjusted file]\n"
+			<< " -f [adjustment file]\n"
+			<< " -p [points file (csv)]\n\n"
 			<< "  This program samples the differences between one or more 'anchor'\n"
 			<< "  rasters and a 'target' raster, then calculates an adjustment to \n"
 			<< "  match them by computing a local regression surface and applying\n"
@@ -61,9 +80,7 @@ void getDiffs(std::vector<Pt>& pts,
 	MemRaster trast(tprops);
 	traster.writeTo(trast, tprops.cols(), tprops.rows(), 0, 0, 0, 0, tband, 1);
 
-	const Bounds& tbounds = tprops.bounds();
-
-	for(int i = 0; i < anchors.size(); ++i) {
+	for(size_t i = 0; i < anchors.size(); ++i) {
 		
 		std::cerr << "anchor: " << anchors[i] << "\n";
 		Raster araster(anchors[i], false);
@@ -75,9 +92,6 @@ void getDiffs(std::vector<Pt>& pts,
 		MemRaster arast(aprops);
 		araster.writeTo(arast, aprops.cols(), aprops.rows(), 0, 0, 0, 0, aband, 1);
 
-		const Bounds& abounds = aprops.bounds();
-		
-		double x, y;
 		for(int row = 0; row < aprops.rows(); ++row) {
 			//std::cerr << "row " << row << "\n";
 			for(int col = 0; col < aprops.cols(); ++col) {
@@ -102,36 +116,40 @@ void getDiffs(std::vector<Pt>& pts,
 	}
 }
 
-void surfaceWork(int span, std::list<std::pair<int, int> >* spans, const std::vector<Pt>* pts, RBF<Pt>* rbf,
+void surfaceWork(int tileSize, std::list<std::pair<int, int> >* tiles, const std::vector<Pt>* pts, RBF<Pt>* rbf,
 	const GridProps* adjprops, MemRaster* adjmem, std::mutex* mtx) {
 
+	// As long as there are tiles, keep working.
 	while(true) {
 		int scol, srow;
 		{
+			// Get a tile from the list.
 			std::lock_guard<std::mutex> lk(*mtx);
-			if(spans->empty())
+			if(tiles->empty())
 				return;
-			srow = std::get<0>(spans->front());
-			scol = std::get<1>(spans->front());
-			spans->pop_front();
+			srow = std::get<0>(tiles->front());
+			scol = std::get<1>(tiles->front());
+			tiles->pop_front();
 		}
 
 		std::cerr << "scol " << scol << ", " << srow << "\n";
 
+		// A list to collect interpolated adjustment values.
 		std::list<std::tuple<double, double, double> > out;
 
-		// Iterate over the cells in the adj raster.
-		for(int row = srow; row < std::min(srow + span, adjprops->rows()); ++row) {
+		// Iterate over the cells in the adj raster and compute the interp value
+		// for that cell.
+		for(int row = srow; row < std::min(srow + tileSize, adjprops->rows()); ++row) {
 			std::cerr << "row: " << row << "\n";
-			for(int col = scol; col < std::min(scol + span, adjprops->cols()); ++col) {
+			for(int col = scol; col < std::min(scol + tileSize, adjprops->cols()); ++col) {
 				double x = adjprops->toCentroidX(col);
 				double y = adjprops->toCentroidY(row);
 				double z = rbf->compute(Pt(x, y, 0));
-				//std::cerr << x << ", " << y << ", " << z << "\n";
 				out.push_back(std::make_tuple(x, y, z));
 			}
 		}
 		{
+			// Write all adjustments to the raster in one go.
 			std::lock_guard<std::mutex> lk(*mtx);
 			for(auto& p : out)
 				adjmem->setFloat(adjprops->toCol(std::get<0>(p)), adjprops->toRow(std::get<1>(p)), std::get<2>(p));
@@ -147,7 +165,6 @@ void buildSurface(std::vector<Pt>& pts,
 	// Get the props and bounds for the target.
 	Raster traster(target, false);
 	GridProps tprops(traster.props());
-	const Bounds& tbounds = tprops.bounds();
 
 	// Create props and bounds for the adjustment raster.
 	GridProps adjprops(tprops);
@@ -169,9 +186,7 @@ void buildSurface(std::vector<Pt>& pts,
 	adjprops.setBands(1);
 	MemRaster adjmem(adjprops, false);
 
-	std::mutex mtx;
-	std::vector<std::thread> threads;
-
+	// Prepare the RBF instance.
 	RBF<Pt> rbf(RBF<Pt>::Type::Gaussian);
 	rbf.setRange(500);
 	rbf.setSigma(0.8);
@@ -182,22 +197,57 @@ void buildSurface(std::vector<Pt>& pts,
 	rbf.add(pts.begin(), pts.end());
 	rbf.build();
 
-	int threadCount = 4;
-	int span = 256;//(int) std::ceil((double) adjprops.rows() / threadCount);
-	std::list<std::pair<int, int> > spans;
-	for(int r = 1024; r < 2048 /*adjprops.rows()*/; r += span) {
-		for(int c = 1024; c < 2048 /*adjprops.cols()*/; c += span)
-			spans.push_back(std::make_pair(r, c));
+	// Each thread will work on a tile, which is a square region of the adjustment region.
+	int tileSize = 256;
+	std::list<std::pair<int, int> > tiles;
+	for(int r = 512; r < 1024 /*adjprops.rows()*/; r += tileSize) {
+		for(int c = 1024; c < 2048 /*adjprops.cols()*/; c += tileSize)
+			tiles.push_back(std::make_pair(r, c));
 	}
+
+	// Start the threads.
+	g_debug("starting")
+	int threadCount = 4;
+	std::mutex mtx;
+	std::vector<std::thread> threads;
 	for(int i = 0; i < threadCount; ++i)
-		threads.emplace_back(surfaceWork, span, &spans, &pts, &rbf, &adjprops, &adjmem, &mtx);
+		threads.emplace_back(surfaceWork, tileSize, &tiles, &pts, &rbf, &adjprops, &adjmem, &mtx);
+
+	// Wait for completion.
 	for(std::thread& t : threads)
 		t.join();
 
+	// Write the adjustment raster to the output.
 	Raster adjraster(adjustment, adjprops);
 	adjmem.writeTo(adjraster);
 }
 
+using namespace geos::geom;
+using namespace geos::linearref;
+
+void buffer(std::vector<Pt>& pts, double buf, double seg) {
+	//GEOSContextHandle_t gctx = OGRGeometry::createGEOSContext();
+	GeometryFactory::unique_ptr geomFactory = GeometryFactory::create(new PrecisionModel());
+	std::vector<Coordinate> coords;
+	for(const Pt& p : pts)
+		coords.emplace_back(p.x, p.y, p.z);
+	MultiPoint* mp = geomFactory->createMultiPoint(coords);
+	Geometry* hull = mp->convexHull();
+	Geometry* buffered = hull->buffer(buf);
+	for(size_t i = 0; i < buffered->getNumGeometries(); ++i) {
+		const Polygon* poly = dynamic_cast<const Polygon*>(buffered->getGeometryN(i));
+		const LineString* ring = dynamic_cast<const LinearRing*>(poly->getExteriorRing());
+		LengthIndexedLine lil(ring);
+		double len = ring->getLength();
+		for(double p = 0; p < len; p += seg) {
+			Coordinate c = lil.extractPoint(p);
+			pts.emplace_back(c.x, c.y, 0);
+		}
+	}
+	delete mp;
+	delete hull;
+	delete buffered;
+}
 
 int main(int argc, char** argv) {
 
@@ -209,6 +259,7 @@ int main(int argc, char** argv) {
 	std::vector<std::string> anchors;
 	std::vector<int> abands;
 	std::string target;
+	std::string ptsFile = "pts.csv";
 	int tband;
 	std::string adjusted;
 	std::string adjustment;
@@ -228,6 +279,9 @@ int main(int argc, char** argv) {
 			continue;
 		} else if(arg == "-f") {
 			mode = 4;
+			continue;
+		} else if(arg == "-p") {
+			ptsFile = argv[++i];
 			continue;
 		}
 		switch(mode) {
@@ -254,13 +308,11 @@ int main(int argc, char** argv) {
 
 	std::vector<Pt> pts;
 	{
-		std::vector<Pt> tmp;
-		getDiffs(tmp, anchors, abands, target, tband, difflimit);
-		//std::random_shuffle(tmp.begin(), tmp.end());
-		size_t count = tmp.size();//std::min(tmp.size(), (size_t) 1000);
-		pts.assign(tmp.begin(), tmp.begin() + count);
-		std::cerr << pts.size() << " points from " << tmp.size() << "\n";
-		std::ofstream of("pts.csv");
+		getDiffs(pts, anchors, abands, target, tband, difflimit);
+		buffer(pts, 500, 100);
+		std::cerr << pts.size() << " points\n";
+		std::ofstream of(ptsFile);
+		of << std::setprecision(12);
 		of << "x,y,diff\n";
 		for(const Pt& pt : pts)
 			of << pt.x << "," << pt.y << "," << pt.z << "\n";
