@@ -9,7 +9,7 @@
 #define INCLUDE_PC_COMPUTER_HPP_
 
 #include "pointcloud.hpp"
-#include "rbf.hpp"
+//#include "rbf.hpp"
 
 namespace geo {
 namespace pc {
@@ -167,6 +167,7 @@ public:
 	int bandCount() const;
 };
 
+/*
 class RBFComputer : public geo::pc::Computer {
 public:
 	RBFComputer(geo::interp::RBF<geo::pc::Point>::Type type, double smoothing);
@@ -174,6 +175,7 @@ public:
 	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out);
 	int bandCount() const;
 };
+*/
 
 } // compute
 } // pc

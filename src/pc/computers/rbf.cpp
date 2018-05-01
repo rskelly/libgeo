@@ -5,6 +5,7 @@
  *      Author: rob
  */
 
+/*
 #include "pointcloud.hpp"
 #include "rbf.hpp"
 #include "pc_computer.hpp"
@@ -33,17 +34,16 @@ int RBFComputer::compute(double x, double y, const std::vector<geo::pc::Point>& 
 
 int RBFComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out) {
 	// TODO: Implement me!
-	/*
 	if(!filtered.empty()) {
 		double area = radius * radius * M_PI;
 		out.push_back(pts.size() / area);
 	} else {
 		out.push_back(std::nan(""));
 	}
-	*/
 	return 1;
 }
 
 int RBFComputer::bandCount() const {
 	return 1;
 }
+*/
