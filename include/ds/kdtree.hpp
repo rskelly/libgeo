@@ -52,9 +52,17 @@ public:
 
 	double operator[](int idx) const {
 		switch(idx % 3) {
-		case 0: return x();
-		case 1: return y();
-		default: return z(); // Who cares.
+		case 0: return m_x;
+		case 1: return m_y;
+		default: return m_z; // Who cares.
+		}
+	}
+
+	double& operator[](int idx) {
+		switch(idx % 3) {
+		case 0: return m_x;
+		case 1: return m_y;
+		default: return m_z; // Who cares.
 		}
 	}
 };
@@ -143,7 +151,7 @@ public:
 		}
 
 		// Set up the tree.
-		m_tree = new ANNkd_tree(m_pts, m_items.size(), m_dims);
+		m_tree = new ANNkd_tree(m_pts, m_items.size(), m_dims, 1, ANN_KD_STD);
 	}
 
 	/**
