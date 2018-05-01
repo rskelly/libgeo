@@ -789,7 +789,7 @@ void Grid::smooth(Grid &smoothed, double sigma, int size, int band,
 	std::unique_ptr<TileIterator> iter = iterator(512, 512, size, band);
 	int tiles = iter->count();
 
-	#pragma omp parallel for
+	// TODO: Need this? #pragma omp parallel for
 	for (int i = 0; i < tiles; ++i) {
 		if (*cancel) continue;
 
