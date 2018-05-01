@@ -13,6 +13,7 @@
 
 #include <Eigen/Core>
 #include <Eigen/LU>
+#include <Eigen/SVD>
 
 #include "ds/kdtree.hpp"
 #include "kmeans.hpp"
@@ -22,6 +23,7 @@
 #define EPS std::numeric_limits<double>::epsilon()
 
 typedef Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> RBFMatrix;
+typedef Eigen::Matrix<double, Eigen::Dynamic, 1> RBFVector;
 
 
 using namespace geo::ds;
@@ -106,14 +108,14 @@ private:
 	// Cluster centres.
 	std::vector<T> m_clusterMeans;
 
-	RBFMatrix m_Ai;
-	RBFMatrix m_c;
+	Eigen::CompleteOrthogonalDecomposition<RBFMatrix> m_Ai;
+	RBFVector m_c;
 	KDTree<T> m_tree;
 
 
 	double computeR(const T& a, const T& b) {
 		double r = dist(a, b) / m_range;
-		return r <=0 ? EPS : r;
+		return r;
 	}
 
 public:
@@ -250,13 +252,16 @@ public:
 
 		size_t size = m_clusterMeans.size();
 
-		m_tree.destroy();
-		m_tree.add(m_clusterMeans.begin(), m_clusterMeans.end());
-		m_tree.build();
+		{
+			std::lock_guard<std::mutex> lk(__mtx);
+			m_tree.destroy();
+			m_tree.add(m_clusterMeans.begin(), m_clusterMeans.end());
+			m_tree.build();
+		}
 
 		g_debug("building matrices")
 		{
-			Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> A(size + 1, size + 1);
+			RBFMatrix A(size + 1, size + 1);
 			m_c.resize(size + 1, 1);
 
 			for(size_t i = 0; i < size; ++i) {
@@ -275,7 +280,7 @@ public:
 			}
 
 			A(size, size) = 0;
-			m_Ai = A.inverse();
+			m_Ai = A.completeOrthogonalDecomposition();//.inverse();
 		}
 		g_debug("done building")
 
@@ -315,23 +320,29 @@ public:
 		if(!count || dst > m_range * 3)
 			return 0;
 
-		RBFMatrix c(size + 1, 1);
-		c(size, 0) = 1;
+		RBFVector c(size + 1);
+		c(size) = 1;
 
-		double r, z;
-		size_t i = 0;
-		for(const T& p : m_clusterMeans) {
-			r = computeR(p, pt);
-			z = (*m_rbf)(r, m_sigma, m_smoothing);
-			c(i++, 0) = z;
+		{
+			double r, z;
+			size_t i = 0;
+			for(const T& p : m_clusterMeans) {
+				r = computeR(p, pt);
+				z = (*m_rbf)(r, m_sigma, m_smoothing);
+				c(i++) = z;
+			}
 		}
 
-		RBFMatrix b = m_Ai * c;
+		RBFVector b = m_Ai.solve(c);
 
-		z = 0;
-		i = 0;
-		for(const T& p : m_clusterMeans)
-			z += b(i++, 0) * p.z;
+		double z = 0;
+		{
+			size_t i = 0;
+			for(const T& p : m_clusterMeans) {
+				double m = b(i++);
+				z += m * p.z;
+			}
+		}
 
 		return z;
 	}
