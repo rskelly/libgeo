@@ -28,7 +28,7 @@ public:
 template <class T>
 void kmeans(std::vector<T>& pts, int n, 
 	std::vector<T>& means,
-	std::unordered_map<size_t, std::list<T> >& clusters) {
+	std::unordered_map<size_t, std::list<T> >& clusters, int iters = 100) {
 
 	if(n > pts.size())
 		g_runerr("Too few points for meaningful clustering.")
@@ -62,7 +62,7 @@ void kmeans(std::vector<T>& pts, int n,
 
 	// Iterate over the entire point set, assigning each point to 
 	// the nearest mean.
-	int changed, lastChanged = 0, same = 0;
+	int changed, lastChanged = 0, same = 0, iter = 0;
 	std::unordered_map<size_t, std::list<T> > clusters0;
 	do {
 		changed = 0;
@@ -111,7 +111,7 @@ void kmeans(std::vector<T>& pts, int n,
 			same = 0;
 		}
 		lastChanged = changed;
-	} while(changed && same < 50);
+	} while(++iter < iters && changed && same < 50);
 
 	for(const Kpt<T>& k : _means)
 		means.emplace_back(*(k.value));
