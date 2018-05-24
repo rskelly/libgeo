@@ -75,7 +75,7 @@ find_package (OpenMP REQUIRED)
 find_package (Boost 1.58 COMPONENTS system filesystem date_time thread REQUIRED)
 find_package (GDAL 2.2 REQUIRED)
 find_package (CGAL REQUIRED COMPONENTS Core)
-find_package (PCL 1.8 REQUIRED)
+#find_package (PCL 1.8 REQUIRED)
 
 find_library (LIBLAS_LIBRARY las)
 find_library (JSONCPP_LIBRARY jsoncpp)
@@ -166,7 +166,7 @@ if(${BUILD_APPS})
 	target_link_libraries (groundassign ${LIBLAS_LIBRARY})
 
 	add_executable (rastermatch src/apps/rastermatch.cpp)
-	target_link_libraries (rastermatch geoutil geoann georaster ${GEOS_LIBRARY} ${GDAL_LIBRARY} ${PCL_LIBRARIES})
+	target_link_libraries (rastermatch geoutil geoann georaster ${GEOS_LIBRARY} ${GDAL_LIBRARY})
 
 	#add_executable (rbf src/tests/rbf.cpp)
 	#target_link_libraries (rbf)
