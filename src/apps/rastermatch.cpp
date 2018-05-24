@@ -220,14 +220,14 @@ void interpolate(const std::vector<Pt>& pts,
 	// Each thread will work on a tile, which is a square region of the adjustment region.
 	int tileSize = 256;
 	std::list<std::pair<int, int> > tiles;
-	for(int r = 1024; r < 2048 /* adjprops.rows() */; r += tileSize) {
-		for(int c = 0; c < adjprops.cols(); c += tileSize)
+	for(int r = 0; r < adjprops.rows(); r += tileSize) {
+		for(int c = 1024; c < 2048 /*adjprops.cols()*/; c += tileSize)
 			tiles.push_back(std::make_pair(r, c));
 	}
 
 	// Start the threads.
 	g_debug("starting")
-	int threadCount = 1;
+	int threadCount = 8;
 	std::mutex mtx;
 	std::vector<std::thread> threads;
 	for(int i = 0; i < threadCount; ++i)

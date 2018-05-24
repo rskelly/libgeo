@@ -34,6 +34,8 @@ inline double __tricube(double dist, double bandwidth) {
 	}
 }
 
+std::mutex _mtx;
+
 template <class T>
 class Loess {
 private:
@@ -68,24 +70,26 @@ public:
 			count = m_tree.radSearch(pt, m_bandwidth, 1024, std::back_inserter(found), std::back_inserter(dist));
 		}
 		if(count >= 3) {
-			// TODO: Check for colinearity.
-
-			Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> mtx;
-			Eigen::VectorXd vec;
-
-			mtx.resize(count, 3);
-			vec.resize(count);
+			Eigen::Matrix<double, 3, Eigen::Dynamic> mtx(3, count);
 
 			for(size_t i = 0; i < count; ++i) {
 				const T& f = found[i];
 				double d = __dist(f, pt);
-				mtx(i, 0) = f[0];
-				mtx(i, 1) = f[1];
-				mtx(i, 2) = 1;
-				vec[i] = __tricube(d, m_bandwidth) * f[2];
+				mtx(0, i) = f[0];
+				mtx(1, i) = f[1];
+				mtx(2, i) = f[2];
 			}
 
-			std::cerr << mtx.bdcSvd(Eigen::ComputeThinU|Eigen::ComputeThinV).solve(vec) << "\n";
+			// Recenter on zero.
+			Eigen::Vector3d cent = mtx.rowwise().mean();
+			mtx.colwise() -= cent;
+
+			Eigen::JacobiSVD<Eigen::MatrixXd> svd(mtx, Eigen::ComputeFullU);
+			//Eigen::Vector3d norm = mtx.bdcSvd(Eigen::ComputeThinU|Eigen::ComputeThinV).solve(vec).matrix().col(2);
+			Eigen::Vector3d norm = svd.matrixU().col(2);
+			double z = -norm.dot(cent);
+			std::cerr << z << "\n";
+			return z;
 		}
 		return 0;
 	}
