@@ -83,6 +83,8 @@ void getDiffs(std::vector<Pt>& pts,
 	MemRaster trast(tprops);
 	traster.writeTo(trast, tprops.cols(), tprops.rows(), 0, 0, 0, 0, tband, 1);
 
+	std::unordered_set<size_t> pxset;
+
 	for(size_t i = 0; i < anchors.size(); ++i) {
 		
 		std::cerr << "anchor: " << anchors[i] << "\n";
@@ -104,15 +106,33 @@ void getDiffs(std::vector<Pt>& pts,
 					int tc = tprops.toCol(x);
 					int tr = tprops.toRow(y);
 					double a = arast.getFloat(col, row);
-					if(a == aprops.nodata()) // || ar.getInt(col, row, 1) < 100)
+					if(a == aprops.nodata()) {// || ar.getInt(col, row, 1) < 100)
+						size_t idx = ((size_t) row<< 32) | col;
+						if(pxset.find(idx) == pxset.end()) {
+							pts.emplace_back(x, y, 0);
+							pxset.insert(idx);
+						}
 						continue;
+					}
 					double b = trast.getFloat(tc, tr);
-					if(b == tprops.nodata()) // || trast.getInt(tc, tr, 1) < 100)
+					if(b == tprops.nodata()) {// || trast.getInt(tc, tr, 1) < 100)
+						size_t idx = ((size_t) row<< 32) | col;
+						if(pxset.find(idx) == pxset.end()) {
+							pts.emplace_back(x, y, 0);
+							pxset.insert(idx);
+						}
 						continue;
+					}
 					double diff = a - b;
 					//if(std::abs(diff) > difflimit)
 					//	continue;
 					pts.emplace_back(x, y, diff);
+				} else {
+					size_t idx = ((size_t) row<< 32) | col;
+					if(pxset.find(idx) == pxset.end()) {
+						pts.emplace_back(x, y, 0);
+						pxset.insert(idx);
+					}
 				}
 			}
 		}
@@ -214,14 +234,14 @@ void interpolate(const std::vector<Pt>& pts,
 	adjprops.setBands(1);
 	MemRaster adjmem(adjprops, false);
 
-	double range = 500;
+	double range = 1000;
 	Loess<Pt> loess(pts, range);
 
 	// Each thread will work on a tile, which is a square region of the adjustment region.
 	int tileSize = 256;
 	std::list<std::pair<int, int> > tiles;
 	for(int r = 0; r < adjprops.rows(); r += tileSize) {
-		for(int c = 1024; c < 2048 /*adjprops.cols()*/; c += tileSize)
+		for(int c = 1024; c < 1280 /*adjprops.cols()*/; c += tileSize)
 			tiles.push_back(std::make_pair(r, c));
 	}
 
@@ -299,19 +319,30 @@ int main(int argc, char** argv) {
 		}
 	}
 
-	std::vector<Pt> pts;
-	{
-		getDiffs(pts, anchors, abands, target, tband, difflimit);
-		buffer(pts, 500, 100);
-		std::cerr << pts.size() << " points\n";
-		std::ofstream of(ptsFile);
-		of << std::setprecision(12);
-		of << "x,y,diff\n";
-		for(const Pt& pt : pts)
-			of << pt.x << "," << pt.y << "," << pt.z << "\n";
+	bool test = false;
+	if(!test) {
+
+		std::vector<Pt> pts;
+		{
+			getDiffs(pts, anchors, abands, target, tband, difflimit);
+			//buffer(pts, 500, 100);
+			std::cerr << pts.size() << " points\n";
+			std::ofstream of(ptsFile);
+			of << std::setprecision(12);
+			of << "x,y,diff\n";
+			for(const Pt& pt : pts)
+				of << pt.x << "," << pt.y << "," << pt.z << "\n";
+		}
+
+		interpolate(pts, anchors, abands, target, tband, adjustment);
+
+	} else {
+
+		Loess<Pt> loess({Pt(453090.43146641052, 6496285.181080793, 0), Pt(453286.44630423211, 6496305.0442587472, 0), Pt(453090.43146641052, 6496265.3179028388, 0)}, 100);
+		double z = loess.estimate(Pt(453088, 6496285, 0));
+		std::cerr << "z: " << z << "\n";
+
 	}
 
-	interpolate(pts, anchors, abands, target, tband, adjustment);
-
-	return 0;
+ 	return 0;
 }

@@ -72,23 +72,39 @@ public:
 		if(count >= 3) {
 			Eigen::Matrix<double, 3, Eigen::Dynamic> mtx(3, count);
 
+			int equal = 0;
+			double e = std::numeric_limits<double>::quiet_NaN();
 			for(size_t i = 0; i < count; ++i) {
 				const T& f = found[i];
 				double d = __dist(f, pt);
+				double t = __tricube(d, m_bandwidth);
 				mtx(0, i) = f[0];
 				mtx(1, i) = f[1];
-				mtx(2, i) = f[2];
+				mtx(2, i) = t * f[2];
+				if(e == f[2]) ++equal;
+				e = f[2];
 			}
+
+			if(equal == count - 1)
+				return e;
 
 			// Recenter on zero.
 			Eigen::Vector3d cent = mtx.rowwise().mean();
 			mtx.colwise() -= cent;
-
-			Eigen::JacobiSVD<Eigen::MatrixXd> svd(mtx, Eigen::ComputeFullU);
-			//Eigen::Vector3d norm = mtx.bdcSvd(Eigen::ComputeThinU|Eigen::ComputeThinV).solve(vec).matrix().col(2);
+			Eigen::JacobiSVD<Eigen::MatrixXd> svd(mtx, Eigen::ComputeThinU | Eigen::ComputeThinV);
 			Eigen::Vector3d norm = svd.matrixU().col(2);
-			double z = -norm.dot(cent);
-			std::cerr << z << "\n";
+			double z = norm.dot(Eigen::Vector3d(0, 0, cent[2]));
+			z = cent[2] > 0 ? std::abs(z) : -std::abs(z);
+			/*
+			{
+				std::lock_guard<std::mutex> lk(_mtx);
+				//std::cerr << "solve " << slv << "\n";
+				std::cerr << "cent " << cent << "\n";
+				std::cerr << "mtx " << mtx << "\n";
+				std::cerr << "norm " << norm << "\n";
+				std::cerr << "z " << z << "\n";
+			}
+			*/
 			return z;
 		}
 		return 0;
