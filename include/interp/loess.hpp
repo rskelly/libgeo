@@ -21,9 +21,8 @@
 namespace geo {
 namespace interp {
 
-template <class T>
-inline double __dist(const T& a, const T& b) {
-	return std::sqrt(std::pow(a.x - b.x, 2.0) + std::pow(a.y - b.y, 2.0));
+inline double __dist(double xa, double ya, double xb, double yb) {
+	return std::sqrt(std::pow(xa - xb, 2.0) + std::pow(ya - yb, 2.0));
 }
 
 inline double __tricube(double dist, double bandwidth) {
@@ -62,38 +61,42 @@ public:
 	 * @param pt A query point.
 	 */
 	double estimate(const T& pt) {
-		std::vector<T> found;
+		std::vector<double> found;
 		std::vector<double> dist;
 		int count;
 		{
-			std::lock_guard<std::mutex> lk(m_treeMtx);
-			count = m_tree.radSearch(pt, m_bandwidth, 1024, std::back_inserter(found), std::back_inserter(dist));
+			//std::lock_guard<std::mutex> lk(m_treeMtx);
+			count = m_tree.radSearch(pt, m_bandwidth, 99999, std::back_inserter(found), std::back_inserter(dist));
 		}
 		if(count >= 3) {
 			Eigen::Matrix<double, 3, Eigen::Dynamic> mtx(3, count);
 
 			int equal = 0;
-			double e = std::numeric_limits<double>::quiet_NaN();
+			int dims = m_tree.dims();
+			double z = std::numeric_limits<double>::quiet_NaN();
 			for(size_t i = 0; i < count; ++i) {
-				const T& f = found[i];
-				double d = __dist(f, pt);
+				double x0 = found[i * dims];
+				double y0 = found[i * dims + 1];
+				double z0 = found[i * dims + 2];
+				double d = __dist(x0, y0, pt.x, pt.y);
 				double t = __tricube(d, m_bandwidth);
-				mtx(0, i) = f[0];
-				mtx(1, i) = f[1];
-				mtx(2, i) = t * f[2];
-				if(e == f[2]) ++equal;
-				e = f[2];
+				mtx(0, i) = x0;
+				mtx(1, i) = y0;
+				mtx(2, i) = t * z0;
+				if(z == z0)
+					++equal;
+				z = z0;
 			}
 
 			if(equal == count - 1)
-				return e;
+				return z;
 
 			// Recenter on zero.
 			Eigen::Vector3d cent = mtx.rowwise().mean();
 			mtx.colwise() -= cent;
 			Eigen::JacobiSVD<Eigen::MatrixXd> svd(mtx, Eigen::ComputeThinU | Eigen::ComputeThinV);
 			Eigen::Vector3d norm = svd.matrixU().col(2);
-			double z = norm.dot(Eigen::Vector3d(0, 0, cent[2]));
+			z = norm.dot(Eigen::Vector3d(0, 0, cent[2]));
 			z = cent[2] > 0 ? std::abs(z) : -std::abs(z);
 			/*
 			{

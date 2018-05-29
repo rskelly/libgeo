@@ -163,15 +163,18 @@ void buffer(std::vector<Pt>& pts, double buf, double seg) {
 	delete buffered;
 }
 
-void doInterp(int tileSize, std::list<std::pair<int, int> >* tiles, const std::vector<Pt>* pts, Loess<Pt>* loess,
-	const GridProps* adjprops, MemRaster* adjmem, std::mutex* mtx) {
+void doInterp(int tileSize, std::list<std::pair<int, int> >* tiles, const std::vector<Pt>* pts,
+	const GridProps* adjprops, MemRaster* adjmem, std::mutex* qmtx, std::mutex* rmtx) {
+
+	double range = 1000;
+	Loess<Pt> loess(*pts, range);
 
 	// As long as there are tiles, keep working.
 	while(true) {
 		int scol, srow;
 		{
 			// Get a tile from the list.
-			std::lock_guard<std::mutex> lk(*mtx);
+			std::lock_guard<std::mutex> lk(*qmtx);
 			if(tiles->empty())
 				return;
 			srow = std::get<0>(tiles->front());
@@ -191,13 +194,13 @@ void doInterp(int tileSize, std::list<std::pair<int, int> >* tiles, const std::v
 			for(int col = scol; col < std::min(scol + tileSize, adjprops->cols()); ++col) {
 				double x = adjprops->toCentroidX(col);
 				double y = adjprops->toCentroidY(row);
-				double z = loess->estimate(Pt(x, y, 0));
+				double z = loess.estimate(Pt(x, y, 0));
 				out.push_back(std::make_tuple(x, y, z));
 			}
 		}
 		{
 			// Write all adjustments to the raster in one go.
-			std::lock_guard<std::mutex> lk(*mtx);
+			std::lock_guard<std::mutex> lk(*rmtx);
 			for(auto& p : out)
 				adjmem->setFloat(adjprops->toCol(std::get<0>(p)), adjprops->toRow(std::get<1>(p)), std::get<2>(p));
 			out.clear();
@@ -234,9 +237,6 @@ void interpolate(const std::vector<Pt>& pts,
 	adjprops.setBands(1);
 	MemRaster adjmem(adjprops, false);
 
-	double range = 1000;
-	Loess<Pt> loess(pts, range);
-
 	// Each thread will work on a tile, which is a square region of the adjustment region.
 	int tileSize = 256;
 	std::list<std::pair<int, int> > tiles;
@@ -247,11 +247,11 @@ void interpolate(const std::vector<Pt>& pts,
 
 	// Start the threads.
 	g_debug("starting")
-	int threadCount = 8;
-	std::mutex mtx;
+	int threadCount = 1;
+	std::mutex qmtx, rmtx;
 	std::vector<std::thread> threads;
 	for(int i = 0; i < threadCount; ++i)
-		threads.emplace_back(doInterp, tileSize, &tiles, &pts, &loess, &adjprops, &adjmem, &mtx);
+		threads.emplace_back(doInterp, tileSize, &tiles, &pts, &adjprops, &adjmem, &qmtx, &rmtx);
 
 	// Wait for completion.
 	for(std::thread& t : threads)

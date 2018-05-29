@@ -51,7 +51,7 @@ const PQKinfo	PQ_NULL_INFO =  ANN_NULL_IDX;	// nonexistent info value
 //		An ANNmin_k structure is one which maintains the smallest
 //		k values (of type PQKkey) and associated information (of type
 //		PQKinfo).  The special info and key values PQ_NULL_INFO and
-//		PQ_NULL_KEY means that thise entry is empty.
+//		PQ_NULL_KEY means that this entry is empty.
 //
 //		It is currently implemented using an array with k items.
 //		Items are stored in increasing sorted order, and insertions
