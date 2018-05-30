@@ -89,7 +89,7 @@ private:
 
 	// Transform parameters; loaded from the itrf file.
 	double tx, ty, tz, dtx, dty, dtz;		// Shifts, rates.
-	double rx, ry, rz, drx, dry, drz;		// Rotations, rates.
+	double rx, ry, rz, drx, dry, drz;		// orientations, rates.
 	double epoch;							// ITRF Transform epoch.
 	double dt; 								// Time delta
 	double d, dd; 							// Scale, scale rate.
