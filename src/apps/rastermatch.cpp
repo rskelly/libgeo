@@ -32,7 +32,6 @@ using namespace geos::geom;
 using namespace geos::linearref;
 
 using namespace geo::raster;
-using namespace geo::ds;
 using namespace geo::interp;
 
 void usage() {
@@ -69,6 +68,8 @@ public:
 		}
 	}
 };
+
+
 
 void getDiffs(std::vector<Pt>& pts, 
 		const std::vector<std::string>& anchors, const std::vector<int>& abands,
@@ -164,14 +165,14 @@ void buffer(std::vector<Pt>& pts, double buf, double seg) {
 }
 
 void doInterp(int tileSize, std::list<std::pair<int, int> >* tiles, const std::vector<Pt>* pts, Loess<Pt>* loess,
-	const GridProps* adjprops, MemRaster* adjmem, std::mutex* mtx) {
+	const GridProps* adjprops, MemRaster* adjmem, std::mutex* qmtx, std::mutex* rmtx) {
 
 	// As long as there are tiles, keep working.
 	while(true) {
 		int scol, srow;
 		{
 			// Get a tile from the list.
-			std::lock_guard<std::mutex> lk(*mtx);
+			std::lock_guard<std::mutex> lk(*qmtx);
 			if(tiles->empty())
 				return;
 			srow = std::get<0>(tiles->front());
@@ -197,7 +198,7 @@ void doInterp(int tileSize, std::list<std::pair<int, int> >* tiles, const std::v
 		}
 		{
 			// Write all adjustments to the raster in one go.
-			std::lock_guard<std::mutex> lk(*mtx);
+			std::lock_guard<std::mutex> lk(*rmtx);
 			for(auto& p : out)
 				adjmem->setFloat(adjprops->toCol(std::get<0>(p)), adjprops->toRow(std::get<1>(p)), std::get<2>(p));
 			out.clear();
@@ -234,24 +235,24 @@ void interpolate(const std::vector<Pt>& pts,
 	adjprops.setBands(1);
 	MemRaster adjmem(adjprops, false);
 
-	double range = 1000;
+	double range = 500;
 	Loess<Pt> loess(pts, range);
 
 	// Each thread will work on a tile, which is a square region of the adjustment region.
 	int tileSize = 256;
 	std::list<std::pair<int, int> > tiles;
 	for(int r = 0; r < adjprops.rows(); r += tileSize) {
-		for(int c = 1024; c < 1280 /*adjprops.cols()*/; c += tileSize)
+		for(int c = 0; c < adjprops.cols(); c += tileSize)
 			tiles.push_back(std::make_pair(r, c));
 	}
 
 	// Start the threads.
 	g_debug("starting")
 	int threadCount = 8;
-	std::mutex mtx;
+	std::mutex qmtx, rmtx;
 	std::vector<std::thread> threads;
 	for(int i = 0; i < threadCount; ++i)
-		threads.emplace_back(doInterp, tileSize, &tiles, &pts, &loess, &adjprops, &adjmem, &mtx);
+		threads.emplace_back(doInterp, tileSize, &tiles, &pts, &loess, &adjprops, &adjmem, &qmtx, &rmtx);
 
 	// Wait for completion.
 	for(std::thread& t : threads)
@@ -273,7 +274,7 @@ int main(int argc, char** argv) {
 	std::vector<int> abands;
 	std::string target;
 	std::string ptsFile = "pts.csv";
-	int tband;
+	int tband = 1;
 	std::string adjusted;
 	std::string adjustment;
 	int mode = 0;
@@ -330,8 +331,10 @@ int main(int argc, char** argv) {
 			std::ofstream of(ptsFile);
 			of << std::setprecision(12);
 			of << "x,y,diff\n";
-			for(const Pt& pt : pts)
-				of << pt.x << "," << pt.y << "," << pt.z << "\n";
+			for(const Pt& pt : pts) {
+				if(pt.z != 0)
+					of << pt.x << "," << pt.y << "," << pt.z << "\n";
+			}
 		}
 
 		interpolate(pts, anchors, abands, target, tband, adjustment);
