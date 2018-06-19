@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.1)
 
+set (CMAKE_INCLUDE_DIRECTORIES_BEFORE ON)
+
 enable_language(C)
 enable_language(CXX)
 set (CMAKE_CXX_STANDARD 11)
@@ -28,21 +30,21 @@ elseif(${WIN32})
 	set (libLAS_LIBRARY_DIRS "C:\\dev\\gisinternals\\lib")
 else()
 	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-pragmas")
-	include_directories (BEFORE SYSTEM /usr/include/eigen3)
-	include_directories (BEFORE SYSTEM /opt/include)
-	link_directories (BEFORE SYSTEM /opt/lib)
+	set (GEOS_INCLUDEDIR /opt/include)
+	set (GEOS_LIBRARYDIR /opt/lib)
+	set (EIGEN_INCLUDEDIR /usr/include/eigen3)
 endif()
 
 set (Boost_DEBUG OFF)
-set (Boost_USE_STATIC_LIBS OFF)
-set (Boost_USE_STATIC_RUNTIME OFF)
+set (Boost_USE_SHARED_LIBS OFF)
+set (Boost_USE_SHARED_RUNTIME OFF)
 
 find_package (OpenMP REQUIRED)
 find_package (Boost COMPONENTS system filesystem date_time REQUIRED)
 find_package (GDAL 2.1 REQUIRED)
 
-find_library (GEOS_LIBRARY geos)
-message (STATUS "GEOS: ${GEOS_LIBRARY}")
+find_library (GEOS_LIBRARY geos PATHS ${GEOS_LIBRARYDIR})
+message (STATUS "GEOS: ${GEOS_LIBRARY} ${GEOS_LIBRARYDIR}")
 
 if(OPENMP_FOUND)
 	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_C_FLAGS} -fopenmp")
@@ -55,45 +57,39 @@ project (libgeo)
 
 # Configure directories
 
-link_directories(. ${Boost_LIBRARY_DIRS} ${LIB_PATH})
+include_directories (include ${GEOS_INCLUDEDIR} ${EIGEN_INCLUDEDIR} ${Boost_INCLUDE_DIRS} ${GDAL_INCLUDE_DIR})
+link_directories(. ${GEOS_LIBRARYDIR} ${Boost_LIBRARY_DIRS} ${LIB_PATH})
 
 # Build support libraries ################################################################################
 
-add_library (geo STATIC src/geo.cpp)
-target_include_directories(geo PUBLIC include)
-
-
-add_library (util STATIC src/util.cpp src/md5.cpp)
-target_include_directories(util PUBLIC include ${INC_PATH} ${Boost_INCLUDE_DIRS} ${GDAL_INCLUDE_DIR})
+add_library (util SHARED src/util.cpp src/md5.cpp src/geo.cpp)
 if (UNIX AND NOT APPLE)
-	target_link_libraries (util ${Boost_LIBRARIES} ${GDAL_LIBRARY} geo rt)
+	target_link_libraries (util ${Boost_LIBRARIES} ${GDAL_LIBRARY} rt)
 else ()
-	target_link_libraries (util ${Boost_LIBRARIES} ${GDAL_LIBRARY} geo)
+	target_link_libraries (util ${Boost_LIBRARIES} ${GDAL_LIBRARY})
 endif ()
 
-add_library (db STATIC src/db.cpp)
-target_include_directories(db PUBLIC include ${INC_PATH} ${Boost_INCLUDE_DIRS} ${GDAL_INCLUDE_DIR})
-target_link_libraries (db ${GDAL_LIBRARY} util geo)
+add_library (db SHARED src/db.cpp)
+target_link_libraries (db ${GDAL_LIBRARY} util)
 
-add_library (raster STATIC src/raster.cpp)
-#target_include_directories(raster PUBLIC include ${INC_PATH} ${Boost_INCLUDE_DIRS} ${GDAL_INCLUDE_DIR})
-target_link_libraries (raster ${GDAL_LIBRARY} ${GEOS_LIBRARY} util geo db)
+add_library (raster SHARED src/raster.cpp)
+target_link_libraries (raster ${GDAL_LIBRARY} ${GEOS_LIBRARY} util db)
 
 # Build tests ############################################################################################
 
-add_executable (polygonize src/apps/polygonize.cpp)
-target_include_directories(polygonize PUBLIC include)
-target_link_libraries (polygonize PUBLIC raster)
+#add_executable (polygonize src/apps/polygonize.cpp)
+#target_include_directories(polygonize PUBLIC include)
+#target_link_libraries (polygonize PUBLIC raster)
 
 #add_executable (smooth_test src/tests/smooth.cpp)
 #target_include_directories(smooth_test PUBLIC include)
 #target_link_libraries (smooth_test PUBLIC raster)
 
-add_executable (fqtree_test src/tests/fqtree.cpp)
-target_include_directories(fqtree_test PUBLIC include)# ${STXXL_INCLUDE_DIRS})
-target_link_libraries (fqtree_test PUBLIC util)# ${STXXL_LIBRARIES})
+#add_executable (fqtree_test src/tests/fqtree.cpp)
+#target_include_directories(fqtree_test PUBLIC include)# ${STXXL_INCLUDE_DIRS})
+#target_link_libraries (fqtree_test PUBLIC util)# ${STXXL_LIBRARIES})
 
-add_executable (mqtree_test src/tests/mqtree.cpp)
-target_include_directories(mqtree_test PUBLIC include)# ${STXXL_INCLUDE_DIRS})
-target_link_libraries (mqtree_test PUBLIC util)# ${STXXL_LIBRARIES})
+#add_executable (mqtree_test src/tests/mqtree.cpp)
+#target_include_directories(mqtree_test PUBLIC include)# ${STXXL_INCLUDE_DIRS})
+#target_link_libraries (mqtree_test PUBLIC util)# ${STXXL_LIBRARIES})
 
