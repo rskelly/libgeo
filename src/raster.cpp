@@ -41,10 +41,6 @@ using namespace geo::raster;
 using namespace geos::geom;
 using namespace geos::operation::geounion;
 
-// Dummy cancel variable for when a cancel flag
-// isn't passed.
-static bool s_cancel = false;
-
 namespace geo {
 
 	namespace raster {
@@ -104,7 +100,7 @@ namespace geo {
 				// within the given thread, or by a thread whose block is completed.
 				// The checked range includes one row above and one below,
 				// which is required to guarantee that a polygon is completed.
-				bool isRangeFinalized(const std::vector<char> &finalRows) const {
+				bool isRangeFinalized(const std::vector<char>& finalRows) const {
 					int start = g_max(minRow - 1, 0);
 					int end = g_min(maxRow + 2, (int) finalRows.size());
 					for (int i = start; i < end; ++i) {
@@ -386,7 +382,7 @@ std::string GridProps::driver() const {
 	return m_driver;
 }
 
-void GridProps::setDriver(const std::string &name) {
+void GridProps::setDriver(const std::string& name) {
 	m_driver = name;
 }
 
@@ -529,7 +525,7 @@ int GridProps::hsrid() const {
 	return m_vsrid;
 }
 
-void GridProps::setProjection(const std::string &proj) {
+void GridProps::setProjection(const std::string& proj) {
 	m_projection = proj;
 }
 
@@ -710,7 +706,7 @@ Tile TileIterator::next() {
 	return Tile(tile, &m_source, m_cols, m_rows, col, row, m_buffer, srcCol, srcRow, dstCol, dstRow, m_band, props.writable());
 }
 
-Tile TileIterator::create(Tile &tpl) {
+Tile TileIterator::create(Tile& tpl) {
 	const GridProps& props = m_source.props();
 	GridProps p(props);
 	p.setSize(m_cols + m_buffer * 2, m_rows + m_buffer * 2);
@@ -802,10 +798,10 @@ void Grid::logNormalize(int band) {
 	double x = st.max;
 	double e = std::exp(1.0) - 1.0;
 	for(uint64_t i = 0; i < gp.size(); ++i)
-		setFloat(i, std::log(1.0 + e * (getFloat(i) - n) / (x - n)));
+		setFloat(i, std::log(1.0 + e * (getFloat(i, band) - n) / (x - n)), band);
 }
 
-void Grid::convert(Grid &g, int srcBand, int dstBand) {
+void Grid::convert(Grid& g, int srcBand, int dstBand) {
 	const GridProps& gp = props();
 	if(g.props().isInt()) {
 		for (uint64_t i = 0; i < gp.size(); ++i)
@@ -876,13 +872,11 @@ void Grid::voidFillIDW(double radius, int count, double exp, int band) {
 
 using namespace geo::raster::util;
 
-void Grid::smooth(Grid &smoothed, double sigma, int size, int band,
-		Status* status, bool *cancel) {
+void Grid::smooth(Grid& smoothed, double sigma, int size, int band,
+		bool& cancel, Status* status) {
 
 	const GridProps& gp = props();
 
-	if (!cancel)
-		cancel = &s_cancel;
 	if (status)
 		status->update(0.01f);
 	if (sigma <= 0)
@@ -909,7 +903,7 @@ void Grid::smooth(Grid &smoothed, double sigma, int size, int band,
 
 	#pragma omp parallel for
 	for (int i = 0; i < tiles; ++i) {
-		if (*cancel) continue;
+		if (cancel) continue;
 
 		Tile tile = iter->next();
 
@@ -965,7 +959,7 @@ MemRaster::MemRaster() :
 	m_mmapped(false) {
 }
 
-MemRaster::MemRaster(const GridProps &props, bool mapped) :
+MemRaster::MemRaster(const GridProps& props, bool mapped) :
 	m_grid(nullptr),
 	m_mmapped(mapped) {
 	init(props, mapped);
@@ -995,7 +989,7 @@ void MemRaster::freeMem() {
 	}
 }
 
-void MemRaster::init(const GridProps &pr, bool mapped) {
+void MemRaster::init(const GridProps& pr, bool mapped) {
 	std::lock_guard<std::mutex> lk(m_mtx);
 	m_grid = nullptr;
 	m_mmapped = false;
@@ -1141,7 +1135,7 @@ void MemRaster::setInt(uint64_t idx, int value, int band) {
 }
 
 void MemRaster::toMatrix(
-		Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> &mtx, int band) {
+		Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic>& mtx, int band) {
 	int cols = m_props.cols();
 	int rows = m_props.rows();
 	for (int r = 1; r < rows; ++r) {
@@ -1151,7 +1145,7 @@ void MemRaster::toMatrix(
 }
 
 void MemRaster::fromMatrix(
-		Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> &mtx, int band) {
+		Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic>& mtx, int band) {
 	int cols = m_props.cols();
 	int rows = m_props.rows();
 	for (int r = 1; r < rows; ++r) {
@@ -1160,7 +1154,7 @@ void MemRaster::fromMatrix(
 	}
 }
 
-void MemRaster::writeToRaster(Raster &grd,
+void MemRaster::writeToRaster(Raster& grd,
 			int cols, int rows,
 			int srcCol, int srcRow,
 			int dstCol, int dstRow,
@@ -1200,7 +1194,7 @@ void MemRaster::writeToRaster(Raster &grd,
 
 }
 
-void MemRaster::writeToMemRaster(MemRaster &grd,
+void MemRaster::writeToMemRaster(MemRaster& grd,
 		int cols, int rows,
 		int srcCol, int srcRow,
 		int dstCol, int dstRow,
@@ -1246,7 +1240,7 @@ void MemRaster::writeToMemRaster(MemRaster &grd,
 	}
 }
 
-void MemRaster::writeTo(Grid &grd,
+void MemRaster::writeTo(Grid& grd,
 		int cols, int rows,
 		int srcCol, int srcRow,
 		int dstCol, int dstRow,
@@ -1276,7 +1270,7 @@ std::map<std::string, std::set<std::string> > Raster::extensions() {
 				if(ext != NULL ) {
 					std::list<std::string> lst;
 					Util::splitString(std::back_inserter(lst), std::string(ext));
-					for(const std::string &item : lst)
+					for(const std::string& item : lst)
 						extensions[desc].insert("." + Util::lower(item));
 				}
 
@@ -1304,18 +1298,18 @@ std::map<std::string, std::string> Raster::drivers() {
 	return drivers;
 }
 
-std::string Raster::getDriverForFilename(const std::string &filename) {
+std::string Raster::getDriverForFilename(const std::string& filename) {
 	std::string ext = Util::extension(filename);
 	std::map<std::string, std::set<std::string> > drivers = extensions();
 	std::string result;
-	for(const auto &it : drivers) {
+	for(const auto& it : drivers) {
 		if(it.second.find(ext) != it.second.end())
 			result = it.first;
 	}
 	return result;
 }
 
-Raster::Raster(const std::string &filename, const GridProps &props) :
+Raster::Raster(const std::string& filename, const GridProps& props) :
 		m_ds(nullptr),
 		m_bcols(0), m_brows(0),
 		m_bcol(-1), m_brow(-1),
@@ -1376,7 +1370,7 @@ Raster::Raster(const std::string &filename, const GridProps &props) :
  	m_block = malloc(m_bcols * m_brows * getTypeSize(m_props.dataType()));
 }
 
-Raster::Raster(const std::string &filename, bool writable) :
+Raster::Raster(const std::string& filename, bool writable) :
 		m_ds(nullptr),
 		m_bcols(0), m_brows(0),
 		m_bcol(-1), m_brow(-1),
@@ -1427,7 +1421,7 @@ const GridProps& Raster::props() const {
 	return m_props;
 }
 
-DataType Raster::getFileDataType(const std::string &filename) {
+DataType Raster::getFileDataType(const std::string& filename) {
 	GDALDataset *ds = (GDALDataset *) GDALOpen(filename.c_str(), GA_ReadOnly);
 	DataType type = gdt2DataType(ds->GetRasterBand(1)->GetRasterDataType());
 	GDALClose(ds);
@@ -1456,7 +1450,7 @@ void Raster::fillFloat(double value, int band) {
 	bnd->Fill(value);
 }
 
-void Raster::writeToRaster(Raster &grd,
+void Raster::writeToRaster(Raster& grd,
 			int cols, int rows,
 			int srcCol, int srcRow,
 			int dstCol, int dstRow,
@@ -1511,7 +1505,7 @@ void Raster::writeToRaster(Raster &grd,
 	}
 }
 
-void Raster::writeToMemRaster(MemRaster &grd,
+void Raster::writeToMemRaster(MemRaster& grd,
 		int cols, int rows,
 		int srcCol, int srcRow,
 		int dstCol, int dstRow,
@@ -1566,7 +1560,7 @@ void Raster::writeToMemRaster(MemRaster &grd,
 
 }
 
-void Raster::writeTo(Grid &grd,
+void Raster::writeTo(Grid& grd,
 		int cols, int rows,
 		int srcCol, int srcRow,
 		int dstCol, int dstRow,
@@ -1745,14 +1739,10 @@ void Raster::setFloat(double x, double y, double v, int band) {
 
 void Raster::polygonize(const std::string& filename, const std::string& layerName,
 		const std::string& driver, uint16_t srid, uint16_t band,
-		bool removeHoles, bool removeDangles, Status *status, bool *cancel) {
+		bool removeHoles, bool removeDangles, bool& cancel, Status* status) {
 
 	if(!m_props.isInt())
 		g_runerr("Only integer rasters can be polygonized.");
-
-	// Use the dummy value if none is provided.
-	if(cancel == nullptr)
-		cancel = &s_cancel;
 
 	GDALAllRegister();
 
@@ -1841,7 +1831,7 @@ void Raster::polygonize(const std::string& filename, const std::string& layerNam
 						polyQ.pop();
 					}
 					// Decide whether to exit the loop.
-					run = !*cancel && (running || !polyQ.empty());
+					run = !cancel && (running || !polyQ.empty());
 				}
 				// If there's nothing in the queue. Wait a bit.
 				if(!p.get()) {
@@ -1883,7 +1873,7 @@ void Raster::polygonize(const std::string& filename, const std::string& layerNam
 				}
 
 				// If cancelled or no more blocks, quit.
-				if(*cancel || b >= blocks)
+				if(cancel || b >= blocks)
 					break;
 
 				// Work out the height of the current buffer. If it's too
@@ -1901,7 +1891,7 @@ void Raster::polygonize(const std::string& filename, const std::string& layerNam
 				// Read over the rows in the buffer.
 				for(int rr = 0; rr < bufHeight; ++rr) {
 
-					if(*cancel)
+					if(cancel)
 						break;
 
 					// The current overall row index.

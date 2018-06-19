@@ -61,7 +61,7 @@ namespace geo {
     		Bounds bounds() const;
 
     		std::string driver() const;
-    		void setDriver(const std::string &name);
+    		void setDriver(const std::string& name);
 
     		bool isInt() const;
     		bool isFloat() const;
@@ -121,7 +121,7 @@ namespace geo {
     		int hsrid() const;
 
     		// Set the WKT projection.
-    		void setProjection(const std::string &proj);
+    		void setProjection(const std::string& proj);
 
     		// Get the WKT projection.
     		std::string projection() const;
@@ -264,7 +264,7 @@ namespace geo {
         	// The tile size in increased, and pixels are read from the source
         	// to fill the buffer, however only pixels within the unbuffered
         	// window are written back.
-        	TileIterator(Grid& source, int cols, int rows, int buffer = 0, int band = 1);
+        	TileIterator(Grid& source, int cols, int rows, int buffer, int band);
 
         public:
 
@@ -281,7 +281,7 @@ namespace geo {
 
         	// Create a Tile using the given tile as a Template.
         	// Does not interfere with the iterator.
-        	Tile create(Tile &tpl);
+        	Tile create(Tile& tpl);
 
         	// Destroy the TileIterator.
         	~TileIterator();
@@ -295,7 +295,7 @@ namespace geo {
             virtual ~Grid() = 0;
             
             // Return a tile iterator;
-            std::unique_ptr<TileIterator> iterator(int cols, int rows, int buffer = 0, int band = 1);
+            std::unique_ptr<TileIterator> iterator(int cols, int rows, int buffer, int band);
 
             // Compute the table of Gaussian weights given the size of the table
             // and the std. deviation.
@@ -304,40 +304,40 @@ namespace geo {
             GridStats stats(int band);
 
             // Returns the grid properties
-            virtual const GridProps &props() const = 0;
+            virtual const GridProps& props() const = 0;
 
             // Fill the entire dataset with the given value.
-            virtual void fillFloat(double value, int band = 1) = 0;
-            virtual void fillInt(int value, int band = 1) = 0;
+            virtual void fillFloat(double value, int band) = 0;
+            virtual void fillInt(int value, int band) = 0;
 
             // Return a the value held at the given index in the grid.
-            virtual int getInt(uint64_t idx, int band = 1) = 0;
-            virtual int getInt(int col, int row, int band = 1) = 0;
-            virtual double getFloat(uint64_t idx, int band = 1) = 0;
-            virtual double getFloat(int col, int row, int band = 1) = 0;
+            virtual int getInt(uint64_t idx, int band) = 0;
+            virtual int getInt(int col, int row, int band) = 0;
+            virtual double getFloat(uint64_t idx, int band) = 0;
+            virtual double getFloat(int col, int row, int band) = 0;
 
             // Set the value held at  the given index in the grid.
-            virtual void setInt(uint64_t idx, int value, int band = 1) = 0;
-            virtual void setInt(int col, int row, int value, int band = 1) = 0;
-            virtual void setFloat(uint64_t idx, double value, int band = 1) = 0;
-            virtual void setFloat(int col, int row, double value, int band = 1) = 0;
+            virtual void setInt(uint64_t idx, int value, int band) = 0;
+            virtual void setInt(int col, int row, int value, int band) = 0;
+            virtual void setFloat(uint64_t idx, double value, int band) = 0;
+            virtual void setFloat(int col, int row, double value, int band) = 0;
 
             // Write data from the current Grid instance to the given grid.
-            virtual void writeTo(Grid &grd,
+            virtual void writeTo(Grid& grd,
             		int cols = 0, int rows = 0,
             		int srcCol = 0, int srcRow = 0,
 					int dstCol = 0, int dstRow = 0,
 					int srcBand = 1, int dstBand = 1) = 0;
 
             // Normalize the grid so that one standard deviation is +-1.
-            void normalize(int band = 1);
+            void normalize(int band);
 
             // Normalize the grid so that the max value is equal to 1, and
             // the minimum is zero.
-            void logNormalize(int band = 1);
+            void logNormalize(int band);
 
             // Convert a Grid to some other type.
-            void convert(Grid &g, int srcBand = 1, int dstBand = 1);
+            void convert(Grid& g, int srcBand = 1, int dstBand = 1);
 
             // Fill the grid, beginning with the target cell, where any contiguous cell
             // satisfies the given FillOperator. The other grid is actually filled,
@@ -353,7 +353,7 @@ namespace geo {
             //             plus the area of the fill's bounding box.
             template <class T, class U>
             static void floodFill(int col, int row,
-                FillOperator<T, U> &op,  bool d8 = false,
+                FillOperator<T, U>& op,  bool d8 = false,
 				int *outminc = nullptr, int *outminr = nullptr,
 				int *outmaxc = nullptr, int *outmaxr = nullptr,
 				int *outarea = nullptr) {
@@ -457,15 +457,13 @@ namespace geo {
             // Smooth the raster and write the smoothed version to the output raster.
             // Callback is an optional function reference with a single float
             // between 0 and 1, for status tracking.
-            void smooth(Grid &smoothed, double sigma, int size, int band = 1,
-                Status* status = nullptr,
-                bool *cancel = nullptr);
+            void smooth(Grid& smoothed, double sigma, int size, int band, bool& cancel, Status* status);
 
             // The radius is given with cells as the unit, but
             // can be rational. When determining which cells to
             // include in the calculation, any cell which partially
             // falls in the radius will be included.
-            void voidFillIDW(double radius, int count = 4, double exp = 2.0, int band = 1);
+            void voidFillIDW(double radius, int count, double exp, int band);
 
         	template <class V>
         	void writeAStarPath(uint64_t start, std::unordered_map<uint64_t, uint64_t>& parents, V inserter) {
@@ -629,7 +627,7 @@ namespace geo {
         public:
             MemRaster();
 
-            MemRaster(const GridProps &props, bool mapped = false);
+            MemRaster(const GridProps& props, bool mapped = false);
 
             ~MemRaster();
 
@@ -640,45 +638,45 @@ namespace geo {
 
             // Initialize with the given number of cols and rows.
             // (Re)allocates memory for the internal grid.
-            void init(const GridProps &props, bool mapped = false);
+            void init(const GridProps& props, bool mapped = false);
 
             // Fill the entire dataset with the given value.
-            void fillFloat(double value, int band = 1);
-            void fillInt(int value, int band = 1);
+            void fillFloat(double value, int band);
+            void fillInt(int value, int band);
 
             // Return a the value held at the given index in the grid.
-            int getInt(uint64_t idx, int band = 1);
-            int getInt(int col, int row, int band = 1);
-            double getFloat(uint64_t idx, int band = 1);
-            double getFloat(int col, int row, int band = 1);
+            int getInt(uint64_t idx, int band);
+            int getInt(int col, int row, int band);
+            double getFloat(uint64_t idx, int band);
+            double getFloat(int col, int row, int band);
 
             // Set the value held at  the given index in the grid.
-            void setInt(uint64_t idx, int value, int band = 1);
-            void setInt(int col, int row, int value, int band = 1);
-            void setFloat(uint64_t idx, double value, int band = 1);
-            void setFloat(int col, int row, double value, int band = 1);
+            void setInt(uint64_t idx, int value, int band);
+            void setInt(int col, int row, int value, int band);
+            void setFloat(uint64_t idx, double value, int band);
+            void setFloat(int col, int row, double value, int band);
 
-			void writeTo(Grid &grd,
+			void writeTo(Grid& grd,
 					int cols = 0, int rows = 0,
 					int srcCol = 0, int srcRow = 0,
 					int dstCol = 0, int dstRow = 0,
 					int srcBand = 1, int dstBand = 1);
-            void writeToMemRaster(MemRaster &grd,
+            void writeToMemRaster(MemRaster& grd,
             		int cols = 0, int rows = 0,
             		int srcCol = 0, int srcRow = 0,
 					int dstCol = 0, int dstRow = 0,
             		int srcBand = 1, int dstBand = 1);
-            void writeToRaster(Raster &grd,
+            void writeToRaster(Raster& grd,
             		int cols = 0, int rows = 0,
             		int srcCol = 0, int srcRow = 0,
 					int dstCol = 0, int dstRow = 0,
 					int srcBand = 1, int dstBand = 1);
 
             // Convert the grid to matrix.
-            void toMatrix(Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> &mtx, int band = 1);
+            void toMatrix(Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic>& mtx, int band);
 
             // Initialize the grid from a matrix.
-            void fromMatrix(Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> &mtx, int band = 1);
+            void fromMatrix(Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic>& mtx, int band);
 
         };
 
@@ -705,18 +703,18 @@ namespace geo {
         public:
 
             // Create a new raster for writing with a template.
-            Raster(const std::string &filename, const GridProps &props);
+            Raster(const std::string& filename, const GridProps& props);
 
             // Open the given raster. Set the writable argument to true
             // to enable writing.
-            Raster(const std::string &filename, bool writable = false);
+            Raster(const std::string& filename, bool writable = false);
 
             // Return the grid properties object.
             const GridProps& props() const;
 
             // Attempts to return the datatype of the raster
             // with the given filename.
-            static DataType getFileDataType(const std::string &filename);
+            static DataType getFileDataType(const std::string& filename);
 
             // Return a map containing the raster driver short name and extension.
             static std::map<std::string, std::set<std::string> > extensions();
@@ -724,7 +722,7 @@ namespace geo {
             // Return a map containing the raster driver short name and long name.
             static std::map<std::string, std::string> drivers();
 
-            static std::string getDriverForFilename(const std::string &filename);
+            static std::string getDriverForFilename(const std::string& filename);
 
             static void createVirtualRaster(const std::vector<std::string>& files, const std::string& outfile, double nodata);
 
@@ -738,42 +736,42 @@ namespace geo {
             std::string filename() const;
 
             // Fill the given band with the given value.
-            void fillInt(int value, int band = 1);
-            void fillFloat(double value, int band = 1);
+            void fillInt(int value, int band);
+            void fillFloat(double value, int band);
 
-			void writeTo(Grid &grd,
+			void writeTo(Grid& grd,
 					int cols = 0, int rows = 0,
 					int srcCol = 0, int srcRow = 0,
 					int dstCol = 0, int dstRow = 0,
 					int srcBand = 1, int dstBand = 1);
-            void writeToMemRaster(MemRaster &grd,
+            void writeToMemRaster(MemRaster& grd,
             		int cols = 0, int rows = 0,
             		int srcCol = 0, int srcRow = 0,
 					int dstCol = 0, int dstRow = 0,
             		int srcBand = 1, int dstBand = 1);
-            void writeToRaster(Raster &grd,
+            void writeToRaster(Raster& grd,
             		int cols = 0, int rows = 0,
             		int srcCol = 0, int srcRow = 0,
 					int dstCol = 0, int dstRow = 0,
 					int srcBand = 1, int dstBand = 1);
 
             // Returns a pixel value.
-            int getInt(double x, double y, int band = 1);
-            int getInt(int col, int row, int band = 1);
-            int getInt(uint64_t idx, int band = 1);
+            int getInt(double x, double y, int band);
+            int getInt(int col, int row, int band);
+            int getInt(uint64_t idx, int band);
 
-            double getFloat(double x, double y, int band = 1);
-            double getFloat(int col, int row, int band = 1);
-            double getFloat(uint64_t idx, int band = 1);
+            double getFloat(double x, double y, int band);
+            double getFloat(int col, int row, int band);
+            double getFloat(uint64_t idx, int band);
 
             // Set an pixel value.
-            void setInt(double x, double y, int v, int band = 1);
-            void setInt(int col, int row, int v, int band = 1);
-            void setInt(uint64_t idx, int v, int band = 1);
+            void setInt(double x, double y, int v, int band);
+            void setInt(int col, int row, int v, int band);
+            void setInt(uint64_t idx, int v, int band);
 
-            void setFloat(double x, double y, double v, int band = 1);
-            void setFloat(int col, int row, double v, int band = 1);
-            void setFloat(uint64_t idx, double v, int band = 1);
+            void setFloat(double x, double y, double v, int band);
+            void setFloat(int col, int row, double v, int band);
+            void setFloat(uint64_t idx, double v, int band);
 
             // Returns true if the raster is square.
             bool isSquare() const;
@@ -785,10 +783,9 @@ namespace geo {
             void flushDirty();
 
             // Vectorize the raster.
-            void polygonize(const std::string &filename, const std::string &layerName, 
-                const std::string &driver, uint16_t srid = 0, uint16_t band = 1,
-				bool removeHoles = false, bool removeDangles = false,
-				geo::util::Status *status = nullptr, bool *cancel = nullptr);
+            void polygonize(const std::string& filename, const std::string& layerName,
+                const std::string& driver, uint16_t srid, uint16_t band, bool removeHoles, bool removeDangles,
+				bool& cancel, geo::util::Status *status);
 
             ~Raster();
 
