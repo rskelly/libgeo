@@ -517,16 +517,16 @@ namespace geo {
         	TileIterator(Grid& source, int cols, int rows, int buffer, int band);
 
         	/**
-        	 * Copy constructor.
-        	 */
-        	TileIterator(const TileIterator& iter);
-
-        	/**
         	 * Construct a TileIterator.
         	 */
         	TileIterator();
 
         public:
+
+        	/**
+        	 * Copy constructor.
+        	 */
+        	TileIterator(const TileIterator& iter);
 
         	/**
         	 * Returns true if there's another tile to be retrieved.
@@ -539,17 +539,18 @@ namespace geo {
         	int count() const;
 
         	/**
-        	 * Returns the next tile. Writes the previous tile to source
-        	 * (if there is one) and reads the next one.
+        	 * Returns the next tile or nullptr if there isn't one.
+        	 * Caller is responsible for disposing of the tile.
         	 */
-        	Tile next();
+        	Tile* next();
 
         	/**
         	 * Create a Tile using the given tile as a Template. Does not
-        	 * interfere with the iterator.
+        	 * interfere with the iterator. Caller is responsible for disposing
+        	 * of tile.
         	 * @param tpl A tile template.
         	 */
-        	Tile create(Tile &tpl);
+        	Tile* create(Tile &tpl);
 
         	/**
         	 * Destroy the TileIterator.
@@ -580,7 +581,7 @@ namespace geo {
              * @param buffer The buffer around the tile.
              * @param band The band in the source raster.
              */
-            std::unique_ptr<TileIterator> iterator(int cols, int rows, int buffer = 0, int band = 1);
+            TileIterator iterator(int cols, int rows, int buffer = 0, int band = 1);
 
             /**
              * Compute the table of Gaussian weights given the size of

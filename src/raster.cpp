@@ -475,7 +475,7 @@ int TileIterator::count() const {
 	return g_max(1, (int) std::ceil((float) p.cols() / m_cols) * (int) std::ceil((float) p.rows() / m_rows));
 }
 
-Tile TileIterator::next() {
+Tile* TileIterator::next() {
 
 	MemRaster* tile = nullptr;
 	int col, row, srcCol, srcRow, dstCol, dstRow, cols, rows;
@@ -483,7 +483,7 @@ Tile TileIterator::next() {
 	{
 		std::lock_guard<std::mutex> lk(m_mtx);
 		if(!(m_curCol < props.cols() && m_curRow < props.rows()))
-			g_runerr("No more tiles.");
+			return nullptr;
 
 		col = m_curCol;
 		row = m_curRow;
@@ -507,10 +507,10 @@ Tile TileIterator::next() {
 		m_source.writeTo(*tile, cols, rows, srcCol, srcRow, dstCol, dstRow, m_band, 1);
 	}
 
-	return Tile(tile, &m_source, m_cols, m_rows, col, row, m_buffer, srcCol, srcRow, dstCol, dstRow, m_band, props.writable());
+	return new Tile(tile, &m_source, m_cols, m_rows, col, row, m_buffer, srcCol, srcRow, dstCol, dstRow, m_band, props.writable());
 }
 
-Tile TileIterator::create(Tile &tpl) {
+Tile* TileIterator::create(Tile &tpl) {
 	MemRaster* tile = nullptr;
 	const GridProps& props = m_source.props();
 	{
@@ -520,7 +520,7 @@ Tile TileIterator::create(Tile &tpl) {
 		tile = new MemRaster(p);
 		m_source.writeTo(*tile, tpl.m_cols, tpl.m_rows, tpl.m_srcCol, tpl.m_srcRow, tpl.m_dstCol, tpl.m_dstRow, m_band, 1);
 	}
-	return Tile(tile, &m_source, m_cols, m_rows, tpl.m_col, tpl.m_row, m_buffer, tpl.m_srcCol, tpl.m_srcRow, tpl.m_dstCol, tpl.m_dstRow, m_band, props.writable());
+	return new Tile(tile, &m_source, m_cols, m_rows, tpl.m_col, tpl.m_row, m_buffer, tpl.m_srcCol, tpl.m_srcRow, tpl.m_dstCol, tpl.m_dstRow, m_band, props.writable());
 }
 
 TileIterator::~TileIterator() {
@@ -532,9 +532,8 @@ TileIterator::~TileIterator() {
 Grid::Grid() {
 }
 
-std::unique_ptr<TileIterator> Grid::iterator(int cols, int rows, int buffer, int band) {
-	std::unique_ptr<TileIterator> iter(new TileIterator(*this, cols, rows, buffer, band));
-	return std::move(iter);
+TileIterator Grid::iterator(int cols, int rows, int buffer, int band) {
+	return TileIterator(*this, cols, rows, buffer, band);
 }
 
 void Grid::gaussianWeights(double *weights, int size, double sigma) {
@@ -751,8 +750,80 @@ void Grid::voidFillIDW(const std::string& filename, double radius, int count, do
 
 using namespace geo::raster::util;
 
-void Grid::smooth(Grid &smoothed, double sigma, int size, int band,
-		Status* status, bool *cancel) {
+/**
+ * Parallel function for smoothing, called by smooth().
+ * @param iter A pointer to a TileIterator.
+ * @param smoothed The grid to contain smoothed output.
+ * @param status The status object.
+ * @param size The size of the kernel.
+ * @param nodata The nodata value from the original raster.
+ * @param weights A list of Gaussian weights.
+ * @param rmtx The read mutex.
+ * @param wmtx The write mutex.
+ * @param cancel If set to true during operation, cancels the operation.
+ */
+void _smooth(TileIterator* iter, Grid* smoothed, Status* status,
+		int size, double nodata, double* weights,
+		std::mutex* rmtx, std::mutex* wmtx, bool* cancel) {
+
+	std::unique_ptr<Tile> tile;
+	int tileCount = iter->count();
+	int curTile = 0;
+
+	while(!*cancel) {
+
+		{
+			std::lock_guard<std::mutex> lk(*rmtx);
+			tile.reset(iter->next());
+			if(!tile.get())
+				return;
+			++curTile;
+		}
+
+		Grid& grid = tile->grid();
+		const GridProps& props = grid.props();
+		MemRaster buf(props);
+		grid.writeTo(buf);
+
+		// Process the entire block, even the buffer parts.
+		for (int r = 0; r < props.rows() - size; ++r) {
+			for (int c = 0; c < props.cols() - size; ++c) {
+				double v, t = 0.0;
+				bool foundNodata = false;
+				for (int gr = 0; gr < size; ++gr) {
+					for (int gc = 0; gc < size; ++gc) {
+						v = buf.getFloat(c + gc, r + gr);
+						if (v == nodata) {
+							foundNodata = true;
+							break;
+						} else {
+							t += weights[gr * size + gc] * v;
+						}
+					}
+					if(foundNodata) break;
+				}
+				if (!foundNodata)
+					grid.setFloat(c + size / 2, r + size / 2, t);
+			}
+		}
+
+		if(*cancel)
+			break;
+
+		{
+			std::lock_guard<std::mutex> lk(*wmtx);
+			tile->writeTo(*smoothed);
+		}
+
+		if (status)
+			status->update(g_min(0.99f, 0.2f + (float) curTile / tileCount * 0.97f));
+
+	}
+
+}
+
+void Grid::smooth(Grid& smoothed, double sigma, int size, int band,
+		Status* status, bool* cancel) {
 
 	const GridProps& gp = props();
 
@@ -769,56 +840,30 @@ void Grid::smooth(Grid &smoothed, double sigma, int size, int band,
 		size++;
 	}
 
+	// Compute the weights for Gaussian smoothing.
 	Buffer weightsBuf(size * size * getTypeSize(DataType::Float64));
 	double* weights = (double*) weightsBuf.buf;
 	Grid::gaussianWeights(weights, size, sigma);
 
-	double nd = gp.nodata();
-	std::atomic<int> curTile(0);
+	double nodata = gp.nodata();
 
 	if (status)
 		status->update(0.02f);
 
-	std::unique_ptr<TileIterator> iter = iterator(512, 512, size, band);
-	int tiles = iter->count();
+	TileIterator iter = iterator(512, 512, size, band);
+	std::mutex wmtx; // write mutex
+	std::mutex rmtx; // read mutex
 
-	#pragma omp parallel for
-	for (int i = 0; i < tiles; ++i) {
-		if (*cancel) continue;
+	// Run the smoothing jobs.
+	std::vector<std::thread> threads;
+	for(int i = 0; i < 4; ++i)
+		threads.emplace_back(_smooth, &iter, &smoothed, status, size, nodata, weights,
+				&rmtx, &wmtx, cancel);
 
-		Tile tile = iter->next();
-
-		Grid& grid = tile.grid();
-		const GridProps& props = grid.props();
-		MemRaster buf(props);
-		grid.writeTo(buf);
-
-		// Process the entire block, even the buffer parts.
-		for (int r = 0; r < props.rows() - size; ++r) {
-			for (int c = 0; c < props.cols() - size; ++c) {
-				double v, t = 0.0;
-				bool foundNodata = false;
-				for (int gr = 0; gr < size; ++gr) {
-					for (int gc = 0; gc < size; ++gc) {
-						v = buf.getFloat(c + gc, r + gr);
-						if (v == nd) {
-							foundNodata = true;
-							break;
-						} else {
-							t += weights[gr * size + gc] * v;
-						}
-					}
-					if(foundNodata) break;
-				}
-				if (!foundNodata)
-					grid.setFloat(c + size / 2, r + size / 2, t);
-			}
-		}
-
-		tile.writeTo(smoothed);
-
-		if (status)
-			status->update(g_min(0.99f, 0.2f + (float) curTile++ / tiles * 0.97f));
+	// Wait for jobs to complete.
+	for(int i = 0; i < 4; ++i) {
+		if(threads[i].joinable())
+			threads[i].join();
 	}
 
 	if (status)
