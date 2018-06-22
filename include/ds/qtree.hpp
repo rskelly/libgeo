@@ -1,13 +1,5 @@
 #ifndef __QTREE_HPP__
 #define __QTREE_HPP__
-
-#include "util.hpp"
-
-#include "geos/geom/Geometry.h"
-#include "geos/geom/Envelope.h"
-#include "geos/geom/Point.h"
-#include "geos/geom/GeometryFactory.h"
-
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -15,6 +7,13 @@
 #include <thread>
 #include <condition_variable>
 #include <fstream>
+
+#include "geos/geom/Geometry.h"
+#include "geos/geom/Envelope.h"
+#include "geos/geom/Point.h"
+#include "geos/geom/GeometryFactory.h"
+
+#include "util.hpp"
 
 using namespace geo::util;
 using namespace geos::geom;
@@ -26,9 +25,13 @@ namespace geo {
 		template <class T>
 		struct qtree_sorter {
 			double x, y;
-			qtree_sorter(double x, double y) : x(x), y(y) {}
+			qtree_sorter(double x, double y) : 
+				x(x), 
+				y(y) {
+			}
+
 			bool operator()(const T& a, const T& b) {
-				return  (g_sq(x - a.x) + g_sq(y - a.y)) < (g_sq(x - b.x) + g_sq(y - b.y));
+				return  (g_sq(x - a.x()) + g_sq(y - a.y())) < (g_sq(x - b.x()) + g_sq(y - b.y()));
 			}
 		};
 
@@ -36,7 +39,28 @@ namespace geo {
 		template <class T>
 		class QTree {
 		protected:
+<<<<<<< HEAD
+=======
+			// The geographic boundary corresponding to this tree. Will be reshaped to a square
+			// using the longer side.
+			Bounds m_bounds;
+			// The four sub-quads
+			std::vector<QTree*> m_nodes;
+			// The list of items stored in the current node if not split.
+			std::list<T> m_items;
+			// The max tree depth. TODO: Should be small enough to prevent degenerate nodes.
+			uint32_t m_maxDepth;
+			// Max number of items before splitting a node.
+			uint32_t m_maxCount;
+			// The depth of the current node.
+			uint32_t m_depth;
+			// An index for traversing the current node's sub-nodes.
+			uint8_t m_iterIdx;
+			// True if the current node has been split.
+			bool m_split;
+>>>>>>> branch 'master' of git@github.com:rskelly/libgeo
 
+<<<<<<< HEAD
 			Bounds m_bounds; 		///<! The geographic boundary corresponding to this tree. Will be reshaped to a square using the longer side.
 			std::list<T> m_items;	///<! The list of items stored in the current node if not split.
 			QTree* m_nodes[4];		///<! The four sub-quads
@@ -45,6 +69,9 @@ namespace geo {
 			uint32_t m_depth;		///<! The depth of the current node.
 			uint8_t m_iterIdx; 		///<! An index for traversing the current node's sub-nodes.
 			bool m_split;			///<! True if the current node has been split.
+=======
+			typename std::list<T>::iterator m_iter;
+>>>>>>> branch 'master' of git@github.com:rskelly/libgeo
 
 			typename std::list<T>::iterator m_iter; ///<! An iterator for traversing the current node's items.
 
@@ -66,19 +93,19 @@ namespace geo {
 			 */
 			QTree* node(uint8_t idx) {
 				if(!m_nodes[idx]) {
+<<<<<<< HEAD
 					Bounds bounds;
+=======
+					Bounds bounds(m_bounds);
+>>>>>>> branch 'master' of git@github.com:rskelly/libgeo
 					if(idx & 1) {
 						bounds.minx(m_bounds.midx());
-						bounds.maxx(m_bounds.maxx());
 					} else {
-						bounds.minx(m_bounds.minx());
 						bounds.maxx(m_bounds.midx());
 					}
 					if(idx & 2) {
 						bounds.miny(m_bounds.midy());
-						bounds.maxy(m_bounds.maxy());
 					} else {
-						bounds.miny(m_bounds.miny());
 						bounds.maxy(m_bounds.midy());
 					}
 					m_nodes[idx] = new QTree(bounds, m_maxDepth, m_maxCount, m_depth + 1);
@@ -101,7 +128,7 @@ namespace geo {
 			 */
 			void split() {
 				for(T& item : m_items)
-					node(item.x, item.y)->addItem(std::move(item));
+					node(item.x(), item.y())->addItem(std::move(item));
 				m_items.clear();
 				m_split = true;
 			}
@@ -140,12 +167,18 @@ namespace geo {
 				m_depth(depth),
 				m_iterIdx(0),
 				m_split(false) {
+<<<<<<< HEAD
 				for(int i = 0; i < 4; ++i)
 					m_nodes[i] = nullptr;
+=======
+
+				m_nodes = {nullptr,nullptr,nullptr,nullptr};
+>>>>>>> branch 'master' of git@github.com:rskelly/libgeo
 			}
 
 		public:
 
+<<<<<<< HEAD
 			/**
 			 * Construct a QTree with the given bounds, depth and count.
 			 *
@@ -156,7 +189,19 @@ namespace geo {
 			QTree(const Bounds& bounds, int maxDepth, int maxCount) {
 				init(bounds, maxDepth, maxCount);
 			}
+=======
+			// Construct a QTree with the given bounds, depth and count.
+			QTree(const Bounds& bounds, int maxDepth, int maxCount) :
+				m_bounds(bounds),
+				m_nodes({nullptr, nullptr, nullptr, nullptr}),
+				m_maxDepth(maxDepth),
+				m_maxCount(maxCount),
+				m_depth(0),
+				m_iterIdx(0),
+				m_split(false) {
+>>>>>>> branch 'master' of git@github.com:rskelly/libgeo
 
+<<<<<<< HEAD
 			/**
 			 * Initialize a QTree with the given bounds, depth and count.
 			 *
@@ -175,6 +220,9 @@ namespace geo {
 				m_depth = 0;
 				m_split = false;
 				m_iterIdx = 0;
+=======
+				m_nodes = {nullptr,nullptr,nullptr,nullptr};
+>>>>>>> branch 'master' of git@github.com:rskelly/libgeo
 				m_bounds.cube();
 			}
 
@@ -211,14 +259,14 @@ namespace geo {
 			 * @param item An item.
 			 */
 			void addItem(const T& item) {
-				if(!m_bounds.contains(item.x, item.y)) {
+				if(!m_bounds.contains(item.x(), item.y())) {
 					g_warn("Item is out of bounds for QTree.");
 					return;
 				}
 				if(m_depth < m_maxDepth && m_items.size() == m_maxCount)
 					split();
 				if(m_split) {
-					node(item.x, item.y)->addItem(item);
+					node(item.x(), item.y())->addItem(item);
 				} else {
 					m_items.push_back(item);
 				}
@@ -230,17 +278,17 @@ namespace geo {
 			 * @param uitem The item to remove.
 			 */
 			void removeItem(const T& uitem) {
-				if(m_bounds.contains(uitem.x, uitem.y)) {
+				if(m_bounds.contains(uitem.x(), uitem.y())) {
 					if(!m_split) {
 						for(auto it = m_items.begin(); it != m_items.end(); ) {
-							if(it->x == uitem.x && it->y == uitem.y) {
+							if(it->x == uitem.x() && it->y == uitem.y()) {
 								it = m_items.erase(it);
 							} else {
 								++it;
 							}
 						}
 					} else {
-						node(uitem.x, uitem.y)->removeItem(uitem);
+						node(uitem.x(), uitem.y())->removeItem(uitem);
 					}
 				}
 			}
@@ -252,14 +300,14 @@ namespace geo {
 			 * @param uitem An item to update.
 			 */
 			void updateItem(const T& uitem) {
-				if(m_bounds.contains(uitem.x, uitem.y)) {
+				if(m_bounds.contains(uitem.x(), uitem.y())) {
 					if(!m_split) {
 						for(T& item : m_items) {
-							if(item.x == uitem.x && item.y == uitem.y)
+							if(item.x() == uitem.x() && item.y() == uitem.y())
 								item = uitem;
 						}
 					} else {
-						node(uitem.x, uitem.y)->updateItem(uitem);
+						node(uitem.x(), uitem.y())->updateItem(uitem);
 					}
 				}
 			}
@@ -302,7 +350,7 @@ namespace geo {
 					outside = g_sq(outside);
 					inside = g_sq(inside);
 					for(T& item : result) {
-						double dist = g_sq(item.x - x) + g_sq(item.y - y);
+						double dist = g_sq(item.x() - x) + g_sq(item.y() - y);
 						if(dist <= outside && dist > inside) {
 							*output = item;
 							++output;
@@ -329,7 +377,7 @@ namespace geo {
 					findIntersecting(bounds, result);
 					// Find all items contained in the bounds.
 					for(T& item : result) {
-						if(bounds.contains(item.x, item.y)) {
+						if(bounds.contains(item.x(), item.y())) {
 							*output = item;
 							++output;
 							++count;
@@ -360,7 +408,7 @@ namespace geo {
 					GeometryFactory gf;
 					// Find all items that are inside the geometry.
 					for(T& item : result) {
-						geos::geom::Point* pt = gf.createPoint(Coordinate(item.x, item.y));
+						geos::geom::Point* pt = gf.createPoint(Coordinate(item.x(), item.y()));
 						if(geom.contains(pt)) {
 							*output = item;
 							++output;
@@ -453,8 +501,15 @@ namespace geo {
 			}
 
 			~QTree() {
+<<<<<<< HEAD
 				for(int i = 0; i < 4; ++i)
 					if(m_nodes[i]) delete m_nodes[i];
+=======
+				for(int i = 0; i < 4; ++i) {
+					if(m_nodes[i])
+						delete m_nodes[i];
+				}
+>>>>>>> branch 'master' of git@github.com:rskelly/libgeo
 			}
 
 		};
@@ -545,7 +600,7 @@ namespace geo {
 				std::vector<T> items(m_count);
 				load(items);
 				for(T& item : items)
-					node(item.x, item.y)->addItem(std::move(item));
+					node(item.x(), item.y())->addItem(std::move(item));
 				m_split = true;
 				m_count = 0;
 				Util::rm(m_fpath);
@@ -678,12 +733,12 @@ namespace geo {
 
 			// Add an item to the node.
 			void addItem(const T& item) {
-				if(!m_bounds.contains(item.x, item.y))
+				if(!m_bounds.contains(item.x(), item.y()))
 					g_runerr("Item is out of bounds for FQTree.");
 				if(m_depth < m_maxDepth && m_count == m_maxCount)
 					split();
 				if(m_split) {
-					node(item.x, item.y)->addItem(item);
+					node(item.x(), item.y())->addItem(item);
 				} else {
 					m_items.push_back(item);
 					++m_count;
@@ -691,13 +746,13 @@ namespace geo {
 			}
 
 			void removeItem(const T& uitem) {
-				if(m_bounds.contains(uitem.x, uitem.y)) {
+				if(m_bounds.contains(uitem.x(), uitem.y())) {
 					flush();
 					if(!m_split) {
 						m_items.resize(m_count);
 						load(m_items);
 						for(auto it = m_items.begin(); it != m_items.end(); ) {
-							if(it->x == uitem.x && it->y == uitem.y) {
+							if(it->x == uitem.x() && it->y == uitem.y()) {
 								it = m_items.erase(it);
 							} else {
 								++it;
@@ -705,7 +760,7 @@ namespace geo {
 						}
 						flush();
 					} else {
-						node(uitem.x, uitem.y)->removeItem(uitem);
+						node(uitem.x(), uitem.y())->removeItem(uitem);
 					}
 				}
 			}
@@ -714,17 +769,17 @@ namespace geo {
 			// For that, remove the item and re-insert it.
 			void updateItem(const T& uitem) {
 				flush();
-				if(m_bounds.contains(uitem.x, uitem.y)) {
+				if(m_bounds.contains(uitem.x(), uitem.y())) {
 					if(!m_split) {
 						m_items.resize(m_count);
 						load(m_items);
 						for(T& item : m_items) {
-							if(item.x == uitem.x && item.y == uitem.y)
+							if(item.x() == uitem.x() && item.y() == uitem.y())
 								item = uitem;
 						}
 						flush();
 					} else {
-						node(uitem.x, uitem.y)->updateItem(uitem);
+						node(uitem.x(), uitem.y())->updateItem(uitem);
 					}
 				}
 			}
@@ -750,7 +805,7 @@ namespace geo {
 					outside = g_sq(outside);
 					inside = g_sq(inside);
 					for(T& item : result) {
-						double dist = g_sq(item.x - x) + g_sq(item.y - y);
+						double dist = g_sq(item.x() - x) + g_sq(item.y() - y);
 						if(dist <= outside && dist > inside) {
 							*output = item;
 							++output;
@@ -771,7 +826,7 @@ namespace geo {
 					findIntersecting(bounds, result);
 					// Find all items contained in the bounds.
 					for(T& item : result) {
-						if(bounds.contains(item.x, item.y)) {
+						if(bounds.contains(item.x(), item.y())) {
 							*output = item;
 							++output;
 							++count;
@@ -796,7 +851,7 @@ namespace geo {
 					GeometryFactory gf;
 					// Find all items that are inside the geometry.
 					for(T& item : result) {
-						geos::geom::Point* pt = gf.createPoint(Coordinate(item.x, item.y));
+						geos::geom::Point* pt = gf.createPoint(Coordinate(item.x(), item.y()));
 						if(geom.contains(pt)) {
 							*output = item;
 							++output;

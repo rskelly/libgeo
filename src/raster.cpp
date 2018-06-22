@@ -6,6 +6,8 @@
 #include <unordered_set>
 #include <thread>
 #include <condition_variable>
+#include <chrono>
+#include <memory>
 
 #include <boost/interprocess/file_mapping.hpp>
 #include <boost/interprocess/mapped_region.hpp>
@@ -19,18 +21,6 @@
 #include <cpl_port.h>
 #include <cpl_string.h>
 
-#include <geos/geom/PrecisionModel.h>
-#include <geos/geom/GeometryFactory.h>
-#include <geos/geom/CoordinateSequenceFactory.h>
-#include <geos/geom/CoordinateArraySequence.h>
-#include <geos/geom/Geometry.h>
-#include <geos/geom/Polygon.h>
-#include <geos/geom/LinearRing.h>
-#include <geos/geom/CoordinateSequence.h>
-#include <geos/operation/union/CascadedPolygonUnion.h>
-
-#include "omp.h"
-
 #include "geo.hpp"
 #include "util.hpp"
 #include "raster.hpp"
@@ -38,8 +28,6 @@
 
 using namespace geo::util;
 using namespace geo::raster;
-using namespace geos::geom;
-using namespace geos::operation::geounion;
 
 namespace geo {
 
@@ -47,6 +35,7 @@ namespace geo {
 
 		namespace util {
 
+/*
 			class Poly {
 			private:
 				// Add the list of polygons to this instance with the rows
@@ -188,6 +177,8 @@ namespace geo {
 
 			};
 
+*/
+
 			int getTypeSize(DataType type) {
 				switch(type) {
 				case DataType::Byte: return sizeof(uint8_t);
@@ -299,71 +290,6 @@ namespace geo {
 				}
 			}
 
-			/*
-			class G_DLL_EXPORT LRUCacheItem {
-			public:
-				int col, row, band;
-				void* data;
-
-				LRUCacheItem(int col, int row, int band, uint64_t size) :
-					col(col), row(row), band(band),
-					data(nullptr) {
-					data = malloc(size);
-				}
-
-				~LRUCacheItem() {
-					free(data);
-				}
-			};
-
-			class G_DLL_EXPORT LRUCache {
-			private:
-				size_t m_slots;
-				size_t m_size;
-				uint64_t m_time;
-				GDALDataset* m_ds;
-				std::map<uint64_t, std::string> m_timeItems;
-				std::unordered_map<std::string, uint64_t> m_itemsTime;
-				std::unordered_map<std::string, std::unique_ptr<LRUCacheItem> > m_items;
-
-				void evict() {
-					auto it = m_timeItems.begin();
-					uint64_t time = it->first;
-					std::string idx = it->second;
-					m_items.erase(idx);
-					m_timeItems.erase(time);
-					m_itemsTime.erase(idx);
-				}
-
-				std::string getIdx(int col, int row, int band) {
-					return std::to_string(col) + std::string(":") + std::to_string(row) + std::string(":") + std::to_string(band);
-				}
-
-			public:
-				LRUCache(size_t slots, size_t size, GDALDataset* ds) :
-					m_slots(slots), m_size(size), m_time(0),
-					m_ds(ds) {}
-
-				void* get(int col, int row, int band) {
-					std::string idx = getIdx(col, row, band);
-					if(m_items.find(idx) == m_items.end()) {
-						while(m_items.size() >= m_slots)
-							evict();
-						m_items[idx].reset(new LRUCacheItem(col, row, band, m_size));
-						++m_time;
-						m_timeItems[m_time] = idx;
-						m_itemsTime[idx] = m_time;
-					} else {
-						m_timeItems.erase(m_time);
-						++m_time;
-						m_timeItems[m_time] = idx;
-						m_itemsTime[idx] = m_time;
-					}
-					return m_items[idx]->data;
-				}
-			};
-			*/
-
 		} //util
 	} // raster
 } // geo
@@ -406,8 +332,8 @@ bool GridProps::isFloat() const {
 	return !isInt();
 }
 
-uint64_t GridProps::size() const {
-	return (uint64_t) cols() * rows();
+size_t GridProps::size() const {
+	return (size_t) cols() * rows();
 }
 
 double GridProps::nodata() const {
@@ -416,6 +342,24 @@ double GridProps::nodata() const {
 
 void GridProps::unsetNodata() {
 	m_nodataSet = false;
+}
+
+void GridProps::bounds(double* bounds) const {
+	double x0 = m_trans[0];
+	double y0 = m_trans[3];
+	double x1 = x0 + m_trans[1] * m_cols;
+	double y1 = y0 + m_trans[5] * m_rows;
+	bounds[0] = g_min(x0, x1);
+	bounds[1] = g_min(y0, y1);
+	bounds[2] = g_max(x0, x1);
+	bounds[3] = g_max(y0, y1);
+}
+
+void GridProps::setBounds(const Bounds& bounds) {
+	m_trans[0] = m_trans[1] > 0 ? bounds.minx() : bounds.maxx();
+	m_trans[3] = m_trans[5] > 0 ? bounds.miny() : bounds.maxy();
+	m_cols = (int) std::ceil(bounds.width() / std::abs(m_trans[1]));
+	m_rows = (int) std::ceil(bounds.height() / std::abs(m_trans[5]));
 }
 
 Bounds GridProps::bounds() const {
@@ -659,10 +603,18 @@ TileIterator::TileIterator(Grid& source, int cols, int rows, int buffer, int ban
 		g_runerr("The column and row size must be larger than the buffer.");
 }
 
+TileIterator::TileIterator(const TileIterator& iter) :
+		TileIterator(iter.m_source, iter.m_cols, iter.m_rows, iter.m_buffer, iter.m_band) {
+}
+
 bool TileIterator::hasNext() {
-	std::lock_guard<std::mutex> lk(m_mtx);
-	const GridProps& p = m_source.props();
-	return m_curCol < p.cols() && m_curRow < p.rows();
+	bool has = false;
+	{
+		std::lock_guard<std::mutex> lk(m_mtx);
+		const GridProps& p = m_source.props();
+		has = m_curCol < p.cols() && m_curRow < p.rows();
+	}
+	return has;
 }
 
 int TileIterator::count() const {
@@ -670,16 +622,15 @@ int TileIterator::count() const {
 	return g_max(1, (int) std::ceil((float) p.cols() / m_cols) * (int) std::ceil((float) p.rows() / m_rows));
 }
 
-Tile TileIterator::next() {
+Tile* TileIterator::next() {
 
-	const GridProps& props = m_source.props();
-
+	MemRaster* tile = nullptr;
 	int col, row, srcCol, srcRow, dstCol, dstRow, cols, rows;
-
+	const GridProps& props = m_source.props();
 	{
 		std::lock_guard<std::mutex> lk(m_mtx);
 		if(!(m_curCol < props.cols() && m_curRow < props.rows()))
-			g_runerr("No more tiles.");
+			return nullptr;
 
 		col = m_curCol;
 		row = m_curRow;
@@ -695,24 +646,28 @@ Tile TileIterator::next() {
 			m_curCol = 0;
 			m_curRow += m_rows;
 		}
+
+		GridProps p(props);
+		p.setSize(m_cols + m_buffer * 2, m_rows + m_buffer * 2);
+		tile = new MemRaster(p);
+
+		m_source.writeTo(*tile, cols, rows, srcCol, srcRow, dstCol, dstRow, m_band, 1);
 	}
 
-	GridProps p(props);
-	p.setSize(m_cols + m_buffer * 2, m_rows + m_buffer * 2);
-	MemRaster* tile = new MemRaster(p);
-
-	m_source.writeTo(*tile, cols, rows, srcCol, srcRow, dstCol, dstRow, m_band, 1);
-
-	return Tile(tile, &m_source, m_cols, m_rows, col, row, m_buffer, srcCol, srcRow, dstCol, dstRow, m_band, props.writable());
+	return new Tile(tile, &m_source, m_cols, m_rows, col, row, m_buffer, srcCol, srcRow, dstCol, dstRow, m_band, props.writable());
 }
 
-Tile TileIterator::create(Tile& tpl) {
+Tile* TileIterator::create(Tile &tpl) {
+	MemRaster* tile = nullptr;
 	const GridProps& props = m_source.props();
-	GridProps p(props);
-	p.setSize(m_cols + m_buffer * 2, m_rows + m_buffer * 2);
-	MemRaster* tile = new MemRaster(p);
-	m_source.writeTo(*tile, tpl.m_cols, tpl.m_rows, tpl.m_srcCol, tpl.m_srcRow, tpl.m_dstCol, tpl.m_dstRow, m_band, 1);
-	return Tile(tile, &m_source, m_cols, m_rows, tpl.m_col, tpl.m_row, m_buffer, tpl.m_srcCol, tpl.m_srcRow, tpl.m_dstCol, tpl.m_dstRow, m_band, props.writable());
+	{
+		std::lock_guard<std::mutex> lk(m_mtx);
+		GridProps p(props);
+		p.setSize(m_cols + m_buffer * 2, m_rows + m_buffer * 2);
+		tile = new MemRaster(p);
+		m_source.writeTo(*tile, tpl.m_cols, tpl.m_rows, tpl.m_srcCol, tpl.m_srcRow, tpl.m_dstCol, tpl.m_dstRow, m_band, 1);
+	}
+	return new Tile(tile, &m_source, m_cols, m_rows, tpl.m_col, tpl.m_row, m_buffer, tpl.m_srcCol, tpl.m_srcRow, tpl.m_dstCol, tpl.m_dstRow, m_band, props.writable());
 }
 
 TileIterator::~TileIterator() {
@@ -721,12 +676,8 @@ TileIterator::~TileIterator() {
 
 // Implementations for the Grid class
 
-Grid::Grid() {
-}
-
-std::unique_ptr<TileIterator> Grid::iterator(int cols, int rows, int buffer, int band) {
-	std::unique_ptr<TileIterator> t(new TileIterator(*this, cols, rows, buffer, band));
-	return std::move(t);
+TileIterator Grid::iterator(int cols, int rows, int buffer, int band) {
+	return TileIterator(*this, cols, rows, buffer, band);
 }
 
 void Grid::gaussianWeights(double *weights, int size, double sigma) {
@@ -747,13 +698,15 @@ void Grid::gaussianWeights(double *weights, int size, double sigma) {
 
 GridStats Grid::stats(int band) {
 	GridStats st;
-	uint64_t i;
+	size_t i;
 	const GridProps& gp = props();
 	double nodata = gp.nodata();
 	double v, m = 0, s = 0;
 	int k = 1;
 	st.sum = 0;
-	st.count = 0;
+	st.count = 0;void voidFillIDW(const std::string& filename, int band, const std::string& mask, int maskBand, double radius, int count = 4, double exp = 2.0);
+
+
 	st.min = G_DBL_MAX_POS;
 	st.max = G_DBL_MAX_NEG;
 	// Welford's method for variance.
@@ -782,7 +735,7 @@ void Grid::normalize(int band) {
 	double v, nodata = gp.nodata();
 	double mean = st.mean;
 	double stdDev = st.stdDev;
-	for (uint64_t i = 0; i < gp.size(); ++i) {
+	for (size_t i = 0; i < gp.size(); ++i) {
 		if ((v = getFloat(i, band)) != nodata && !std::isnan(v) && v < G_DBL_MAX_POS) {
 			setFloat(i, ((v - mean) / stdDev), band);
 		} else {
@@ -792,27 +745,28 @@ void Grid::normalize(int band) {
 }
 
 void Grid::logNormalize(int band) {
-	GridStats st = stats(1);
+	GridStats st = stats(band);
 	const GridProps& gp = props();
 	double n = st.min;
 	double x = st.max;
 	double e = std::exp(1.0) - 1.0;
-	for(uint64_t i = 0; i < gp.size(); ++i)
+	for(size_t i = 0; i < gp.size(); ++i)
 		setFloat(i, std::log(1.0 + e * (getFloat(i, band) - n) / (x - n)), band);
 }
 
 void Grid::convert(Grid& g, int srcBand, int dstBand) {
 	const GridProps& gp = props();
 	if(g.props().isInt()) {
-		for (uint64_t i = 0; i < gp.size(); ++i)
+		for (size_t i = 0; i < gp.size(); ++i)
 			g.setInt(i, getInt(i, srcBand), dstBand);
 	} else {
-		for (uint64_t i = 0; i < gp.size(); ++i)
+		for (size_t i = 0; i < gp.size(); ++i)
 			g.setFloat(i, getFloat(i, srcBand), dstBand);
 	}
 }
 
-void Grid::voidFillIDW(double radius, int count, double exp, int band) {
+void Grid::voidFillIDW(const std::string& filename, int band, const std::string& mask,
+		int maskBand, double radius, int count, double exp) {
 
 	if(!props().isFloat())
 		g_runerr("IDW fill only implemented for float rasters.");
@@ -826,48 +780,118 @@ void Grid::voidFillIDW(double radius, int count, double exp, int band) {
 	if (exp <= 0.0)
 		throw std::invalid_argument("Exponent must be larger than 0.");
 
-	MemRaster tmp(props());
+	GridProps iprops(props());
+	iprops.setBands(1);
+	iprops.setWritable(true);
+	MemRaster input(iprops);
+	writeTo(input, iprops.cols(), iprops.rows(), 0, 0, 0, 0, band);
+
+	GridProps oprops(props());
+	oprops.setBands(1);
+	oprops.setWritable(true);
+	MemRaster output(oprops);
+
+	double maxDist = 100;
+	bool holesOnly = true;
+
 	double nodata = props().nodata();
+	double v, d;
 	int rows = props().rows();
 	int cols = props().cols();
-	for (int r = 0; r < rows; ++r) {
+
+    TargetFillOperator<double, double> op1(&input, band, band, nodata, 99999);
+    TargetFillOperator<double, double> op2(&input, band, &output, band, 99999, nodata);
+    TargetFillOperator<double, double> op3(&input, band, band, 99999, 99998);
+    int outminc, outminr, outmaxc, outmaxr;
+
+    for (int r = 0; r < rows; ++r) {
+    	if(r % 100 == 0) {
+    		std::cerr << "Row " << r << " of " << rows << "\n";
+    	}
 		for (int c = 0; c < cols; ++c) {
-			if (getFloat(c, r) != nodata)
-				continue;
-			double rad = radius;
-			bool found = false;
-			do {
-				double d = g_sq(rad);
-				double a = 0.0;
-				double b = 0.0;
+
+			v = input.getFloat(c, r);
+			if(v == 99998) {
+
+				//output.setFloat(c, r, nodata);
+
+			} else if (v != nodata) {
+
+				output.setFloat(c, r, v);
+
+			} else if(!holesOnly) {
+
+				double dp, a = 0, b = 0;
 				int cnt = 0;
-				for (int r0 = (int) g_max(0, r - rad); r0 < (int) g_min(rows, r + rad + 1); ++r0) {
-					for (int c0 = (int) g_max(0, c - rad); c0 < (int) g_min(cols, c + rad + 1); ++c0) {
-						double d0 = g_sq((double) c0 - c) + g_sq((double) r0 - r);
-						if (d0 <= d && getFloat(c0, r0, band) != nodata) {
-							double dp = 1.0 / std::pow(d0, exp);
-							a += dp * getFloat(c0, r0, band);
-							b += dp;
-							++cnt;
+				for(int r0 = g_max(0, r - maxDist); r0 < g_min(rows, r + maxDist + 1); ++r0) {
+					for(int c0 = g_max(0, c - maxDist); c0 < g_min(cols, c + maxDist + 1); ++c0) {
+						if((c0 == c && r0 == r) || (d = g_sq(c0 - c) + g_sq(r0 - r)) > maxDist || (v = input.getFloat(c0, r0)) == nodata)
+							continue;
+						dp = 1.0 / std::pow(d, exp);
+						a += dp * v;
+						b += dp;
+						++cnt;
+					}
+				}
+				output.setFloat(c, r, cnt ? (a / b) : nodata);
+
+			} else {
+
+				// Fill the hole with a unique value.
+	            input.floodFill(c, r, op1, false, &outminc, &outminr, &outmaxc, &outmaxr);
+
+	            // If it touches the edges, re-fill with nodata and continue.
+	            if(outminc == 0 || outmaxc == cols - 1 || outminr == 0 || outmaxr == rows - 1) {
+	            	output.floodFill(c, r, op2, false);
+					input.floodFill(c, r, op3, false);
+	            	continue;
+	            }
+
+	            // Find all the pixels which were filled
+	            std::vector<std::tuple<int, int, double> > vpx;
+	            std::vector<std::tuple<int, int> > npx;
+				for(int r0 = g_max(0, outminr - 1); r0 < g_min(rows, outmaxr + 2); ++r0) {
+					for(int c0 = g_max(0, outminc - 1); c0 < g_min(cols, outmaxc + 2); ++c0) {
+						v = input.getFloat(c0, r0);
+						if(v == 99999) {
+							npx.push_back(std::make_tuple(c0, r0));
+						} else if(v != nodata && v != 99998) {
+							vpx.push_back(std::make_tuple(c0, r0, v));
 						}
 					}
 				}
 
-				if (cnt >= count) {
-					tmp.setFloat(c, r, (a / b), band);
-					found = true;
-					break;
+	            // Fill voids using the surrounding pixel values.
+				int pc, pr, nc, nr, cnt;
+				double dp, pv, a, b;
+				for(auto& np : npx) {
+					nc = std::get<0>(np);
+					nr = std::get<1>(np);
+					cnt = 0;
+					a = 0;
+					b = 0;
+					for(auto& vp : vpx) {
+						pc = std::get<0>(vp);
+						pr = std::get<1>(vp);
+						pv = std::get<2>(vp);
+						d = g_sq(pc - nc) + g_sq(pr - nr);
+						dp = 1.0 / std::pow(d, exp);
+						a += dp * pv;
+						b += dp;
+						++cnt;
+					}
+					output.setFloat(nc, nr, cnt ? (a / b) : nodata);
 				}
 
-				rad += 1.0;
-
-			} while (rad < g_min(cols, rows));
-
-			if (!found)
-				g_warn("Pixel not filled at " << c << "," << r << ". Consider larger radius or smaller count.");
+				// Fill again with a different value so it will be ignored.
+				input.floodFill(c, r, op3, false);
+			}
 		}
 	}
-	writeTo(tmp);
+
+	Raster routput(filename, oprops);
+	output.writeTo(routput);
+
 }
 
 using namespace geo::raster::util;
@@ -898,16 +922,16 @@ void Grid::smooth(Grid& smoothed, double sigma, int size, int band,
 	if (status)
 		status->update(0.02f);
 
-	std::unique_ptr<TileIterator> iter = iterator(512, 512, size, band);
-	int tiles = iter->count();
+	TileIterator iter = iterator(512, 512, size, band);
+	int tiles = iter.count();
 
-	#pragma omp parallel for
+	// TODO: Need this? #pragma omp parallel for
 	for (int i = 0; i < tiles; ++i) {
 		if (cancel) continue;
 
-		Tile tile = iter->next();
+		std::unique_ptr<Tile> tile(iter.next());
 
-		Grid& grid = tile.grid();
+		Grid& grid = tile->grid();
 		const GridProps& props = grid.props();
 		MemRaster buf(props);
 		grid.writeTo(buf);
@@ -934,7 +958,7 @@ void Grid::smooth(Grid& smoothed, double sigma, int size, int band,
 			}
 		}
 
-		tile.writeTo(smoothed);
+		tile->writeTo(smoothed);
 
 		if (status)
 			status->update(g_min(0.99f, 0.2f + (float) curTile++ / tiles * 0.97f));
@@ -944,24 +968,30 @@ void Grid::smooth(Grid& smoothed, double sigma, int size, int band,
 		status->update(1.0);
 }
 
-Grid::~Grid() {
-}
-
 // Implementations for MemRaster
+
+bool MemRaster::mmapped() const {
+	return m_mmapped;
+}
 
 void MemRaster::checkInit() const {
 	if (m_grid == nullptr)
 		g_runerr("This instance has not been initialized.");
 }
 
-MemRaster::MemRaster() :
+MemRaster::MemRaster() : 
+	m_mmapped(false),
 	m_grid(nullptr),
-	m_mmapped(false) {
+	m_mappedFile(nullptr) {
 }
 
-MemRaster::MemRaster(const GridProps& props, bool mapped) :
-	m_grid(nullptr),
-	m_mmapped(mapped) {
+MemRaster::MemRaster(const MemRaster& other) :
+		MemRaster() {
+	init(other.props(), other.mmapped());
+}
+
+MemRaster::MemRaster(const GridProps &props, bool mapped) :
+		MemRaster() {
 	init(props, mapped);
 }
 
@@ -978,9 +1008,11 @@ void* MemRaster::grid() {
 }
 
 void MemRaster::freeMem() {
+	std::lock_guard<std::mutex> lk(m_mtx);
 	if (m_grid) {
 		if (m_mmapped) {
-			delete m_mappedFile.release();
+			delete m_mappedFile;
+			m_mappedFile = nullptr;
 			m_grid = nullptr;
 		} else {
 			free(m_grid);
@@ -1006,7 +1038,7 @@ void MemRaster::init(const GridProps& pr, bool mapped) {
 		size_t typeSize = getTypeSize(m_props.dataType());
 		size_t size = MappedFile::fixSize(typeSize * m_props.cols() * m_props.rows());
 		if (mapped) {
-			m_mappedFile.reset(new MappedFile(size));
+			m_mappedFile = new MappedFile(size, true);
 			m_grid = m_mappedFile->data();
 		} else {
 			m_grid = malloc(size);
@@ -1028,12 +1060,9 @@ void MemRaster::fillFloat(double value, int band) {
 		for (size_t i = 0; i < chunk / sizeof(double); ++i)
 			*(buf + i) = value;
 		char* grid = (char*)m_grid;
-		{
-			std::lock_guard<std::mutex> lk(m_mtx);
-			for (uint64_t i = 0; i < size; i += chunk) {
-				std::memcpy(grid, buffer.buf, chunk);
-				grid += chunk;
-			}
+		for (size_t i = 0; i < size; i += chunk) {
+			std::memcpy(grid, buffer.buf, chunk);
+			grid += chunk;
 		}
 	}
 }
@@ -1050,58 +1079,81 @@ void MemRaster::fillInt(int value, int band) {
 		for(size_t i = 0; i < chunk / sizeof(int); ++i)
 			*(buf + i) = value;
 		char* grid = (char*) m_grid;
-		{
-			std::lock_guard<std::mutex> lk(m_mtx);
-			for (uint64_t i = 0; i < size; i += chunk) {
-				std::memcpy(grid, buffer.buf, chunk);
-				grid += chunk;
-			}
+		for (size_t i = 0; i < size; i += chunk) {
+			std::memcpy(grid, buffer.buf, chunk);
+			grid += chunk;
 		}
 	}
 }
 
-double MemRaster::getFloat(uint64_t idx, int band) {
+double MemRaster::getFloat(size_t idx, int band) {
 	checkInit();
 	if (idx < 0 || idx >= m_props.size())
 		g_argerr("Index out of bounds: " << idx << "; size: " << m_props.size());
 	if(m_props.isInt()) {
 		return (double) getInt(idx, band);
 	} else {
-		double* grid = (double*) m_grid;
-		return *(grid + idx);
+		return *(((double*) m_grid) + idx);
 	}
 }
 
 double MemRaster::getFloat(int col, int row, int band) {
-	uint64_t idx = (uint64_t) row * m_props.cols() + col;
+	size_t idx = (size_t) row * m_props.cols() + col;
 	return getFloat(idx, band);
 }
 
-int MemRaster::getInt(uint64_t idx, int band) {
+int MemRaster::getIntRow(int row, int band, int* buf) {
+	checkInit();
+	if(row < 0 || row >= m_props.rows())
+		g_argerr("Row index out of bounds: " << row << "; rows: " << m_props.rows());
+	if(m_props.isInt()) {
+		int cols = m_props.cols();
+		std::memcpy(buf, ((int*) m_grid) + (row * cols), cols * sizeof(int));
+		return cols;
+	} else {
+		g_runerr("Not an integer raster.");
+	}
+	return 0;
+}
+
+int MemRaster::getFloatRow(int row, int band, float* buf) {
+	checkInit();
+	if(row < 0 || row >= m_props.rows())
+		g_argerr("Row index out of bounds: " << row << "; rows: " << m_props.rows());
+	if(m_props.isFloat()) {
+		int cols = m_props.cols();
+		std::memcpy(buf, ((float*) m_grid) + (row * cols), cols * sizeof(double));
+		return cols;
+	} else {
+		g_runerr("Not a float raster.");
+	}
+	return 0;
+}
+
+int MemRaster::getInt(size_t idx, int band) {
 	checkInit();
 	if (idx < 0 || idx >= m_props.size())
 		g_argerr("Index out of bounds: " << idx << "; size: " << m_props.size());
 	if(m_props.isInt()) {
-		int* grid = (int*) m_grid;
-		return *(grid + idx);
+		return *(((int*) m_grid) + idx);
 	} else {
 		return (int) getFloat(idx, band);
 	}
 }
 
 int MemRaster::getInt(int col, int row, int band) {
-	uint64_t idx = (uint64_t) row * m_props.cols() + col;
+	size_t idx = (size_t) row * m_props.cols() + col;
 	return getInt(idx, band);
 }
 
 void MemRaster::setFloat(int col, int row, double value, int band) {
-	uint64_t idx = (uint64_t) row * m_props.cols() + col;
+	size_t idx = (size_t) row * m_props.cols() + col;
 	setFloat(idx, value, band);
 }
 
-void MemRaster::setFloat(uint64_t idx, double value, int band) {
+void MemRaster::setFloat(size_t idx, double value, int band) {
 	checkInit();
-	uint64_t ps = m_props.size();
+	size_t ps = m_props.size();
 	if (idx >= ps)
 		g_argerr("Index out of bounds: " << idx << "; size: " << m_props.size()
 						<< "; value: " << value << "; col: " << (idx % m_props.cols())
@@ -1109,25 +1161,23 @@ void MemRaster::setFloat(uint64_t idx, double value, int band) {
 	if(m_props.isInt()) {
 		setInt(idx, (int) value, band);
 	} else {
-		std::lock_guard<std::mutex> lk(m_mtx);
 		*(((double *) m_grid) + idx) = value;
 	}
 }
 
 void MemRaster::setInt(int col, int row, int value, int band) {
-	uint64_t idx = (uint64_t) row * m_props.cols() + col;
+	size_t idx = (size_t) row * m_props.cols() + col;
 	setInt(idx, value, band);
 }
 
-void MemRaster::setInt(uint64_t idx, int value, int band) {
+void MemRaster::setInt(size_t idx, int value, int band) {
 	checkInit();
-	uint64_t ps = m_props.size();
+	size_t ps = m_props.size();
 	if (idx >= ps)
 		g_argerr("Index out of bounds: " << idx << "; size: " << m_props.size()
 						<< "; value: " << value << "; col: " << (idx % m_props.cols())
 						<< "; row: " << (idx / m_props.cols()));
 	if(m_props.isInt()) {
-		std::lock_guard<std::mutex> lk(m_mtx);
 		*(((int *) m_grid) + idx) = value;
 	} else {
 		setFloat(idx, (double) value, band);
@@ -1181,15 +1231,10 @@ void MemRaster::writeToRaster(Raster& grd,
 
 	char* input  = (char*) grid();
 
-	{
-		std::lock_guard<std::mutex> lk1(grd.m_mtx);
-		std::lock_guard<std::mutex> lk0(m_mtx);
-		for(int r = 0; r < rows; ++r) {
-			//std::memcpy(output + r * cols * typeSize, input + ((srcRow + r) * gcols + srcCol) * typeSize, cols * typeSize);
-			if(CPLE_None != band->RasterIO(GF_Write, dstCol, dstRow + r, cols, 1, input + ((srcRow + r) * gcols + srcCol) * typeSize,
-					cols, 1, gtype, 0, 0, 0))
-				g_runerr("Failed to write to: " << grd.filename());
-		}
+	for(int r = 0; r < rows; ++r) {
+		if(CPLE_None != band->RasterIO(GF_Write, dstCol, dstRow + r, cols, 1, input + ((srcRow + r) * gcols + srcCol) * typeSize,
+				cols, 1, gtype, 0, 0, 0))
+			g_runerr("Failed to write to: " << grd.filename());
 	}
 
 }
@@ -1211,13 +1256,11 @@ void MemRaster::writeToMemRaster(MemRaster& grd,
 
 	if(grd.m_props.isInt()) {
 		if(m_props.isInt()) {
-			std::lock_guard<std::mutex> lk(m_mtx);
 			for(int r = 0; r < rows; ++r) {
 				for(int c = 0; c < cols; ++c)
 					grd.setInt(c + dstCol, r + dstRow, getInt(c + srcCol, r + srcRow, srcBand), dstBand);
 			}
 		} else {
-			std::lock_guard<std::mutex> lk(m_mtx);
 			for(int r = 0; r < rows; ++r) {
 				for(int c = 0; c < cols; ++c)
 					grd.setInt(c + dstCol, r + dstRow, (int) getFloat(c + srcCol, r + srcRow, srcBand), dstBand);
@@ -1225,13 +1268,11 @@ void MemRaster::writeToMemRaster(MemRaster& grd,
 		}
 	} else {
 		if(m_props.isInt()) {
-			std::lock_guard<std::mutex> lk(m_mtx);
 			for(int r = 0; r < rows; ++r) {
 				for(int c = 0; c < cols; ++c)
 					grd.setFloat(c + dstCol, r + dstRow, (double) getInt(c + srcCol, r + srcRow, srcBand), dstBand);
 			}
 		} else {
-			std::lock_guard<std::mutex> lk(m_mtx);
 			for(int r = 0; r < rows; ++r) {
 				for(int c = 0; c < cols; ++c)
 					grd.setFloat(c + dstCol, r + dstRow, getFloat(c + srcCol, r + srcRow, srcBand), dstBand);
@@ -1313,10 +1354,8 @@ Raster::Raster(const std::string& filename, const GridProps& props) :
 		m_ds(nullptr),
 		m_bcols(0), m_brows(0),
 		m_bcol(-1), m_brow(-1),
-		m_band(1),
-		m_block(nullptr),
-		m_dirty(false), 
 		m_bband(0),
+		m_dirty(false), 
 		m_type(GDT_Unknown) {
 
 	if (props.resolutionX() == 0 || props.resolutionY() == 0)
@@ -1342,6 +1381,8 @@ Raster::Raster(const std::string& filename, const GridProps& props) :
 	std::string drvName = m_props.driver();
 	if(drvName.empty())
 		drvName = getDriverForFilename(m_filename);
+	if(drvName.empty())
+		g_runerr("Couldn't find driver for: " << m_filename)
 	GDALDriver *drv = GetGDALDriverManager()->GetDriverByName(drvName.c_str());
 	const char *create = drv->GetMetadataItem(GDAL_DCAP_CREATE);
 	if(create == NULL || std::strncmp(create, "YES", 3) != 0)
@@ -1367,17 +1408,14 @@ Raster::Raster(const std::string& filename, const GridProps& props) :
 			m_ds->GetRasterBand(i)->SetNoDataValue(m_props.nodata());
 	}
 	m_ds->GetRasterBand(1)->GetBlockSize(&m_bcols, &m_brows);
- 	m_block = malloc(m_bcols * m_brows * getTypeSize(m_props.dataType()));
 }
 
 Raster::Raster(const std::string& filename, bool writable) :
 		m_ds(nullptr),
 		m_bcols(0), m_brows(0),
 		m_bcol(-1), m_brow(-1),
-		m_band(1),
-		m_block(nullptr),
-		m_dirty(false),
 		m_bband(0),
+		m_dirty(false),
 		m_type(GDT_Unknown) {
 
 	if (filename.empty())
@@ -1410,7 +1448,12 @@ Raster::Raster(const std::string& filename, bool writable) :
 	m_props.setProjection(std::string(m_ds->GetProjectionRef()));
 	m_props.setNoData(m_ds->GetRasterBand(1)->GetNoDataValue()); // TODO: This might not be a real nodata value.
 	m_ds->GetRasterBand(1)->GetBlockSize(&m_bcols, &m_brows);
- 	m_block = malloc(m_bcols * m_brows * getTypeSize(m_props.dataType()));
+}
+
+void* Raster::getBlock(int band) {
+	if(m_blocks.find(band) == m_blocks.end())
+		m_blocks[band] = malloc(m_bcols * m_brows * getTypeSize(m_props.dataType()));
+	return m_blocks[band];
 }
 
 GDALDataset* Raster::ds() const {
@@ -1440,13 +1483,11 @@ void writeInt(char* buf, int size, int value) {
 
 void Raster::fillInt(int value, int band) {
 	GDALRasterBand *bnd = m_ds->GetRasterBand(band);
-	std::lock_guard<std::mutex> lk(m_mtx);
 	bnd->Fill((int) value);
 }
 
 void Raster::fillFloat(double value, int band) {
 	GDALRasterBand *bnd = m_ds->GetRasterBand(band);
-	std::lock_guard<std::mutex> lk(m_mtx);
 	bnd->Fill(value);
 }
 
@@ -1460,8 +1501,7 @@ void Raster::writeToRaster(Raster& grd,
 		GDALRasterBand* bnd = m_ds->GetRasterBand(m_bband);
 		if(!bnd)
 			g_runerr("Failed to find band " << m_bband);
-		std::lock_guard<std::mutex> lk(m_mtx);
-		if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, m_block))
+		if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, getBlock(m_bband)))
 			g_runerr("Failed to flush to: " << filename());
 		m_dirty = false;
 	}
@@ -1494,15 +1534,12 @@ void Raster::writeToRaster(Raster& grd,
 	GDALRasterBand* dstBnd = grd.m_ds->GetRasterBand(dstBand);
 	if(!dstBnd)
 		g_runerr("Failed to find destination band " << dstBand);
-	{
-		std::lock_guard<std::mutex> lk(m_mtx);
-		if(CPLE_None != srcBnd->RasterIO(GF_Read, srcCol, srcRow, cols, rows,
-				buf.buf, cols, rows, gtype, 0, 0, 0))
-			g_runerr("Failed to read from: " << grd.filename());
-		if(CPLE_None != dstBnd->RasterIO(GF_Write, dstCol, dstRow, cols, rows,
-				buf.buf, cols, rows, gtype, 0, 0, 0))
-			g_runerr("Failed to write to: " << filename());
-	}
+	if(CPLE_None != srcBnd->RasterIO(GF_Read, srcCol, srcRow, cols, rows,
+			buf.buf, cols, rows, gtype, 0, 0, 0))
+		g_runerr("Failed to read from: " << grd.filename());
+	if(CPLE_None != dstBnd->RasterIO(GF_Write, dstCol, dstRow, cols, rows,
+			buf.buf, cols, rows, gtype, 0, 0, 0))
+		g_runerr("Failed to write to: " << filename());
 }
 
 void Raster::writeToMemRaster(MemRaster& grd,
@@ -1515,8 +1552,7 @@ void Raster::writeToMemRaster(MemRaster& grd,
 		GDALRasterBand* bnd = m_ds->GetRasterBand(m_bband);
 		if(!bnd)
 			g_runerr("Failed to find band " << bnd);
-		std::lock_guard<std::mutex> lk(m_mtx);
-		if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, m_block))
+		if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, getBlock(m_bband)))
 			g_runerr("Failed to flush to: " << filename());
 		m_dirty = false;
 	}
@@ -1535,26 +1571,23 @@ void Raster::writeToMemRaster(MemRaster& grd,
 
 	const GridProps& gp = grd.props();
 	GDALDataType gtype = dataType2GDT(gp.dataType());
-	uint64_t typeSize = getTypeSize(gp.dataType());
-	uint64_t gcols = gp.cols();
+	size_t typeSize = getTypeSize(gp.dataType());
+	size_t gcols = gp.cols();
 
 	Buffer buf(cols * rows * typeSize);
 	GDALRasterBand *band = m_ds->GetRasterBand(srcBand);
 	if(!band)
 		g_runerr("Failed to find band " << srcBand);
-	{
-		std::lock_guard<std::mutex> lk(m_mtx);
-		if(CPLE_None != band->RasterIO(GF_Read, srcCol, srcRow, cols, rows, buf.buf,
-				cols, rows, gtype, 0, 0, 0))
-			g_runerr("Failed to read from: " << filename());
-	}
+	if(CPLE_None != band->RasterIO(GF_Read, srcCol, srcRow, cols, rows, buf.buf,
+			cols, rows, gtype, 0, 0, 0))
+		g_runerr("Failed to read from: " << filename());
 
 	char* output = (char*) grd.grid();
 	char* input  = (char*) buf.buf;
-	uint64_t len = cols * typeSize;
+	size_t len = cols * typeSize;
 	for(int r = 0; r < rows; ++r) {
-		uint64_t doff = ((dstRow + r) * gcols + dstCol) * typeSize;
-		uint64_t soff = (uint64_t) r * cols * typeSize;
+		size_t doff = ((dstRow + r) * gcols + dstCol) * typeSize;
+		size_t soff = (size_t) r * cols * typeSize;
 		std::memcpy(output + doff , input + soff, len);
 	}
 
@@ -1582,35 +1615,26 @@ double Raster::getFloat(int col, int row, int band) {
 	int bcol = col / m_bcols;
 	int brow = row / m_brows;
 	if(bcol != m_bcol || brow != m_brow || band != m_bband) {
-		if(m_dirty) {
-			GDALRasterBand* bnd = m_ds->GetRasterBand(m_bband);
-			if(!bnd)
-				g_runerr("Failed to find band " << bnd);
-			std::lock_guard<std::mutex> lk(m_mtx);
-			if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, m_block))
-				g_runerr("Failed to flush to: " << filename());
-			m_dirty = false;
-		}
-		GDALRasterBand *rb = m_ds->GetRasterBand(band);
-		if(!rb)
+		if(m_dirty)
+			flush();
+		GDALRasterBand* bnd = m_ds->GetRasterBand(band);
+		if(!bnd)
 			g_argerr("Failed to find band " << band);
-		{
-			std::lock_guard<std::mutex> lk(m_mtx);
-			if(CPLE_None != rb->ReadBlock(bcol, brow, m_block))
-				g_runerr("Failed to read from: " << filename());
-		}
+		if(CPLE_None != bnd->ReadBlock(bcol, brow, getBlock(band)))
+			g_runerr("Failed to read from: " << filename());
 		m_bcol = bcol;
 		m_brow = brow;
 		m_bband = band;
 	}
 	int idx = (row % m_brows) * m_bcols + (col % m_bcols);
 	double v = 0;
-	readFromBlock(m_block, getGDType(), &v, idx);
+	readFromBlock(getBlock(m_bband), getGDType(), &v, idx);
 	return v;
 }
 
-double Raster::getFloat(uint64_t idx, int band) {
-	return getFloat((int) (idx % m_props.cols()), (int) (idx / m_props.cols()), band);
+double Raster::getFloat(size_t idx, int band) {
+	int cols = m_props.cols();
+	return getFloat((int) (idx % cols), (int) (idx / cols), band);
 }
 
 
@@ -1622,43 +1646,35 @@ int Raster::getInt(int col, int row, int band) {
 	int bcol = col / m_bcols;
 	int brow = row / m_brows;
 	if(bcol != m_bcol || brow != m_brow || band != m_bband) { // TODO: No effective cacheing if the band changes.
-		if(m_dirty) {
-			GDALRasterBand* bnd = m_ds->GetRasterBand(m_bband);
-			if(!bnd)
-				g_runerr("Failed to find band " << m_bband);
-			std::lock_guard<std::mutex> lk(m_mtx);
-			if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, m_block))
-				g_runerr("Failed to flush to: " << filename());
-			m_dirty = false;
-		}
-		GDALRasterBand *rb = m_ds->GetRasterBand(band);
-		if(!rb)
+		if(m_dirty)
+			flush();
+		GDALRasterBand* bnd = m_ds->GetRasterBand(band);
+		if(!bnd)
 			g_argerr("Failed to find band " << band);
-		{
-			std::lock_guard<std::mutex> lk(m_mtx);
-			if(CPLE_None != rb->ReadBlock(bcol, brow, m_block))
-				g_runerr("Failed to read from: " << filename());
-		}
+		if(CPLE_None != bnd->ReadBlock(bcol, brow, getBlock(band)))
+			g_runerr("Failed to read from: " << filename());
 		m_bcol = bcol;
 		m_brow = brow;
 		m_bband = band;
 	}
 	int idx = (row % m_brows) * m_bcols + (col % m_bcols);
 	int v = 0;
-	readFromBlock(m_block, getGDType(), &v, idx);
+	readFromBlock(getBlock(m_bband), getGDType(), &v, idx);
 	return v;
 }
 
-int Raster::getInt(uint64_t idx, int band) {
-	return getInt((int) (idx % m_props.cols()), (int) (idx / m_props.cols()), band);
+int Raster::getInt(size_t idx, int band) {
+	int cols = m_props.cols();
+	return getInt((int) (idx % cols), (int) (idx / cols), band);
 }
 
 int Raster::getInt(double x, double y, int band) {
 	return getInt(m_props.toCol(x), m_props.toRow(y), band);
 }
 
-void Raster::setInt(uint64_t idx, int v, int band) {
-	setInt((int) (idx % m_props.cols()), (int) (idx / m_props.cols()), v, band);
+void Raster::setInt(size_t idx, int v, int band) {
+	int cols = m_props.cols();
+	setInt((int) (idx % cols), (int) (idx / cols), v, band);
 }
 
 void Raster::setInt(double x, double y, int v, int band) {
@@ -1670,30 +1686,20 @@ void Raster::setFloat(int col, int row, double v, int band) {
 		g_runerr("This raster is not writable.");
 	int bcol = col / m_bcols;
 	int brow = row / m_brows;
-	if(bcol != m_bcol || brow != m_brow || band != m_band) {
-		if(m_dirty) {
-			GDALRasterBand* bnd = m_ds->GetRasterBand(m_bband);
-			if(!bnd)
-				g_runerr("Failed to find band " << m_bband);
-			std::lock_guard<std::mutex> lk(m_mtx);
-			if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, m_block))
-				g_runerr("Failed to flush to: " << filename());
-			m_dirty = false;
-		}
-		GDALRasterBand *rb = m_ds->GetRasterBand(band);
-		if(!rb)
+	if(bcol != m_bcol || brow != m_brow || band != m_bband) {
+		if(m_dirty)
+			flush();
+		GDALRasterBand* bnd = m_ds->GetRasterBand(band);
+		if(!bnd)
 			g_argerr("Failed to find band " << band);
-		{
-			std::lock_guard<std::mutex> lk(m_mtx);
-			if(CPLE_None != rb->ReadBlock(bcol, brow, m_block))
-				g_runerr("Failed to read from: " << filename());
-		}
+		if(CPLE_None != bnd->ReadBlock(bcol, brow, getBlock(band)))
+			g_runerr("Failed to read from: " << filename());
 		m_bcol = bcol;
 		m_brow = brow;
 		m_bband = band;
 	}
 	int idx = (row % m_brows) * m_bcols + (col % m_bcols);
-	writeToBlock(m_block, getGDType(), v, idx);
+	writeToBlock(getBlock(m_bband), getGDType(), v, idx);
 	m_dirty = true;
 }
 
@@ -1702,41 +1708,33 @@ void Raster::setInt(int col, int row, int v, int band) {
 		g_runerr("This raster is not writable.");
 	int bcol = col / m_bcols;
 	int brow = row / m_brows;
-	if(bcol != m_bcol || brow != m_brow || band != m_band) {
-		if(m_dirty) {
-			GDALRasterBand* bnd = m_ds->GetRasterBand(m_bband);
-			if(!bnd)
-				g_runerr("Failed to find band " << m_bband);
-			std::lock_guard<std::mutex> lk(m_mtx);
-			if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, m_block))
-				g_runerr("Failed to flush to: " << filename());
-			m_dirty = false;
-		}
-		GDALRasterBand *rb = m_ds->GetRasterBand(band);
-		if(!rb)
+	if(bcol != m_bcol || brow != m_brow || band != m_bband) {
+		if(m_dirty)
+			flush();
+		GDALRasterBand* bnd = m_ds->GetRasterBand(band);
+		if(!bnd)
 			g_argerr("Failed to find band " << band);
-		{
-			std::lock_guard<std::mutex> lk(m_mtx);
-			if(CPLE_None != rb->ReadBlock(bcol, brow, m_block))
-				g_runerr("Failed to read from: " << filename());
-		}
+		if(CPLE_None != bnd->ReadBlock(bcol, brow, getBlock(band)))
+			g_runerr("Failed to read from: " << filename());
 		m_bcol = bcol;
 		m_brow = brow;
 		m_bband = band;
 	}
 	int idx = (row % m_brows) * m_bcols + (col % m_bcols);
-	writeToBlock(m_block, getGDType(), v, idx);
+	writeToBlock(getBlock(m_bband), getGDType(), v, idx);
 	m_dirty = true;
 }
 
-void Raster::setFloat(uint64_t idx, double v, int band) {
-	setFloat((int) (idx % m_props.cols()), (int) (idx / m_props.cols()), v, band);
+void Raster::setFloat(size_t idx, double v, int band) {
+	int cols = m_props.cols();
+	setFloat((int) (idx % cols), (int) (idx / cols), v, band);
 }
 
 void Raster::setFloat(double x, double y, double v, int band) {
 	setFloat(m_props.toCol(x), m_props.toRow(y), v, band);
 }
 
+/**
 void Raster::polygonize(const std::string& filename, const std::string& layerName,
 		const std::string& driver, uint16_t srid, uint16_t band,
 		bool removeHoles, bool removeDangles, bool& cancel, Status* status) {
@@ -2005,25 +2003,24 @@ void Raster::polygonize(const std::string& filename, const std::string& layerNam
 	if(status)
 		status->update(1.0f, "Done.");
 }
+*/
 
 void Raster::flush() {
-	if(m_brow > -1 && m_bcol > -1 && m_props.writable()) {
-		GDALRasterBand* bnd = m_ds->GetRasterBand(m_band);
+	if(m_dirty && m_props.writable()) {
+		GDALRasterBand* bnd = m_ds->GetRasterBand(m_bband);
 		if(!bnd)
-			g_runerr("Failed to find band " << m_band);
-		std::lock_guard<std::mutex> lk(m_mtx);
-		if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, m_block))
+			g_runerr("Failed to find band " << m_bband);
+		if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, getBlock(m_bband)))
 			g_warn("Failed to write block to " << filename());
 	}
 	m_ds->FlushCache();
+	m_dirty = false;
 }
 
 Raster::~Raster() {
 	flush();
-	if(m_block)
-		free(m_block);
-	m_block = nullptr;
+	for(auto& item : m_blocks)
+		free(item.second);
 	if(m_ds)
 		GDALClose(m_ds);
-	m_ds = nullptr;
 }

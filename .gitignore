@@ -28,8 +28,14 @@
 *.out
 *.app
 .DS_Store
-makefiles
 /.cproject
 /.project
+<<<<<<< HEAD
 .settings
 build
+=======
+/.settings
+/build/
+/data/
+/docs/
+>>>>>>> branch 'master' of git@github.com:rskelly/libgeo

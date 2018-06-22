@@ -49,16 +49,7 @@ G_DLL_EXPORT extern int g__loglevel;
 
 #define g_loglevel(x) {g__loglevel = x;}
 
-#ifdef _MSC_VER
-#define g_log(x, y) { if(g__loglevel >= y) std::cerr << std::setprecision(12) << x << std::endl; }
-#else
-#define g_log(x, y) _Pragma("omp critical") \
-        { \
-                if(g__loglevel >= y) { \
-                        std::cerr << std::setprecision(12) << x << std::endl; \
-                } \
-        }
-#endif
+#define g_log(x, y) { if(g__loglevel <= y) std::cerr << std::setprecision(12) << x << std::endl; }
 
 #define g_trace(x) g_log("TRACE:   " << x, G_LOG_TRACE)
 #define g_debug(x) g_log("DEBUG:   " << x, G_LOG_DEBUG)
