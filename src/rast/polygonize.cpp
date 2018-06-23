@@ -7,6 +7,7 @@
 
 #include <thread>
 #include <condition_variable>
+#include <tuple>
 
 #include <gdal.h>
 #include <gdal_alg.h>
@@ -38,24 +39,18 @@ using namespace geos::operation::geounion;
 class Poly {
 private:
 
-	// The final geometry.
-	geos::geom::Geometry* m_geom;
-	// The list of consitiuent geometries.
-	std::vector<geos::geom::Geometry*> m_geoms;
-	// Unique geometry ID.
-	uint64_t m_id;
-	// The minimum and maximum row
-	// index from the source raster.
-	long m_minRow, m_maxRow;
-	// True if this poly has already been finalized.
-	bool m_finalized;
-	// True if the geometries have been collapsed after
-	// the most recent update.
-	bool m_collapsed;
+
+	Geometry* m_geom;				///<! The final geometry.
+	std::vector<Geometry*> m_geoms;	///<! The list of consitiuent geometries.
+	size_t m_id;					///<! Unique geometry ID.
+	long m_minRow;					///<! The minimum row index from the source raster.
+	long m_maxRow;					///<! The maximum row index from the source raster.
+	bool m_finalized;				///<! True if this poly has already been finalized.
+	bool m_collapsed;				///<! True if the geometries have been collapsed after the most recent update.
 
 	/**
-	 * Add the list of polygons to this instance with the rows
-	 * covered by them.
+	 * Add the list of polygons to this instance with the rows covered by them.
+	 *
 	 * @param u The vector of Polygons.
 	 * @param minRow The lowest row index occupied by this geometry.
 	 * @param maxRow The highest row index occupied by this geometry.
@@ -70,6 +65,7 @@ private:
 
 	/**
 	 * Updates the row indices covered by this polygon.
+	 *
 	 * @param minRow The lowest row index occupied by this geometry.
 	 * @param maxRow The highest row index occupied by this geometry.
 	 */
@@ -78,73 +74,13 @@ private:
 		if(maxRow > m_maxRow) m_maxRow = maxRow;
 	}
 
-
-public:
-
 	/**
-	 * Create a polygon with the given ID and initial geometry,
-	 * for the given rows. The factory is shared by all
-	 * instances.
+	 * Unions the geometries in group and adds the result to geoms.
+	 * If an invalid geometry is found in the output, an exception is thrown.
 	 *
-	 * @param id A unique ID.
+	 * @param group A vector of input polygons.
+	 * @param geoms A vector of output geometries.
 	 */
-	Poly(uint64_t id) :
-		m_geom(nullptr),
-		m_id(id),
-		m_minRow(std::numeric_limits<long>::max()),
-		m_maxRow(std::numeric_limits<long>::min()),
-		m_finalized(false),
-		m_collapsed(false) {
-	}
-
-	/**
-	 * Add the contents of the Poly to this instance.
-	 * @param p The Poly to add.
-	 */
-	void update(Poly& p) {
-		p.collapse();
-		update(p.geom(), p.minRow(), p.maxRow());
-	}
-
-	/**
-	 * Add the polygon to this instance with the
-	 * rows covered by it.
-	 * @param u The Polygon to add.
-	 * @param minRow The lowest row index occupied by this geometry.
-	 * @param maxRow The highest row index occupied by this geometry.
-	 */
-	void update(Geometry* u, int minRow, int maxRow) {
-		m_geoms.push_back(u);
-		update(minRow, maxRow);
-		m_collapsed = false;
-	}
-
-	/**
-	 * Returns true if the range of rows given by start and end was finalized
-	 * within the given thread, or by a thread whose block is completed.
-	 * The checked range includes one row above and one below,
-	 * which is required to guarantee that a polygon is completed.
-	 * @param rowFinished The last row read.
-	 */
-	bool isRangeFinalized(std::vector<bool> rowsFinished) const {
-		for(long i = std::max(0L, m_minRow - 1); i < std::max((long) rowsFinished.size(), m_maxRow + 1); ++i) {
-			if(!rowsFinished[i])
-				return false;
-		}
-		return true;
-	}
-
-	/**
-	 * Return the pointer to the unioned polygon.
-	 */
-	Geometry* geom() const {
-		return m_geom;
-	}
-
-	const std::vector<Geometry*>& geoms() const {
-		return m_geoms;
-	}
-
 	void _collapse(std::vector<Polygon*>* group, std::vector<Geometry*>* geoms) {
 		if(!group->empty()) {
 			Geometry* p = geos::operation::geounion::CascadedPolygonUnion::CascadedPolygonUnion::Union(group);
@@ -157,6 +93,118 @@ public:
 		}
 	}
 
+public:
+
+	/**
+	 * Create a polygon with the given ID and initial geometry,
+	 * for the given rows. The factory is shared by all instances.
+	 *
+	 * @param id A unique ID.
+	 * @param geom A Geometry. This instance takes ownership.
+	 * @param minRow The minimum row.
+	 * @param maxRow The maximum row.
+	 */
+	Poly(size_t id, Geometry* geom, long minRow, long maxRow) :
+		m_geom(nullptr),
+		m_id(id),
+		m_minRow(std::numeric_limits<long>::max()),
+		m_maxRow(std::numeric_limits<long>::min()),
+		m_finalized(false),
+		m_collapsed(false) {
+	}
+
+	/**
+	 * Create a polygon with the given ID and initial geometry,
+	 * for the given rows. The factory is shared by all instances.
+	 *
+	 * @param id A unique ID.
+	 */
+	Poly(size_t id) : Poly(id, nullptr, 0, 0) {}
+
+	/**
+	 * Create an empty polygon.
+	 */
+	Poly() : Poly(0) {}
+
+	/**
+	 * Add the contents of the Poly to this instance.
+	 * The Poly's geometry is cloned.
+	 *
+	 * @param p The Poly to add.
+	 */
+	void update(Poly& p) {
+		p.collapse();
+		update(p.geom()->clone(), p.minRow(), p.maxRow());
+	}
+
+	/**
+	 * Add the polygon to this instance with the
+	 * rows covered by it. This Poly now owns the geometry.
+	 *
+	 * @param u The Polygon to add.
+	 * @param minRow The lowest row index occupied by this geometry.
+	 * @param maxRow The highest row index occupied by this geometry.
+	 */
+	void update(Geometry* u, int minRow, int maxRow) {
+		m_geoms.push_back(u);
+		update(minRow, maxRow);
+		m_collapsed = false;
+	}
+
+	/**
+	 * Add and ID and polygon to this instance with the
+	 * rows covered by it. This Poly now owns the geometry.
+	 *
+	 * @param u The Polygon to add.
+	 * @param minRow The lowest row index occupied by this geometry.
+	 * @param maxRow The highest row index occupied by this geometry.
+	 */
+	void update(size_t id, Geometry* u, int minRow, int maxRow) {
+		m_id = id;
+		m_geoms.push_back(u);
+		update(minRow, maxRow);
+		m_collapsed = false;
+	}
+
+	/**
+	 * Returns true if the range of rows given by start and end was finalized
+	 * within the given thread, or by a thread whose block is completed.
+	 * The checked range includes one row above and one below,
+	 * which is required to guarantee that a polygon is completed.
+	 *
+	 * @param rowFinished The last row read.
+	 * @return True if all the rows are finished.
+	 */
+	bool isRangeFinalized(std::vector<bool> rowsFinished) const {
+		for(long i = std::max(0L, m_minRow - 1); i < std::max((long) rowsFinished.size(), m_maxRow + 1); ++i) {
+			if(!rowsFinished[i])
+				return false;
+		}
+		return true;
+	}
+
+	/**
+	 * Return the pointer to the unioned polygon.
+	 *
+	 * @return The pointer to the unioned polygon.
+	 */
+	const Geometry* geom() const {
+		return m_geom;
+	}
+
+	/**
+	 * Return the list of constituent geometries.
+	 *
+	 * @return The list of constituent geometries.
+	 */
+	const std::vector<Geometry*>& geoms() const {
+		return m_geoms;
+	}
+
+	/**
+	 * Iteratively union the constituent geometries into a
+	 * smaller list of single polygons (ideally).
+	 */
 	void collapse() {
 		if(m_collapsed || m_geoms.empty())
 			return;
@@ -176,7 +224,7 @@ public:
 				delete g;
 			m_geoms.clear();
 
-			g_debug("Collapsing " << polys.size() << " polys")
+			//g_debug("Collapsing " << polys.size() << " polys")
 
 			// The max group size is 1024; min 2.
 			int groupSize = g_max(2, g_min(1024, polys.size() / 16));
@@ -217,7 +265,7 @@ public:
 			change = geomCount - m_geoms.size();
 			geomCount = m_geoms.size();
 
-			g_debug("Collapse " << change << ", " << geomCount)
+			//g_debug("Collapse " << change << ", " << geomCount)
 		}
 
 		m_collapsed = true;
@@ -225,6 +273,7 @@ public:
 
 	/**
 	 * Generate the unioned polygon from its parts. Remove dangles and holes if required.
+	 *
 	 * @param fact The GeometryFactory.
 	 * @param removeHoles True, if it is desired that holes in polygons be removed.
 	 * @param removeDangles True, if it is desired that single-pixel artifacts, attached at the corners, be removed.
@@ -237,7 +286,7 @@ public:
 
 		collapse();
 
-		g_debug("Finalize")
+		//g_debug("Finalize")
 
 		Geometry* geom = fact->createMultiPolygon(m_geoms);
 
@@ -280,13 +329,17 @@ public:
 
 	/**
 	 * Return the unique ID.
+	 *
+	 * @return The unique ID.
 	 */
-	uint64_t id() const {
+	size_t id() const {
 		return m_id;
 	}
 
 	/**
 	 * Return the minimum row index covered by the geometry.
+	 *
+	 * @return The minimum row index covered by the geometry.
 	 */
 	int minRow() const {
 		return m_minRow;
@@ -294,20 +347,28 @@ public:
 
 	/**
 	 * Return the maximum row index covered by the geometry.
+	 *
+	 * @return The maximum row index covered by the geometry.
 	 */
 	int maxRow() const {
 		return m_maxRow;
 	}
 
 	~Poly() {
+		for(Geometry* geom : m_geoms)
+			delete geom;
 		if(m_geom)
 			delete m_geom;
 	}
 };
 
-typedef std::unordered_map<uint64_t, std::unique_ptr<Poly> > PolyMap;
-typedef std::queue<std::unique_ptr<Poly> > PolyQueue;
+typedef std::unordered_map<size_t, Poly> PolyMap; 	///<! A map for maintaining the collection of Polys.
+typedef std::queue<Poly> PolyQueue;					///<! The Poly processing queue.
 
+/**
+ * Maintains the set of objects and values required for parallel
+ * polygonization of rasters and processing of geometries.
+ */
 class PolyContext {
 private:
 	Grid* m_raster;
@@ -330,7 +391,7 @@ private:
 	std::mutex m_blockMtx;      // For the block counter.
 	std::mutex m_fidMtx;        // For the featureId.
 	std::mutex m_ogrMtx;        // For the OGRLayer.
-	uint64_t m_featureId;
+	size_t m_featureId;
 	int m_bufSize;
 	int m_band;
 	bool m_removeHoles;
@@ -434,7 +495,7 @@ public:
 		return m_layer;
 	}
 
-	uint64_t nextFeatureId() {
+	size_t nextFeatureId() {
 		std::lock_guard<std::mutex> lk(m_fidMtx);
 		return ++m_featureId;
 	}
@@ -495,7 +556,7 @@ public:
 		int row = getRow(props, m_maskRaster);
 		int cols = getCols(props, m_maskRaster);
 		int rows = getRows(props, m_maskRaster);
-		uint64_t nd = (uint64_t) props.nodata();
+		size_t nd = (size_t) props.nodata();
 
 		// The number of blocks int he raster.
 		int blocks = (int) rows / m_bufSize + 1;
@@ -544,11 +605,13 @@ public:
 				// Read into the row buffer from the block.
 				blockBuf.getIntRow(rr, m_band, rowBuf.data());
 
+				std::list<std::tuple<size_t, Geometry*> > toWrite;
+
 				// Read over the columns in the current row.
 				for(int c = 0; c < cols; ++c) {
 
 					// Get the current ID, skip if nodata.
-					uint64_t id0 = rowBuf[c];
+					size_t id0 = rowBuf[c];
 					if(id0 == nd || id0 == 0)
 						continue;
 
@@ -560,7 +623,7 @@ public:
 					while(++c <= cols) {
 
 						// Get the next ID or zero if beyond the edge.
-						uint64_t id1 = c < cols ? rowBuf[c] : 0;
+						size_t id1 = c < cols ? rowBuf[c] : 0;
 
 						// If the ID changes, capture and output the polygon.
 						if(id0 > 0 && id1 != id0) {
@@ -578,18 +641,20 @@ public:
 							seq->setAt(Coordinate(x0, y0), 4);
 							LinearRing* ring = m_geomFactory->createLinearRing(seq);
 							Polygon* geom = m_geomFactory->createPolygon(ring, NULL);
-							// Update the polygon list with the new poly.
-							{
-								std::lock_guard<std::mutex> lk(m_polyMapMtx);
-								if(m_polyMap.find(id0) == m_polyMap.end())
-									m_polyMap[id0].reset(new Poly(id0));
-								m_polyMap[id0]->update(geom, r, r);
-							}
+
+							toWrite.emplace_back(id0, geom);
 
 							--c; // Back up the counter by one, to start with the new ID.
 							break;
 						}
 						id0 = id1;
+					}
+
+					// Update the polygon list with the new poly.
+					{
+						std::lock_guard<std::mutex> lk(m_polyMapMtx);
+						for(auto& it : toWrite)
+							m_polyMap[id0].update(std::get<0>(it), std::get<1>(it), r, r);
 					}
 				}
 
@@ -602,7 +667,7 @@ public:
 
 		} // while
 
-		g_debug("Read block finished");
+		//g_debug("Read block finished");
 
 		notifyTransfer();
 	}
@@ -611,7 +676,8 @@ public:
 
 		while(!*m_cancel && !(m_readFinish && m_polyMap.empty())) {
 
-			std::unique_ptr<Poly> geom;
+			Poly p;
+			bool found = false;
 			{
 				// Wait for a wake-up.
 				std::unique_lock<std::mutex> lk(m_polyMapMtx);
@@ -619,52 +685,45 @@ public:
 					m_polyMapCond.wait(lk);
 
 				// Process the finished items if there are any.
-				for(auto it = m_polyMap.begin(); it != m_polyMap.end(); ) {
-					if(it->second->isRangeFinalized(m_rowsFinished)) {
-						geom.swap(it->second);
-						it = m_polyMap.erase(it);
-					} else {
-						++it;
+				for(const auto& it : m_polyMap) {
+					if(it.second.isRangeFinalized(m_rowsFinished)) {
+						p = std::move(m_polyMap[it.first]);
+						m_polyMap.erase(it.first);
+						found = true;
+						break;
 					}
-					break;
 				}
 			}
 
-			if(geom.get()) {
-				geom->finalize(m_geomFactory, m_removeHoles, m_removeDangles);
+			if(found) {
+				p.finalize(m_geomFactory, m_removeHoles, m_removeDangles);
 				{
 					std::lock_guard<std::mutex> lk(m_polyQueueMtx);
-					m_polyQueue.push(std::move(geom));
+					m_polyQueue.push(std::move(p));
 				}
 			}
 
 			notifyWrite();
 		}
 
-		g_debug("Poly transfer queue finished")
-
 		notifyWrite();
 	}
 
-	std::unique_ptr<Poly> polyFromPath(int id, const std::vector<double>& path) {
+	Poly polyFromPath(int id, const std::vector<double>& path) {
 		// Build the geometry.
 		CoordinateSequence* seq = m_geomFactory->getCoordinateSequenceFactory()->create((size_t) 0, 2);
 		std::vector<Coordinate> coords;
 		for(size_t i = 0; i < path.size(); i += 2)
 			coords.push_back(Coordinate(path[i], path[i+1]));
 		seq->add(&coords, false);
-
 		// Get the ring and make a polygon.
 		LinearRing* ring = m_geomFactory->createLinearRing(seq);
 		Polygon* geom = m_geomFactory->createPolygon(ring, NULL);
-		// Create and return the poly.
-		std::unique_ptr<Poly> p(new Poly(id));
-		p->update(geom, 0, 0);
-		return std::move(p);
+		return Poly(id, geom, 0, 0);
 	}
 
-	void enqueuePoly(std::unique_ptr<Poly>& poly) {
-		poly->finalize(m_geomFactory, m_removeHoles, m_removeDangles);
+	void enqueuePoly(Poly& poly) {
+		poly.finalize(m_geomFactory, m_removeHoles, m_removeDangles);
 		{
 			std::lock_guard<std::mutex> lk(m_polyQueueMtx);
 			m_polyQueue.push(std::move(poly));
@@ -678,7 +737,8 @@ public:
 		// The loop runs as long as the queue isn't "finalized" and is not empty.
 		while(!*m_cancel && !(m_transferFinish && m_polyQueue.empty())) {
 
-			std::unique_ptr<Poly> p;
+			Poly p;
+			bool found = false;
 			{
 				// Wait for a wake-up.
 				std::unique_lock<std::mutex> lk(m_polyQueueMtx);
@@ -687,19 +747,18 @@ public:
 
 				// Grab the element from the queue, if there is one.
 				if(!m_polyQueue.empty()) {
-					p.swap(m_polyQueue.front());
+					p = std::move(m_polyQueue.front());
 					m_polyQueue.pop();
+					found = true;
 				}
 			}
 
 			// If no element, loop.
-			if(!p.get())
+			if(!found)
 				continue;
 
-			g_debug("Write")
-
 			// Retrieve the unioned geometry and write it.
-			Geometry* geom = p->geom();
+			const Geometry* geom = p.geom();
 
 			{
 				std::vector<Polygon*> polys;
@@ -713,21 +772,18 @@ public:
 			}
 
 			if(geom->getGeometryTypeId() != GEOS_MULTIPOLYGON) {
-				g_debug("Converting to multipolygon " << geom->getGeometryTypeId())
-				std::vector<Geometry*>* geoms = new std::vector<Geometry*>;
-				geoms->push_back(geom);
+				std::vector<Geometry*>* geoms = new std::vector<Geometry*>();
+				geoms->push_back(geom->clone());
 				geom = m_geomFactory->createMultiPolygon(geoms);
 			}
 
-			g_debug("Writing to file " << geom->getNumGeometries())
 			OGRGeometry* ogeom = OGRGeometryFactory::createFromGEOS(m_gctx, (GEOSGeom) geom);
 			if(!geom)
 				g_runerr("Null geometry.");
 			OGRFeature feat(m_layer->GetLayerDefn());
 			feat.SetGeometry(ogeom);
-			feat.SetField("id", (GIntBig) p->id());
+			feat.SetField("id", (GIntBig) p.id());
 			feat.SetFID(nextFeatureId());
-			delete geom;        // The geom is copied by the feature.
 			delete ogeom;
 
 			int err;
@@ -737,11 +793,7 @@ public:
 			}
 			if(OGRERR_NONE != err)
 				g_runerr("Failed to add geometry.");
-
-			g_debug("Poly")
 		}
-
-		g_debug("Poly write queue finished")
 	}
 
 };
@@ -806,13 +858,13 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 
 	writeT.join();
 
-	g_debug("Writing...");
+	//g_debug("Writing...");
 	if(status)
 		status->update(0.99f, "Writing polygons...");
 
 	ctx.commitOutput();
 
-	g_debug("Done");
+	//g_debug("Done");
 	if(status)
 		status->update(1.0f, "Done.");
 }
