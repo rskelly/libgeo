@@ -419,8 +419,8 @@ private:
 	double m_x; 			///< The x-coordinate.
 	double m_y; 			///< The y-coordinate.
 	double m_z; 			///< The z-coordinate.
-	float m_intensity;
-	float m_angle;
+	short m_intensity;
+	char m_angle;
 	char m_cls;
 	char m_edge;
 	char m_numReturns;

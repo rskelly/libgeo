@@ -12,6 +12,8 @@
 #include <boost/algorithm/string/case_conv.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 
+#include <openssl/sha.h>
+
 #include "crypto/md5.hpp"
 #include "crypto/uuid.hpp"
 #include "util.hpp"
@@ -564,8 +566,6 @@ std::string Util::md5(const std::string& input) {
 	m.finalize();
 	return m.hexdigest();
 }
-
-#include "openssl/sha.h"
 
 std::string Util::sha256(const std::string& input) {
 	const char* str = input.c_str();

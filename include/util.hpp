@@ -34,7 +34,7 @@ namespace geo {
 
     	// Provides a simple way to get a formatted
     	// time beginning at an arbitrary point.
-    	class Stopwatch {
+    	class G_DLL_EXPORT Stopwatch {
     	private:
     		bool m_reset;
     		std::chrono::time_point<std::chrono::system_clock> m_start;
@@ -58,7 +58,7 @@ namespace geo {
 
         // Provides access to an allocated buffer
         // which will be safely disposed of.
-        class Buffer {
+        class G_DLL_EXPORT Buffer {
         public:
             void *buf;
 
@@ -87,7 +87,7 @@ namespace geo {
         };
 
         // Provides methods for handling status callbacks.
-        class Callbacks {
+        class G_DLL_EXPORT Callbacks {
         public:
             virtual ~Callbacks();
             virtual void stepCallback(float status) const;
@@ -96,7 +96,7 @@ namespace geo {
         };
 
 		// Simple class for capturing status from utility functions.
-		class Status {
+		class G_DLL_EXPORT Status {
 		private:
 			geo::util::Callbacks *m_callbacks;
 			float m_start, m_end;
@@ -108,7 +108,7 @@ namespace geo {
 			geo::util::Callbacks* callbacks() const;
 		};
 
-        class Point {
+        class G_DLL_EXPORT Point {
         public:
             double x, y, z;
             std::unordered_map<std::string, std::string> fields;
@@ -117,7 +117,7 @@ namespace geo {
             Point(double x, double y, double z, const std::map<std::string, std::string> &fields);
         };
 
-        class Bounds {
+        class G_DLL_EXPORT Bounds {
         private:
             double m_minx, m_miny;
             double m_maxx, m_maxy;
@@ -228,7 +228,7 @@ namespace geo {
         };
 
         // Maintains a memory-mapped file, and gives access to the mapped data.
-        class MappedFile {
+        class G_DLL_EXPORT MappedFile {
         private:
             uint64_t m_size;
 			std::string m_name;
@@ -373,7 +373,7 @@ namespace geo {
          * A file-backed allocator for stl classes.
          */
         template<typename T>
-        class mmap_allocator {
+        class G_DLL_EXPORT mmap_allocator {
         private:
 			MappedFile m_file;
 			std::string m_filename;
@@ -451,7 +451,7 @@ namespace geo {
 		/**
          * Provides utility methods.
          */
-        class Util {
+        class G_DLL_EXPORT Util {
         public:
 
             // Computes the area of the triangle given by the coordinates.
@@ -705,7 +705,7 @@ namespace geo {
 
         };
 
-        class CRS {
+        class G_DLL_EXPORT CRS {
         public:
         	std::string epsg2Proj4(int crs) const;
         	std::string epsg2WKT(int crs) const;

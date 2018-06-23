@@ -76,6 +76,8 @@ namespace geo {
     		 */
     		Bounds bounds() const;
 
+    		void setBounds(const Bounds& bounds);
+
     		/**
     		 * Populate an (at least) 4-element double array with the bounding
     		 * box of this object.

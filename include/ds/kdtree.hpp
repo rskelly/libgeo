@@ -18,44 +18,12 @@
 #include "geo.hpp"
 #include "util.hpp"
 
+#define EPS std::numeric_limits<double>::epsilon()
+
 using namespace geo::util;
 
 namespace geo {
 namespace ds {
-
-/**
- * A 3D point class that can be used in the KDTree.
- */
-class KDPoint {
-private:
-	double m_x, m_y, m_z;
-
-public:
-
-	KDPoint(double x, double y, double z = 0) :
-		m_x(x), m_y(y), m_z(z) {
-	}
-
-	double x() const {
-		return m_x;
-	}
-
-	double y() const {
-		return m_y;
-	}
-
-	double z() const {
-		return m_z;
-	}
-
-	double operator[](int idx) const {
-		switch(idx % 3) {
-		case 0: return x();
-		case 1: return y();
-		default: return z(); // Who cares.
-		}
-	}
-};
 
 /**
  * A KDTree.
@@ -67,8 +35,8 @@ public:
 template <class T>
 class KDTree {
 private:
-	std::vector<T> m_items;
-	ANNpointArray m_pts;
+	std::vector<double> m_items;
+	std::vector<ANNpoint> m_pts;
 	ANNkd_tree* m_tree;
 	size_t m_dims;
 
@@ -77,8 +45,7 @@ public:
 	/**
 	 * Construct the KDTree with the given number of dimensions.
 	 */
-	KDTree(size_t dims) :
-		m_pts(nullptr),
+	KDTree(size_t dims = 3) :
 		m_tree(nullptr),
 		m_dims(dims) {
 	}
@@ -92,9 +59,10 @@ public:
 			m_tree = nullptr;
 		}
 		m_items.clear();
-		if(m_pts) {
-			annDeallocPts(m_pts);
-			m_pts = nullptr;
+		if(!m_pts.empty()) {
+			for(ANNpoint p : m_pts)
+				delete p;
+			m_pts.clear();
 		}
 	}
 
@@ -103,7 +71,8 @@ public:
 	 * @param item An item.
 	 */
 	void add(T& item) {
-		m_items.push_back(item);
+		for(int i = 0; i < m_dims; ++i)
+			m_items.push_back(item[i]);
 	}
 
 	/**
@@ -113,7 +82,11 @@ public:
 	 */
 	template <class Iter>
 	void add(Iter begin, Iter end) {
-		m_items.insert(m_items.begin(), begin, end);
+		while(begin != end) {
+			for(int i = 0; i < m_dims; ++i)
+				m_items.push_back((*begin)[i]);
+			++begin;
+		}
 	}
 
 	/**
@@ -131,31 +104,32 @@ public:
 		if(m_items.empty())
 			g_runerr("Not enough items.");
 
+		// The code below does the same as annAllocPts: the m_pts
+		// array stores pointers to the coordinates in m_items
 		// Set up the points buffer.
-		m_pts = annAllocPts(m_items.size(), m_dims);
+		m_pts.resize(m_items.size() / m_dims); // = annAllocPts(m_items.size(), m_dims);
 
 		// Write points into the buffer and save pointers.
-		for(size_t i = 0; i < m_items.size(); ++i) {
-			for(size_t j = 0; j < m_dims; ++j)
-				m_pts[i][j] = m_items[i][j];
-		}
+		double* data = (double*) m_items.data();
+		for(size_t i = 0, k = 0; i < m_pts.size(); ++i, k += m_dims)
+			m_pts[i] = (data + k);
 
 		// Set up the tree.
-		m_tree = new ANNkd_tree(m_pts, m_items.size(), m_dims);
+		m_tree = new ANNkd_tree(static_cast<ANNpointArray>(m_pts.data()), m_pts.size(), m_dims, 128, ANN_KD_SUGGEST);
 	}
 
 	/**
 	 * Returns the number of items in the tree.
 	 */
 	int size() const {
-		return m_items.size();
+		return m_items.size() / m_dims;
 	}
 
 	/**
 	 * Returns a reference to the vector containing all
-	 * items added to the tree.
+	 * coordinates added to the tree.
 	 */
-	const std::vector<T>& items() const {
+	const std::vector<double>& items() const {
 		return m_items;
 	}
 
@@ -165,12 +139,12 @@ public:
 	 * and distances to the given iterators.
 	 * @param item The search item; of the same type as the tree items.
 	 * @param count The number of items to return.
-	 * @param titer A back_inserter for the found items.
+	 * @param titer A back_inserter for the found items, which are represented as a sequence of doubles representing the coordinate.
 	 * @param diter A back_inserter for the item distances.
 	 * @param eps The allowable error bound.
 	 */
 	template <class TIter, class DIter>
-	int knn(const T& item, size_t count, TIter titer, DIter diter, double eps = 0.0) {
+	int knn(const T& item, size_t count, TIter titer, DIter diter, double eps = EPS) const {
 
 		if(!m_tree) {
 			g_warn("Tree not built. Forget to call build?");
@@ -221,7 +195,7 @@ public:
 	 * @param eps The error bound.
 	 */
 	template <class TIter, class DIter>
-	int radSearch(const T& item, double radius, int maxCount, TIter titer, DIter diter, double eps = 0.0) {
+	int radSearch(const T& item, double radius, int maxCount, TIter titer, DIter diter, double eps = EPS) const {
 
 		if(!m_tree) {
 			g_warn("Tree not built. Forget to call build?");
@@ -243,20 +217,25 @@ public:
 		std::vector<ANNdist> dist(maxCount);
 
 		// Perform search.
-		m_tree->annkFRSearch(static_cast<ANNpoint>(pt.data()), radius, maxCount,
+		int count = m_tree->annkFRSearch(static_cast<ANNpoint>(pt.data()), radius * radius, maxCount,
 				static_cast<ANNidxArray>(idx.data()), static_cast<ANNdistArray>(dist.data()), eps);
 
 		// Populate output iterators.
-		for(size_t i = 0; i < maxCount; ++i) {
+		for(size_t i = 0; i < count; ++i) {
 			if(idx[i] == -1)
 				return i;
-			*titer = m_items[idx[i]];
-			++titer;
+			size_t j = idx[i] * m_dims;
+			*titer = m_items[j + 0];
+			*titer = m_items[j + 1];
+			*titer = m_items[j + 2];
 			*diter = std::sqrt(dist[i]);
-			++diter;
 		}
 
-		return maxCount;
+		return count;
+	}
+
+	int dims() const {
+		return m_dims;
 	}
 
 	~KDTree() {
