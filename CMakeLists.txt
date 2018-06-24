@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.1)
 
+set (CMAKE_INCLUDE_DIRECTORIES_BEFORE ON)
+
 enable_language(C)
 enable_language(CXX)
 set (CMAKE_CXX_STANDARD 11)
@@ -62,6 +64,8 @@ elseif(${WIN32})
 	# Qt should be added to the prefix dir.
 	set (CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH};${QT_LIBRARYDIR}")
 else()
+	set (GEOS_INCLUDEDIR /opt/include)
+	set (GEOS_LIBRARYDIR /opt/lib)
 	set (EIGEN_INCLUDEDIR "/usr/include/eigen3")
 	set (BOOST_INCLUDEDIR "/usr/include")
 	set (BOOST_LIBRARYDIR "/usr/lib/x86_64-linux-gnu")
@@ -71,11 +75,9 @@ endif()
 set (THREADS_PREFER_PTHREAD_FLAG ON)
 
 find_package (Threads REQUIRED)
-find_package (OpenMP REQUIRED)
 find_package (Boost 1.58 COMPONENTS system filesystem date_time thread REQUIRED)
 find_package (GDAL 2.2 REQUIRED)
 find_package (CGAL REQUIRED COMPONENTS Core)
-#find_package (PCL 1.8 REQUIRED)
 
 find_library (LIBLAS_LIBRARY las)
 find_library (JSONCPP_LIBRARY jsoncpp)
@@ -83,18 +85,14 @@ find_library (CRYPTO_LIBRARY crypto libcrypto PATHS ${CRYPTO_LIBRARYDIR})
 find_library (GEOS_LIBRARY geos PATHS ${GEOS_LIBRARYDIR})
 find_library (PROJ_LIBRARY proj)
 
-if(OPENMP_FOUND)
-	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_C_FLAGS} -fopenmp")
-	set (CMAKE_C_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_C_FLAGS} -fopenmp")
-endif()
-
 project (libgeo)
 
 # Configure directories###################################################################################
 
 include_directories(BEFORE SYSTEM ./include ./ann/include /opt/include
 	${GEOS_INCLUDEDIR} ${OSGEO_INCLUDEDIR} ${GDAL_INCLUDE_DIR} ${PCL_INCLUDE_DIRS} 
-	${Boost_INCLUDE_DIRS} ${CRYPTO_INCLUDEDIR} ${EIGEN_INCLUDEDIR} ${JSON_INCLUDEDIR}) 
+	${Boost_INCLUDE_DIRS} ${CRYPTO_INCLUDEDIR} ${EIGEN_INCLUDEDIR} ${JSON_INCLUDEDIR})
+	 
 link_directories(. /opt/lib ${Boost_LIBRARY_DIRS} ${GDAL_LIBRARYDIR} ${PCL_LIBRARY_DIRS})
 
 # Build support libraries ################################################################################
