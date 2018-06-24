@@ -589,8 +589,7 @@ public:
 			if(bufHeight < 1)
 				break;
 
-			if(m_status)
-				m_status->update((float) b / blocks);
+			m_status->update((float) b / blocks);
 
 			// Write into the buffer.
 			m_raster->writeTo(blockBuf, cols, bufHeight, col, row + b * m_bufSize, 0, 0, m_band);
@@ -803,7 +802,7 @@ public:
 void Grid::polygonize(const std::string& filename, const std::string& layerName,
 		const std::string& driver, int srid, int band, bool removeHoles, bool removeDangles,
 		const std::string& mask, int maskBand, int threads,
-		bool& cancel, Status* status) {
+		bool& cancel, Status& status) {
 
 	if(!props().isInt())
 		g_runerr("Only integer rasters can be polygonized.");
@@ -829,7 +828,7 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 		maskRaster = new Raster(mask);
 
 	// Set up the shared context.
-	PolyContext ctx(this, status, &block, &cancel, bufSize, band, removeHoles, removeDangles, maskRaster, maskBand);
+	PolyContext ctx(this, &status, &block, &cancel, bufSize, band, removeHoles, removeDangles, maskRaster, maskBand);
 
 	// Initialize database.
 	ctx.initOutput(driver, filename, layerName, srid);
@@ -855,11 +854,9 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 
 	writeT.join();
 
-	if(status)
-		status->update(0.99f, "Writing polygons...");
+	status.update(0.99f, "Writing polygons...");
 
 	ctx.commitOutput();
 
-	if(status)
-		status->update(1.0f, "Done.");
+	status.update(1.0f, "Done.");
 }

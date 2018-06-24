@@ -973,11 +973,11 @@ namespace geo {
              * @param band     The target band.
              * @param cancel   A reference to a variable that will be true if the
              *                 process should be cancelled.
-             * @param status   A pointer to a Status object which will be updated with
+             * @param status   A reference to a Status object which will be updated with
              *                 the current status of the process.
 			 */
             void smooth(Grid &smoothed, double sigma, int size, int band,
-            		bool& cancel, Status* status = nullptr);
+            		bool& cancel, geo::util::Status& status);
 
             /**
              * Smooth the raster and write the smoothed version to the output raster.
@@ -990,10 +990,10 @@ namespace geo {
              * @param band     The target band.
              * @param cancel   A reference to a variable that will be true if the
              *                 process should be cancelled.
-             * @param status   A pointer to a Status object which will be updated with
+             * @param status   A reference to a Status object which will be updated with
              *                 the current status of the process.
 			 */
-            void smooth(Grid &smoothed, int band, bool& cancel, Status* status = nullptr);
+            void smooth(Grid &smoothed, int band, bool& cancel, geo::util::Status& status);
 
             /**
              * The radius is given with cells as the unit, but can be rational.
@@ -1139,7 +1139,7 @@ namespace geo {
             void polygonize(const std::string &filename, const std::string &layerName,
                 const std::string &driver, int srid, int band, bool removeHoles, bool removeDangles,
 				const std::string& mask, int maskBand, int threads,
-				bool& cancel, geo::util::Status *status);
+				bool& cancel, geo::util::Status& status);
         };
 
         /**
@@ -1583,11 +1583,6 @@ namespace geo {
              * Flush a dirty read/write block to the dataset.
              */
             void flushDirty();
-
-            void polygonize(const std::string &filename, const std::string &layerName,
-                const std::string &driver, int srid, int band, bool removeHoles, bool removeDangles,
-				const std::string& mask, int maskBand, int threads,
-				bool& cancel, geo::util::Status *status = nullptr);
 
             const GridProps& props() const;
 

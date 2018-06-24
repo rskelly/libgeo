@@ -35,150 +35,6 @@ namespace geo {
 
 		namespace util {
 
-/*
-			class Poly {
-			private:
-				// Add the list of polygons to this instance with the rows
-				// covered by them.
-				void update(std::vector<Polygon*>& u, int minRow, int maxRow) {
-					for (Polygon* p : u)
-						geoms.push_back(p);
-					update(minRow, maxRow);
-				}
-
-				// Update the row range.
-				void update(int minRow, int maxRow) {
-					if(minRow < this->minRow) this->minRow = minRow;
-					if(maxRow > this->maxRow) this->maxRow = maxRow;
-				}
-
-			public:
-				// The final geometry.
-				Geometry* final;
-				// Unique geometry ID.
-				uint64_t id;
-				// The minimum and maximum row
-				// index from the source raster.
-				int minRow, maxRow;
-				// The list of constituent geometries.
-				std::vector<Polygon*> geoms;
-
-				// Create a polygon with the given ID and initial geometry,
-				// for the given rows. The factory is shared by all
-				// instances.
-				Poly(uint64_t id) :
-					final(nullptr),
-					id(id),
-					minRow(std::numeric_limits<int>::max()),
-					maxRow(std::numeric_limits<int>::min()) {
-				}
-
-				// Add the contents of the Poly to this instance.
-				void update(Poly& p) {
-					update(p.geoms, p.minRow, p.maxRow);
-				}
-
-				// Add the polygon to this instance with the
-				// rows covered by it.
-				void update(Polygon* u, int minRow, int maxRow) {
-					geoms.push_back(u);
-					update(minRow, maxRow);
-				}
-
-				// Returns true if the range of rows given by start and end was finalized
-				// within the given thread, or by a thread whose block is completed.
-				// The checked range includes one row above and one below,
-				// which is required to guarantee that a polygon is completed.
-				bool isRangeFinalized(const std::vector<char>& finalRows) const {
-					int start = g_max(minRow - 1, 0);
-					int end = g_min(maxRow + 2, (int) finalRows.size());
-					for (int i = start; i < end; ++i) {
-						if (!finalRows[i])
-							return false;
-					}
-					return true;
-				}
-
-				// Return the pointer to the unioned polygon.
-				Geometry* getPoly() const {
-					return final;
-				}
-
-				// Generate the unioned polygon from its parts. Remove dangles and holes if required.
-				void generate(const GeometryFactory::unique_ptr& fact, bool removeHoles, bool removeDangles) {
-
-					Geometry* geom;
-
-					// Calculate the union of geometries. This could result in a single
-					// poly or a multi.
-					{
-						geom = geos::operation::geounion::CascadedPolygonUnion::Union(&geoms);
-						if (!geom)
-							g_runerr("Failed to compute geometry.");
-					}
-
-					int typeId = geom->getGeometryTypeId();
-
-					// If the result is a single polygon, turn it into a multi.
-					if(typeId == GEOS_POLYGON) {
-						std::vector<Geometry*>* geoms0 = new std::vector<Geometry*>();
-						geoms0->push_back(geom);
-						geom = fact->createMultiPolygon(geoms0); // Do not copy -- take ownership.
-					}
-
-					// If we're removing dangles, throw away all but the
-					// largest single polygon. If it was originally a polygon,
-					// there are no dangles.
-					if(removeDangles && typeId != GEOS_POLYGON) {
-						size_t idx = 0;
-						double area = 0;
-						for(size_t i = 0; i < geom->getNumGeometries(); ++i) {
-							const Geometry* p = geom->getGeometryN(i);
-							double a = p->getArea();
-							if(a > area) {
-								area = a;
-								idx = i;
-							}
-						}
-						Geometry* g = geom->getGeometryN(idx)->clone(); // Force copy.
-						delete geom;
-						geom = g;
-					}
-
-
-					// If we're removing holes, extract the exterior rings
-					// of all constituent polygons.
-					if(removeHoles) {
-						std::vector<Geometry*>* geoms0 = new std::vector<Geometry*>();
-						for(size_t i = 0; i < geom->getNumGeometries(); ++i) {
-							const Polygon* p = dynamic_cast<const Polygon*>(geom->getGeometryN(i));
-							const LineString* l = p->getExteriorRing();
-							LinearRing* r = fact->createLinearRing(l->getCoordinates());
-							geoms0->push_back(fact->createPolygon(r, nullptr));
-						}
-						Geometry* g = fact->createMultiPolygon(geoms0); // Do not copy -- take ownership.
-						delete geom;
-						geom = g;
-					}
-
-					for(Geometry* g : geoms)
-						delete g;
-					geoms.clear();
-
-					final = geom;
-				}
-
-				~Poly() {
-					for(Geometry* g : geoms)
-						delete g;
-					if(final)
-						delete final;
-				}
-
-			};
-
-*/
-
 			int getTypeSize(DataType type) {
 				switch(type) {
 				case DataType::Byte: return sizeof(uint8_t);
@@ -961,20 +817,18 @@ void _smooth(TileIterator* iter, Grid* smoothed,
 			tile->writeTo(*smoothed);
 		}
 
-		if (status)
-			status->update(g_min(0.99f, 0.2f + (float) curTile / tileCount * 0.97f));
-
+		status->update(g_min(0.99f, 0.2f + (float) curTile / tileCount * 0.97f));
 	}
 
 }
 
 void Grid::smooth(Grid& smoothed, double sigma, int size, int band,
-		bool& cancel, Status* status) {
+		bool& cancel, Status& status) {
 
 	const GridProps& gp = props();
 
-	if (status)
-		status->update(0.01f);
+	status.update(0.01f);
+
 	if (sigma <= 0)
 		g_argerr("Sigma must be > 0.");
 	if (size < 3)
@@ -991,8 +845,7 @@ void Grid::smooth(Grid& smoothed, double sigma, int size, int band,
 
 	double nodata = gp.nodata();
 
-	if (status)
-		status->update(0.02f);
+	status.update(0.02f);
 
 	TileIterator iter = iterator(512, 512, size, band);
 	std::mutex wmtx; // write mutex
@@ -1002,7 +855,7 @@ void Grid::smooth(Grid& smoothed, double sigma, int size, int band,
 	std::vector<std::thread> threads;
 	for(int i = 0; i < 4; ++i)
 		threads.emplace_back(_smooth, &iter, &smoothed, size, nodata, weights,
-				&rmtx, &wmtx, &cancel, status);
+				&rmtx, &wmtx, &cancel, &status);
 
 	// Wait for jobs to complete.
 	for(int i = 0; i < 4; ++i) {
@@ -1010,8 +863,7 @@ void Grid::smooth(Grid& smoothed, double sigma, int size, int band,
 			threads[i].join();
 	}
 
-	if (status)
-		status->update(1.0);
+	status.update(1.0);
 }
 
 // Implementations for MemRaster

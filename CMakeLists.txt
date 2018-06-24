@@ -93,7 +93,7 @@ include_directories(BEFORE SYSTEM ./include ./ann/include /opt/include
 	${GEOS_INCLUDEDIR} ${OSGEO_INCLUDEDIR} ${GDAL_INCLUDE_DIR} ${PCL_INCLUDE_DIRS} 
 	${Boost_INCLUDE_DIRS} ${CRYPTO_INCLUDEDIR} ${EIGEN_INCLUDEDIR} ${JSON_INCLUDEDIR})
 	 
-link_directories(. /opt/lib ${Boost_LIBRARY_DIRS} ${GDAL_LIBRARYDIR} ${PCL_LIBRARY_DIRS})
+link_directories(build/lib /opt/lib ${Boost_LIBRARY_DIRS} ${GDAL_LIBRARYDIR} ${LIB_PATH})
 
 # Build support libraries ################################################################################
 
