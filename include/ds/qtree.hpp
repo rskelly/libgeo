@@ -39,35 +39,36 @@ namespace geo {
 		template <class T>
 		class QTree {
 		protected:
-			// The geographic boundary corresponding to this tree. Will be reshaped to a square
-			// using the longer side.
-			Bounds m_bounds;
-			// The four sub-quads
-			std::vector<QTree*> m_nodes;
-			// The list of items stored in the current node if not split.
-			std::list<T> m_items;
-			// The max tree depth. TODO: Should be small enough to prevent degenerate nodes.
-			uint32_t m_maxDepth;
-			// Max number of items before splitting a node.
-			uint32_t m_maxCount;
-			// The depth of the current node.
-			uint32_t m_depth;
-			// An index for traversing the current node's sub-nodes.
-			uint8_t m_iterIdx;
-			// True if the current node has been split.
-			bool m_split;
+			Bounds m_bounds; 		///<! The geographic boundary corresponding to this tree. Will be reshaped to a square using the longer side.
+			std::list<T> m_items;	///<! The list of items stored in the current node if not split.
+			QTree* m_nodes[4];		///<! The four sub-quads
+			uint32_t m_maxDepth;	///<! The max tree depth. TODO: Should be small enough to prevent degenerate nodes.
+			uint32_t m_maxCount;	///<! Max number of items before splitting a node.
+			uint32_t m_depth;		///<! The depth of the current node.
+			uint8_t m_iterIdx; 		///<! An index for traversing the current node's sub-nodes.
+			bool m_split;			///<! True if the current node has been split.
 
-			typename std::list<T>::iterator m_iter;
+			typename std::list<T>::iterator m_iter; ///<! An iterator for traversing the current node's items.
 
-			// Returns the index of a sub-node given a point.
+
+			/**
+			 * Returns the index of a sub-node given a point.
+			 *
+			 * @param x X-coordinate.
+			 * @param y Y-coordinate.
+			 */
 			int index(double x, double y) {
 				return ((y >= m_bounds.midy()) << 1) | (x >= m_bounds.midx());
 			}
 
-			// Returns the node for the given index; creates it if necessary.
+			/**
+			 * Returns the node for the given index; creates it if necessary.
+			 *
+			 * @param idx The node index.
+			 */
 			QTree* node(uint8_t idx) {
 				if(!m_nodes[idx]) {
-					Bounds bounds(m_bounds);
+					Bounds bounds;
 					if(idx & 1) {
 						bounds.minx(m_bounds.midx());
 					} else {
@@ -83,12 +84,19 @@ namespace geo {
 				return m_nodes[idx];
 			}
 
-			// Returns the node for the given point; creates it if necessary.
+			/**
+			 * Returns the node for the given point; creates it if necessary.
+			 *
+			 * @param x X-coordinate.
+			 * @param y Y-coordinate.
+			 */
 			QTree* node(double x, double y) {
 				return node(index(x, y));
 			}
 
-			// Split the node; distribute items to subnodes.
+			/**
+			 * Split the node; distribute items to subnodes.
+			 */
 			void split() {
 				for(T& item : m_items)
 					node(item.x(), item.y())->addItem(std::move(item));
@@ -96,7 +104,12 @@ namespace geo {
 				m_split = true;
 			}
 
-			// Search for all points inside nodes intersecting the bounding box.
+			/**
+			 * Search for all points inside nodes intersecting the bounding box.
+			 *
+			 * @param bounds The bounds to search in.
+			 * @param output The output list.
+			 */
 			void findIntersecting(const Bounds& bounds, std::list<T>& output) {
 				if(m_bounds.intersects(bounds)) {
 					if(!m_split) {
@@ -110,7 +123,14 @@ namespace geo {
 				}
 			}
 
-			// Construct a sub-node.
+			/**
+			 * Construct a sub-node.
+			 *
+			 * @param bounds The 3D bounding box of the tree.
+			 * @param maxDepth The maximum depth of a leaf.
+			 * @param maxCount The maximum number of items in a leaf.
+			 * @param depth The depth of the new node.
+			 */
 			QTree(const Bounds& bounds, int maxDepth, int maxCount, int depth) :
 				m_bounds(bounds),
 				m_maxDepth(maxDepth),
@@ -118,27 +138,49 @@ namespace geo {
 				m_depth(depth),
 				m_iterIdx(0),
 				m_split(false) {
-
-				m_nodes = {nullptr,nullptr,nullptr,nullptr};
+				for(int i = 0; i < 4; ++i)
+					m_nodes[i] = nullptr;
 			}
 
 		public:
 
-			// Construct a QTree with the given bounds, depth and count.
-			QTree(const Bounds& bounds, int maxDepth, int maxCount) :
-				m_bounds(bounds),
-				m_nodes({nullptr, nullptr, nullptr, nullptr}),
-				m_maxDepth(maxDepth),
-				m_maxCount(maxCount),
-				m_depth(0),
-				m_iterIdx(0),
-				m_split(false) {
+			/**
+			 * Construct a QTree with the given bounds, depth and count.
+			 *
+			 * @param bounds The 3D bounding box of the tree.
+			 * @param maxDepth The maximum depth of a leaf.
+			 * @param maxCount The maximum number of items in a leaf.
+			 */
+			QTree(const Bounds& bounds, int maxDepth, int maxCount) {
+				init(bounds, maxDepth, maxCount);
+			}
 
-				m_nodes = {nullptr,nullptr,nullptr,nullptr};
+			/**
+			 * Initialize a QTree with the given bounds, depth and count.
+			 *
+			 * @param bounds The 3D bounding box of the tree.
+			 * @param maxDepth The maximum depth of a leaf.
+			 * @param maxCount The maximum number of items in a leaf.
+			 */
+			void init(const Bounds& bounds, int maxDepth, int maxCount) {
+				for(int i = 0; i < 4; ++i) {
+					if(m_nodes[i]) delete m_nodes[i];
+					m_nodes[i] = nullptr;
+				}
+				m_bounds = bounds;
+				m_maxDepth = maxDepth;
+				m_maxCount = maxCount;
+				m_depth = 0;
+				m_split = false;
+				m_iterIdx = 0;
 				m_bounds.cube();
 			}
 
-			// The total number of items in the node.
+			/**
+			 * The total number of items in the node.
+			 *
+			 * @return The total number of items in the node.
+			 */
 			uint64_t count() const {
 				if(!m_split) {
 					return m_items.size();
@@ -152,12 +194,20 @@ namespace geo {
 				}
 			}
 
-			// The bounds of the node.
+			/**
+			 * The bounds of the node.
+			 *
+			 * @return The bounds of the node.
+			 */
 			const Bounds& bounds() const {
 				return m_bounds;
 			}
 
-			// Add an item to the node.
+			/**
+			 * Add an item to the node.
+			 *
+			 * @param item An item.
+			 */
 			void addItem(const T& item) {
 				if(!m_bounds.contains(item.x(), item.y())) {
 					g_warn("Item is out of bounds for QTree.");
@@ -172,6 +222,11 @@ namespace geo {
 				}
 			}
 
+			/**
+			 * Remove the item from the tree.
+			 *
+			 * @param uitem The item to remove.
+			 */
 			void removeItem(const T& uitem) {
 				if(m_bounds.contains(uitem.x(), uitem.y())) {
 					if(!m_split) {
@@ -188,8 +243,12 @@ namespace geo {
 				}
 			}
 
-			// Update the item in the tree. Updating the position is not allowed.
-			// For that, remove the item and re-insert it.
+			/**
+			 * Update the item in the tree. Updating the position is not allowed.
+			 * For that, remove the item and re-insert it.
+			 *
+			 * @param uitem An item to update.
+			 */
 			void updateItem(const T& uitem) {
 				if(m_bounds.contains(uitem.x(), uitem.y())) {
 					if(!m_split) {
@@ -203,14 +262,31 @@ namespace geo {
 				}
 			}
 
-			// Search for points within [radius] of the coordinate.
+			/**
+			 * Search for points within [radius] of the coordinate.
+			 *
+			 * @param x The x-coordinate.
+			 * @param y The y-coordinate.
+			 * @param radius The search radius.
+			 * @param output An iterator for output items.
+			 * @return The number of found items.
+			 */
 			template <class U>
 			int search(double x, double y, double radius, U output) {
 				// Search with an inside radius of zero.
 				return search(x, y, radius, 0, output);
 			}
 
-			// Search for points within [outside] of the coordinate, but not within [inside].
+			/**
+			 * Search for points within [outside] of the coordinate, but not within [inside].
+			 *
+			 * @param x The x-coordinate.
+			 * @param y The y-coordinate.
+			 * @param inside The inside search radius.
+			 * @param outside The outside search radius.
+			 * @param output An iterator for output items.
+			 * @return The number of found items.
+			 */
 			template <class U>
 			int search(double x, double y, double outside, double inside, U output) {
 				int count = 0;
@@ -235,7 +311,13 @@ namespace geo {
 				return count;
 			}
 
-			// Search for points inside the bounding box.
+			/**
+			 * Search for points inside the bounding box.
+			 *
+			 * @param bounds The search bounds.
+			 * @param output An iterator for output items.
+			 * @return The number of found items.
+			 */
 			template <class U>
 			int search(const Bounds& bounds, U output) {
 				int count = 0;
@@ -255,7 +337,13 @@ namespace geo {
 				return count;
 			}
 
-			// Search for points inside the GEOS geometry.
+			/**
+			 * Search for points inside the GEOS geometry.
+			 *
+			 * @param geom A Geometry.
+			 * @param output An iterator for output items.
+			 * @return The number of found items.
+			 */
 			template <class U>
 			int search(const Geometry& geom, U output) {
 				int count = 0;
@@ -276,14 +364,25 @@ namespace geo {
 							++output;
 							++count;
 						}
+						delete pt;
 					}
 				}
 				return count;
 			}
 
-			// Find the [n] nearest items to the coordinate.
-			// If [outside] and [inside] are given, they're the outer and inner radii to search within.
-			// and will be doubled on each iteration.
+			/**
+			 * Find the [n] nearest items to the coordinate.
+			 * If [outside] and [inside] are given, they're the outer and inner radii to search within.
+			 * and will be doubled on each iteration.
+			 *
+			 * @param x The x-coordinate.
+			 * @param y The y-coordinate.
+			 * @param n The number of items to find.
+			 * @param output An iterator for output items.
+			 * @param outside The outside search radius.
+			 * @param inside The inside search radius.
+			 * @return The number of found items.
+			 */
 			template <class U>
 			int nearest(double x, double y, uint64_t n, U output, double outside = 1, double inside = 0) {
 				int count = 0;
@@ -312,7 +411,9 @@ namespace geo {
 				return count;
 			}
 
-			// Reset the iterator on this node and children.
+			/**
+			 * Reset the iterator on this node and children.
+			 */
 			void reset() {
 				if(!m_split) {
 					m_iter = m_items.begin();
@@ -326,7 +427,12 @@ namespace geo {
 				}
 			}
 
-			// Get the next item in this subtree.
+			/**
+			 * Get the next item in this subtree.
+			 *
+			 * @param item An item to set (out).
+			 * @return True if an item was found.
+			 */
 			bool next(T& item) {
 				if(m_split) {
 					while(m_iterIdx < 4) {
@@ -345,10 +451,8 @@ namespace geo {
 			}
 
 			~QTree() {
-				for(int i = 0; i < 4; ++i) {
-					if(m_nodes[i])
-						delete m_nodes[i];
-				}
+				for(int i = 0; i < 4; ++i)
+					if(m_nodes[i]) delete m_nodes[i];
 			}
 
 		};
@@ -800,3 +904,4 @@ namespace geo {
 	}
 }
 #endif
+

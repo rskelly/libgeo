@@ -372,7 +372,9 @@ typedef std::queue<Poly> PolyQueue;					///<! The Poly processing queue.
 class PolyContext {
 private:
 	Grid* m_raster;
+	int m_band;
 	Grid* m_maskRaster;
+	int m_maskBand;
 	Status* m_status;
 	int* m_block;
 	bool* m_cancel;
@@ -393,7 +395,6 @@ private:
 	std::mutex m_ogrMtx;        // For the OGRLayer.
 	size_t m_featureId;
 	int m_bufSize;
-	int m_band;
 	bool m_removeHoles;
 	bool m_removeDangles;
 	bool m_queueUpdate;
@@ -403,9 +404,11 @@ private:
 
 public:
 	PolyContext(Grid* raster, Status* status, int* block, bool* cancel,
-			int bufSize, int band, bool removeHoles, bool removeDangles, Grid* maskRaster = nullptr) :
+			int bufSize, int band, bool removeHoles, bool removeDangles, Grid* maskRaster, int maskBand) :
 		m_raster(raster),
+		m_band(band),
 		m_maskRaster(maskRaster),
+		m_maskBand(maskBand),
 		m_status(status),
 		m_block(block),
 		m_cancel(cancel),
@@ -415,7 +418,6 @@ public:
 		m_gctx(nullptr),
 		m_featureId(0),
 		m_bufSize(bufSize),
-		m_band(band),
 		m_removeHoles(removeHoles),
 		m_removeDangles(removeDangles),
 		m_queueUpdate(false),
@@ -798,11 +800,10 @@ public:
 
 };
 
-bool s_cancel = false;
-
 void Grid::polygonize(const std::string& filename, const std::string& layerName,
-		const std::string& driver, int srid, int band, bool removeHoles,
-		bool removeDangles, Status *status, bool *cancel, const std::string& mask, int threads) {
+		const std::string& driver, int srid, int band, bool removeHoles, bool removeDangles,
+		const std::string& mask, int maskBand, int threads,
+		bool& cancel, Status* status) {
 
 	if(!props().isInt())
 		g_runerr("Only integer rasters can be polygonized.");
@@ -811,10 +812,6 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 	// writing output (1), and unioning and transferring to the write queue (n - 2).
 	if(threads < 3)
 		threads = 3;
-
-	// If no cancel pointer is given, use a dummy.
-	if(cancel == nullptr)
-		cancel = &s_cancel;
 
 	// Counter for the current block.
 	int block = 0;
@@ -832,7 +829,7 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 		maskRaster = new Raster(mask);
 
 	// Set up the shared context.
-	PolyContext ctx(this, status, &block, cancel, bufSize, band, removeHoles, removeDangles, maskRaster);
+	PolyContext ctx(this, status, &block, &cancel, bufSize, band, removeHoles, removeDangles, maskRaster, maskBand);
 
 	// Initialize database.
 	ctx.initOutput(driver, filename, layerName, srid);
@@ -858,13 +855,11 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 
 	writeT.join();
 
-	//g_debug("Writing...");
 	if(status)
 		status->update(0.99f, "Writing polygons...");
 
 	ctx.commitOutput();
 
-	//g_debug("Done");
 	if(status)
 		status->update(1.0f, "Done.");
 }
