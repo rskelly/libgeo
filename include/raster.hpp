@@ -593,7 +593,6 @@ namespace geo {
         	int m_curCol;				///<! The current column index.
         	int m_curRow;				///<! The current row index.
         	int m_band;					///<! The band index in the data source.
-        	mutable std::mutex m_mtx;	///<! Mutex to protect resources from concurrent access.
 
         protected:
 
@@ -1257,7 +1256,6 @@ namespace geo {
             void *m_grid;							///<! The allocated memory pointer.
             geo::util::MappedFile* m_mappedFile;	///<! The mapped file container.
             GridProps m_props;						///<! Grid properties.
-            std::mutex m_mtx;						///<! Mutex for protecting memory resources.
 
             /**
              * Checks if the grid has been initialized. Throws exception otherwise.
