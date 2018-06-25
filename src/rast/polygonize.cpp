@@ -650,12 +650,15 @@ public:
 						}
 						id0 = id1;
 					}
+				}
 
-					// Update the polygon list with the new poly.
-					{
-						std::lock_guard<std::mutex> lk(m_polyMapMtx);
-						for(auto& it : toWrite)
-							m_polyMap[id0].update(std::get<0>(it), std::get<1>(it), r, r);
+				// Update the polygon list with the new poly.
+				{
+					std::lock_guard<std::mutex> lk(m_polyMapMtx);
+					for(auto& it : toWrite) {
+						size_t id = std::get<0>(it);
+						Geometry* geom = std::get<1>(it);
+						m_polyMap[id].update(id, geom, r, r);
 					}
 				}
 
@@ -667,8 +670,6 @@ public:
 			}
 
 		} // while
-
-		//g_debug("Read block finished");
 
 		notifyTransfer();
 	}
@@ -685,23 +686,22 @@ public:
 				while(!*m_cancel && !m_readFinish && m_polyMap.empty())
 					m_polyMapCond.wait(lk);
 
-				// Process the finished items if there are any.
+				// Find a finished Poly.
 				for(const auto& it : m_polyMap) {
-					if(it.second.isRangeFinalized(m_rowsFinished)) {
-						p = std::move(m_polyMap[it.first]);
+					Poly& p0 = m_polyMap[it.first];
+					if(p0.isRangeFinalized(m_rowsFinished)) {
+						p = std::move(p0);
 						m_polyMap.erase(it.first);
 						found = true;
-						break;
 					}
 				}
 			}
 
+			// Finalized the finished Poly and transfer to the write queue.
 			if(found) {
 				p.finalize(m_geomFactory, m_removeHoles, m_removeDangles);
-				{
-					std::lock_guard<std::mutex> lk(m_polyQueueMtx);
-					m_polyQueue.push(std::move(p));
-				}
+				std::lock_guard<std::mutex> lk(m_polyQueueMtx);
+				m_polyQueue.push(std::move(p));
 			}
 
 			notifyWrite();
@@ -755,45 +755,45 @@ public:
 			}
 
 			// If no element, loop.
-			if(!found)
-				continue;
+			if(found) {
 
-			// Retrieve the unioned geometry and write it.
-			const Geometry* geom = p.geom();
+				// Retrieve the unioned geometry and write it.
+				const Geometry* geom = p.geom();
 
-			{
-				std::vector<Polygon*> polys;
-				for(size_t i = 0; i < geom->getNumGeometries(); ++i) {
-					const Geometry* g = geom->getGeometryN(i);
-					if(!g || g->getGeometryTypeId() != GEOS_POLYGON)
-						g_runerr("Null or invalid polygon.");
-					polys.push_back(dynamic_cast<Polygon*>(g->clone()));
+				{
+					std::vector<Polygon*> polys;
+					for(size_t i = 0; i < geom->getNumGeometries(); ++i) {
+						const Geometry* g = geom->getGeometryN(i);
+						if(!g || g->getGeometryTypeId() != GEOS_POLYGON)
+							g_runerr("Null or invalid polygon.");
+						polys.push_back(dynamic_cast<Polygon*>(g->clone()));
+					}
+					geom = geos::operation::geounion::CascadedPolygonUnion::CascadedPolygonUnion::Union(&polys);
 				}
-				geom = geos::operation::geounion::CascadedPolygonUnion::CascadedPolygonUnion::Union(&polys);
-			}
 
-			if(geom->getGeometryTypeId() != GEOS_MULTIPOLYGON) {
-				std::vector<Geometry*>* geoms = new std::vector<Geometry*>();
-				geoms->push_back(geom->clone());
-				geom = m_geomFactory->createMultiPolygon(geoms);
-			}
+				if(geom->getGeometryTypeId() != GEOS_MULTIPOLYGON) {
+					std::vector<Geometry*>* geoms = new std::vector<Geometry*>();
+					geoms->push_back(geom->clone());
+					geom = m_geomFactory->createMultiPolygon(geoms);
+				}
 
-			OGRGeometry* ogeom = OGRGeometryFactory::createFromGEOS(m_gctx, (GEOSGeom) geom);
-			if(!geom)
-				g_runerr("Null geometry.");
-			OGRFeature feat(m_layer->GetLayerDefn());
-			feat.SetGeometry(ogeom);
-			feat.SetField("id", (GIntBig) p.id());
-			feat.SetFID(nextFeatureId());
-			delete ogeom;
+				OGRGeometry* ogeom = OGRGeometryFactory::createFromGEOS(m_gctx, (GEOSGeom) geom);
+				if(!geom)
+					g_runerr("Null geometry.");
+				OGRFeature feat(m_layer->GetLayerDefn());
+				feat.SetGeometry(ogeom);
+				feat.SetField("id", (GIntBig) p.id());
+				feat.SetFID(nextFeatureId());
+				delete ogeom;
 
-			int err;
-			{
-				std::lock_guard<std::mutex> lk(m_ogrMtx);
-				err = m_layer->CreateFeature(&feat);
+				int err;
+				{
+					std::lock_guard<std::mutex> lk(m_ogrMtx);
+					err = m_layer->CreateFeature(&feat);
+				}
+				if(OGRERR_NONE != err)
+					g_runerr("Failed to add geometry.");
 			}
-			if(OGRERR_NONE != err)
-				g_runerr("Failed to add geometry.");
 		}
 	}
 
