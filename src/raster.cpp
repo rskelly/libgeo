@@ -863,13 +863,14 @@ void Grid::smooth(Grid& smoothed, double sigma, int size, int band,
 
 	// Run the smoothing jobs.
 	std::vector<std::thread> threads;
-	for(int i = 0; i < 1; ++i) {
+	int numThreads = 8;
+	for(int i = 0; i < numThreads; ++i) {
 		threads.emplace_back(_smooth, &iter, &smoothed, size, nodata, weights,
 				&rmtx, &wmtx, &cancel, &status, &curTile);
 	}
 
 	// Wait for jobs to complete.
-	for(int i = 0; i < 1; ++i) {
+	for(int i = 0; i < numThreads; ++i) {
 		if(threads[i].joinable())
 			threads[i].join();
 	}
