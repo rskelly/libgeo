@@ -151,8 +151,8 @@ namespace geo {
 			 * @param maxDepth The maximum depth of a leaf.
 			 * @param maxCount The maximum number of items in a leaf.
 			 */
-			QTree(const Bounds& bounds, int maxDepth, int maxCount) {
-				init(bounds, maxDepth, maxCount);
+			QTree(const Bounds& bounds, int maxDepth, int maxCount) :
+				QTree(bounds, maxDepth, maxCount, 0) {
 			}
 
 			/**
