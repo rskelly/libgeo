@@ -546,29 +546,29 @@ void Grid::gaussianWeights(double *weights, int size, double sigma) {
 
 GridStats Grid::stats(int band) {
 	GridStats st;
-	size_t i;
 	const GridProps& gp = props();
 	double nodata = gp.nodata();
 	double v, m = 0, s = 0;
 	int k = 1;
 	st.sum = 0;
-	st.count = 0;void voidFillIDW(const std::string& filename, int band, const std::string& mask, int maskBand, double radius, int count = 4, double exp = 2.0);
-
-
+	st.count = 0;
 	st.min = G_DBL_MAX_POS;
 	st.max = G_DBL_MAX_NEG;
 	// Welford's method for variance.
-	// i has the index of the first dpata element.
-	for (i = 0; i < gp.size(); ++i) {
-		if ((v = getFloat(i, band)) != nodata) {
-			double oldm = m;
-			m = m + (v - m) / k;
-			s = s + (v - m) * (v - oldm);
-			st.sum += v;
-			if(v < st.min) st.min = v;
-			if(v > st.max) st.max = v;
-			++st.count;
-			++k;
+	int rows = gp.rows();
+	int cols = gp.cols();
+	for(int row = 0; row < rows; ++row) {
+		for(int col = 0; col < cols; ++col) {
+			if ((v = getFloat(col, row, band)) != nodata) {
+				double oldm = m;
+				m = m + (v - m) / k;
+				s = s + (v - m) * (v - oldm);
+				st.sum += v;
+				if(v < st.min) st.min = v;
+				if(v > st.max) st.max = v;
+				++st.count;
+				++k;
+			}
 		}
 	}
 	st.mean = st.sum / st.count;
@@ -583,11 +583,15 @@ void Grid::normalize(int band) {
 	double v, nodata = gp.nodata();
 	double mean = st.mean;
 	double stdDev = st.stdDev;
-	for (size_t i = 0; i < gp.size(); ++i) {
-		if ((v = getFloat(i, band)) != nodata && !std::isnan(v) && v < G_DBL_MAX_POS) {
-			setFloat(i, ((v - mean) / stdDev), band);
-		} else {
-			setFloat(i, nodata, band);
+	int rows = gp.rows();
+	int cols = gp.cols();
+	for(int row = 0; row < rows; ++row) {
+		for(int col = 0; col < cols; ++col) {
+			if ((v = getFloat(col, row, band)) != nodata && !std::isnan(v) && v < G_DBL_MAX_POS) {
+				setFloat(col, row, ((v - mean) / stdDev), band);
+			} else {
+				setFloat(col, row, nodata, band);
+			}
 		}
 	}
 }
@@ -598,18 +602,31 @@ void Grid::logNormalize(int band) {
 	double n = st.min;
 	double x = st.max;
 	double e = std::exp(1.0) - 1.0;
-	for(size_t i = 0; i < gp.size(); ++i)
-		setFloat(i, std::log(1.0 + e * (getFloat(i, band) - n) / (x - n)), band);
+	int rows = gp.rows();
+	int cols = gp.cols();
+	for(int row = 0; row < rows; ++row) {
+		for(int col = 0; col < cols; ++col) {
+				setFloat(col, row, std::log(1.0 + e * (getFloat(col, row, band) - n) / (x - n)), band);
+		}
+	}
 }
 
 void Grid::convert(Grid& g, int srcBand, int dstBand) {
 	const GridProps& gp = props();
+	int rows = gp.rows();
+	int cols = gp.cols();
 	if(g.props().isInt()) {
-		for (size_t i = 0; i < gp.size(); ++i)
-			g.setInt(i, getInt(i, srcBand), dstBand);
+		for(int row = 0; row < rows; ++row) {
+			for(int col = 0; col < cols; ++col) {
+				g.setInt(col, row, getInt(col, row, srcBand), dstBand);
+			}
+		}
 	} else {
-		for (size_t i = 0; i < gp.size(); ++i)
-			g.setFloat(i, getFloat(i, srcBand), dstBand);
+		for(int row = 0; row < rows; ++row) {
+			for(int col = 0; col < cols; ++col) {
+				g.setFloat(col, row, getFloat(col, row, srcBand), dstBand);
+			}
+		}
 	}
 }
 
@@ -658,14 +675,14 @@ void Grid::voidFillIDW(const std::string& filename, int band, const std::string&
     	}
 		for (int c = 0; c < cols; ++c) {
 
-			v = input.getFloat(c, r);
+			v = input.getFloat(c, r, band);
 			if(v == 99998) {
 
 				//output.setFloat(c, r, nodata);
 
 			} else if (v != nodata) {
 
-				output.setFloat(c, r, v);
+				output.setFloat(c, r, v, 1);
 
 			} else if(!holesOnly) {
 
@@ -673,7 +690,8 @@ void Grid::voidFillIDW(const std::string& filename, int band, const std::string&
 				int cnt = 0;
 				for(int r0 = g_max(0, r - maxDist); r0 < g_min(rows, r + maxDist + 1); ++r0) {
 					for(int c0 = g_max(0, c - maxDist); c0 < g_min(cols, c + maxDist + 1); ++c0) {
-						if((c0 == c && r0 == r) || (d = g_sq(c0 - c) + g_sq(r0 - r)) > maxDist || (v = input.getFloat(c0, r0)) == nodata)
+						if((c0 == c && r0 == r) || (d = g_sq(c0 - c) + g_sq(r0 - r)) > maxDist ||
+								(v = input.getFloat(c0, r0, band)) == nodata)
 							continue;
 						dp = 1.0 / std::pow(d, exp);
 						a += dp * v;
@@ -681,7 +699,7 @@ void Grid::voidFillIDW(const std::string& filename, int band, const std::string&
 						++cnt;
 					}
 				}
-				output.setFloat(c, r, cnt ? (a / b) : nodata);
+				output.setFloat(c, r, cnt ? (a / b) : nodata, 1);
 
 			} else {
 
@@ -700,7 +718,7 @@ void Grid::voidFillIDW(const std::string& filename, int band, const std::string&
 	            std::vector<std::tuple<int, int> > npx;
 				for(int r0 = g_max(0, outminr - 1); r0 < g_min(rows, outmaxr + 2); ++r0) {
 					for(int c0 = g_max(0, outminc - 1); c0 < g_min(cols, outmaxc + 2); ++c0) {
-						v = input.getFloat(c0, r0);
+						v = input.getFloat(c0, r0, band);
 						if(v == 99999) {
 							npx.push_back(std::make_tuple(c0, r0));
 						} else if(v != nodata && v != 99998) {
@@ -728,7 +746,7 @@ void Grid::voidFillIDW(const std::string& filename, int band, const std::string&
 						b += dp;
 						++cnt;
 					}
-					output.setFloat(nc, nr, cnt ? (a / b) : nodata);
+					output.setFloat(nc, nr, cnt ? (a / b) : nodata, 1);
 				}
 
 				// Fill again with a different value so it will be ignored.
@@ -975,6 +993,7 @@ void MemRaster::fillInt(int value, int band) {
 	}
 }
 
+/*
 double MemRaster::getFloat(size_t idx, int band) {
 	checkInit();
 	if (idx < 0 || idx >= m_props.size())
@@ -985,10 +1004,18 @@ double MemRaster::getFloat(size_t idx, int band) {
 		return *(((double*) m_grid) + idx);
 	}
 }
+*/
 
 double MemRaster::getFloat(int col, int row, int band) {
-	size_t idx = (size_t) row * m_props.cols() + col;
-	return getFloat(idx, band);
+	checkInit();
+	if(m_props.isInt()) {
+		return (double) getInt(col, row, band);
+	} else {
+		size_t idx = (size_t) row * m_props.cols() + col;
+		if (idx < 0 || idx >= m_props.size())
+			g_argerr("Index out of bounds: " << idx << "; size: " << m_props.size());
+		return *(((double*) m_grid) + idx);
+	}
 }
 
 int MemRaster::getIntRow(int row, int band, int* buf) {
@@ -1019,6 +1046,7 @@ int MemRaster::getFloatRow(int row, int band, float* buf) {
 	return 0;
 }
 
+/*
 int MemRaster::getInt(size_t idx, int band) {
 	checkInit();
 	if (idx < 0 || idx >= m_props.size())
@@ -1029,17 +1057,36 @@ int MemRaster::getInt(size_t idx, int band) {
 		return (int) getFloat(idx, band);
 	}
 }
+*/
 
 int MemRaster::getInt(int col, int row, int band) {
-	size_t idx = (size_t) row * m_props.cols() + col;
-	return getInt(idx, band);
+	checkInit();
+	if(m_props.isInt()) {
+		size_t idx = (size_t) row * m_props.cols() + col;
+		if (idx < 0 || idx >= m_props.size())
+			g_argerr("Index out of bounds: " << idx << "; size: " << m_props.size());
+		return *(((int*) m_grid) + idx);
+	} else {
+		return (int) getFloat(col, row, band);
+	}
 }
 
 void MemRaster::setFloat(int col, int row, double value, int band) {
-	size_t idx = (size_t) row * m_props.cols() + col;
-	setFloat(idx, value, band);
+	checkInit();
+	if(m_props.isInt()) {
+		setInt(col, row, (int) value, band);
+	} else {
+		size_t idx = (size_t) row * m_props.cols() + col;
+		size_t ps = m_props.size();
+		if (idx >= ps)
+			g_argerr("Index out of bounds: " << idx << "; size: " << m_props.size()
+							<< "; value: " << value << "; col: " << (idx % m_props.cols())
+							<< "; row: " << (idx / m_props.cols()));
+		*(((double *) m_grid) + idx) = value;
+	}
 }
 
+/*
 void MemRaster::setFloat(size_t idx, double value, int band) {
 	checkInit();
 	size_t ps = m_props.size();
@@ -1053,12 +1100,24 @@ void MemRaster::setFloat(size_t idx, double value, int band) {
 		*(((double *) m_grid) + idx) = value;
 	}
 }
+*/
 
 void MemRaster::setInt(int col, int row, int value, int band) {
-	size_t idx = (size_t) row * m_props.cols() + col;
-	setInt(idx, value, band);
+	checkInit();
+	if(m_props.isInt()) {
+		size_t idx = (size_t) row * m_props.cols() + col;
+		size_t ps = m_props.size();
+		if (idx >= ps)
+			g_argerr("Index out of bounds: " << idx << "; size: " << m_props.size()
+							<< "; value: " << value << "; col: " << (idx % m_props.cols())
+							<< "; row: " << (idx / m_props.cols()));
+		*(((int *) m_grid) + idx) = value;
+	} else {
+		setFloat(col, row, (double) value, band);
+	}
 }
 
+/*
 void MemRaster::setInt(size_t idx, int value, int band) {
 	checkInit();
 	size_t ps = m_props.size();
@@ -1072,6 +1131,7 @@ void MemRaster::setInt(size_t idx, int value, int band) {
 		setFloat(idx, (double) value, band);
 	}
 }
+*/
 
 void MemRaster::toMatrix(
 		Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic>& mtx, int band) {
@@ -1522,11 +1582,12 @@ double Raster::getFloat(int col, int row, int band) {
 	return v;
 }
 
+/*
 double Raster::getFloat(size_t idx, int band) {
 	int cols = m_props.cols();
 	return getFloat((int) (idx % cols), (int) (idx / cols), band);
 }
-
+*/
 
 double Raster::getFloat(double x, double y, int band) {
 	return getFloat(m_props.toCol(x), m_props.toRow(y), band);
@@ -1553,19 +1614,23 @@ int Raster::getInt(int col, int row, int band) {
 	return v;
 }
 
+/*
 int Raster::getInt(size_t idx, int band) {
 	int cols = m_props.cols();
 	return getInt((int) (idx % cols), (int) (idx / cols), band);
 }
+*/
 
 int Raster::getInt(double x, double y, int band) {
 	return getInt(m_props.toCol(x), m_props.toRow(y), band);
 }
 
+/*
 void Raster::setInt(size_t idx, int v, int band) {
 	int cols = m_props.cols();
 	setInt((int) (idx % cols), (int) (idx / cols), v, band);
 }
+*/
 
 void Raster::setInt(double x, double y, int v, int band) {
 	setInt(m_props.toCol(x), m_props.toRow(y), v, band);
@@ -1615,10 +1680,12 @@ void Raster::setInt(int col, int row, int v, int band) {
 	m_dirty = true;
 }
 
+/*
 void Raster::setFloat(size_t idx, double v, int band) {
 	int cols = m_props.cols();
 	setFloat((int) (idx % cols), (int) (idx / cols), v, band);
 }
+*/
 
 void Raster::setFloat(double x, double y, double v, int band) {
 	setFloat(m_props.toCol(x), m_props.toRow(y), v, band);

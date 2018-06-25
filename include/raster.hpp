@@ -729,7 +729,7 @@ namespace geo {
              * @param band The band.
              * @return The value held at the given index in the grid.
              */
-            virtual int getInt(size_t idx, int band) = 0;
+            //virtual int getInt(size_t idx, int band) = 0;
 
             /**
              * Return a the value held at the given position in the grid.
@@ -748,7 +748,7 @@ namespace geo {
              * @param band The band.
              * @return The value held at the given index in the grid.
              */
-            virtual double getFloat(size_t idx, int band) = 0;
+            //virtual double getFloat(size_t idx, int band) = 0;
 
             /**
              * Return a the value held at the given position in the grid.
@@ -767,7 +767,7 @@ namespace geo {
              * @param value The value to set.
              * @param band The band.
              */
-            virtual void setInt(size_t idx, int value, int band) = 0;
+            //virtual void setInt(size_t idx, int value, int band) = 0;
 
             /**
              * Set the value held at  the given index in the grid.
@@ -786,7 +786,7 @@ namespace geo {
              * @param value The value to set.
              * @param band The band.
              */
-            virtual void setFloat(size_t idx, double value, int band) = 0;
+            //virtual void setFloat(size_t idx, double value, int band) = 0;
 
             /**
              * Set the value held at  the given index in the grid.
@@ -1351,19 +1351,19 @@ namespace geo {
 
             void fillInt(int value, int band);
 
-            int getInt(uint64_t idx, int band);
+            //int getInt(uint64_t idx, int band);
 
             int getInt(int col, int row, int band);
 
-            double getFloat(uint64_t idx, int band);
+            //double getFloat(uint64_t idx, int band);
 
             double getFloat(int col, int row, int band);
 
-            void setInt(uint64_t idx, int value, int band);
+            //void setInt(uint64_t idx, int value, int band);
 
             void setInt(int col, int row, int value, int band);
 
-            void setFloat(uint64_t idx, double value, int band);
+            //void setFloat(uint64_t idx, double value, int band);
 
             void setFloat(int col, int row, double value, int band);
 
@@ -1598,25 +1598,25 @@ namespace geo {
 
             int getInt(int col, int row, int band);
 
-            int getInt(uint64_t idx, int band);
+            //int getInt(uint64_t idx, int band);
 
             double getFloat(double x, double y, int band);
 
             double getFloat(int col, int row, int band);
 
-            double getFloat(uint64_t idx, int band);
+            //double getFloat(uint64_t idx, int band);
 
             void setInt(double x, double y, int v, int band);
 
             void setInt(int col, int row, int v, int band);
 
-            void setInt(uint64_t idx, int v, int band);
+            //void setInt(uint64_t idx, int v, int band);
 
             void setFloat(double x, double y, double v, int band);
 
             void setFloat(int col, int row, double v, int band);
 
-            void setFloat(uint64_t idx, double v, int band);
+            //void setFloat(uint64_t idx, double v, int band);
 
             ~Raster();
 
