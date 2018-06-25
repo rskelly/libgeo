@@ -213,7 +213,7 @@ namespace geo {
 					g_warn("Item is out of bounds for QTree.");
 					return;
 				}
-				if(m_depth < m_maxDepth && m_items.size() == m_maxCount)
+				if(m_depth < m_maxDepth && (int) m_items.size() == m_maxCount)
 					split();
 				if(m_split) {
 					node(item.x(), item.y())->addItem(item);
