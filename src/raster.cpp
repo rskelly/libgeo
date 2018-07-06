@@ -918,6 +918,7 @@ void* MemRaster::grid() {
 }
 
 void MemRaster::freeMem() {
+	std::lock_guard<std::mutex> lk(m_freeMtx);
 	if (m_grid) {
 		if (m_mmapped) {
 			delete m_mappedFile;
@@ -931,6 +932,7 @@ void MemRaster::freeMem() {
 }
 
 void MemRaster::init(const GridProps& pr, bool mapped) {
+	std::lock_guard<std::mutex> lk(m_initMtx);
 	m_grid = nullptr;
 	m_mmapped = false;
 	if (pr.cols() != m_props.cols() || pr.rows() != m_props.rows()) {

@@ -1256,6 +1256,8 @@ namespace geo {
             void *m_grid;							///<! The allocated memory pointer.
             geo::util::MappedFile* m_mappedFile;	///<! The mapped file container.
             GridProps m_props;						///<! Grid properties.
+            std::mutex m_freeMtx;					///<! Mutex to protect memory resources.
+            std::mutex m_initMtx;					///<! Mutex to protect memory resources.
 
             /**
              * Checks if the grid has been initialized. Throws exception otherwise.
