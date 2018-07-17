@@ -35,7 +35,7 @@ namespace ds {
 template <class T>
 class KDTree {
 private:
-	std::vector<double> m_items;
+	std::vector<T*> m_items;
 	std::vector<ANNpoint> m_pts;
 	ANNkd_tree* m_tree;
 	size_t m_dims;
@@ -58,21 +58,18 @@ public:
 			delete m_tree;
 			m_tree = nullptr;
 		}
+		for(T* item : m_items)
+			delete item;
 		m_items.clear();
-		if(!m_pts.empty()) {
-			for(ANNpoint p : m_pts)
-				delete p;
-			m_pts.clear();
-		}
+		m_pts.clear();
 	}
 
 	/**
 	 * Add an item to the tree.
 	 * @param item An item.
 	 */
-	void add(T& item) {
-		for(int i = 0; i < m_dims; ++i)
-			m_items.push_back(item[i]);
+	void add(T* item) {
+		m_items.push_back(item);
 	}
 
 	/**
@@ -129,7 +126,7 @@ public:
 	 * Returns a reference to the vector containing all
 	 * coordinates added to the tree.
 	 */
-	const std::vector<double>& items() const {
+	const std::vector<T*>& items() const {
 		return m_items;
 	}
 
