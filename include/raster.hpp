@@ -671,6 +671,13 @@ namespace geo {
             virtual ~Grid() {}
             
             /**
+             * Return a mutex that can be used to protect the resource.
+             *
+             * @return A mutex.
+             */
+            virtual std::mutex& mutex() = 0;
+
+            /**
              * Return a TileIterator.
              *
              * @param cols The number of columns in each tile.
@@ -1258,6 +1265,7 @@ namespace geo {
             GridProps m_props;						///<! Grid properties.
             std::mutex m_freeMtx;					///<! Mutex to protect memory resources.
             std::mutex m_initMtx;					///<! Mutex to protect memory resources.
+            std::mutex m_mtx;						///<! Mutex for use by callers.
 
             /**
              * Checks if the grid has been initialized. Throws exception otherwise.
@@ -1347,6 +1355,8 @@ namespace geo {
              */
             void fromMatrix(Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic>& mtx, int band);
 
+            std::mutex& mutex();
+
             const GridProps& props() const;
 
             void fillFloat(double value, int band);
@@ -1395,15 +1405,16 @@ namespace geo {
         class G_DLL_EXPORT Raster : public Grid {
         	friend class MemRaster;
         private:
-            GDALDataset *m_ds;          				///< GDAL data set pointer.
-            int m_bcols, m_brows;						///< The size of the GDAL block.
-            int m_bcol, m_brow;							///< The current loaded block position.
-            int m_bband;								///< The band corresponding to the current block.
-            bool m_dirty;								///< True if the current block has been written to and must be flushed.
-            std::string m_filename;     				///< Raster filename
-            GridProps m_props;							///< Properties of the raster.
-            GDALDataType m_type;        				///< GDALDataType -- limits the possible template types.
-            std::unordered_map<int, void*> m_blocks;	///< The block cache.
+            GDALDataset *m_ds;          				///<! GDAL data set pointer.
+            int m_bcols, m_brows;						///<! The size of the GDAL block.
+            int m_bcol, m_brow;							///<! The current loaded block position.
+            int m_bband;								///<! The band corresponding to the current block.
+            bool m_dirty;								///<! True if the current block has been written to and must be flushed.
+            std::string m_filename;     				///<! Raster filename
+            GridProps m_props;							///<! Properties of the raster.
+            GDALDataType m_type;        				///<! GDALDataType -- limits the possible template types.
+            std::unordered_map<int, void*> m_blocks;	///<! The block cache.
+            std::mutex m_mtx;							///<! Mutex for use by callers.
 
             /**
              * Returns the GDAL data type.
@@ -1583,6 +1594,8 @@ namespace geo {
              * Flush a dirty read/write block to the dataset.
              */
             void flushDirty();
+
+            std::mutex& mutex();
 
             const GridProps& props() const;
 
