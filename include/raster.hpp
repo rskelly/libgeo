@@ -876,7 +876,7 @@ namespace geo {
                 int area = 0;
 
                 std::queue<Cell> q;
-                q.push(Cell(col, row));
+                q.emplace(col, row);
 
                 std::vector<bool> visited(size, false); // Tracks visited pixels.
 
