@@ -89,10 +89,10 @@ namespace geo {
         // Provides methods for handling status callbacks.
         class G_DLL_EXPORT Callbacks {
         public:
-            virtual ~Callbacks();
-            virtual void stepCallback(float status) const;
-            virtual void overallCallback(float status) const;
-            virtual void statusCallback(const std::string& msg) const;
+            virtual ~Callbacks() {}
+            virtual void stepCallback(float status) const = 0;
+            virtual void overallCallback(float status) const = 0;
+            virtual void statusCallback(const std::string& msg) const = 0;
         };
 
 		// Simple class for capturing status from utility functions.
@@ -101,6 +101,14 @@ namespace geo {
 			geo::util::Callbacks *m_callbacks;
 			float m_start, m_end;
 		public:
+			/**
+			 * Create a Status object to wrap the given callbacks. The Status object
+			 * does not own the Callbacks.
+			 *
+			 * @param callbacks The Callbacks implementation instance.
+			 * @param start The start value for the status counter, at zero.
+			 * @param end The end value for the status counter at 100.
+			 */
 			Status(geo::util::Callbacks *callbacks, float start, float end);
 			void update(float s, const std::string& msg = "");
 			float start() const;

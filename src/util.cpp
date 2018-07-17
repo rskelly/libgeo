@@ -67,8 +67,6 @@ void Callbacks::statusCallback(const std::string &msg) const {
 	g_debug("Status: " << msg);
 }
 
-Callbacks::~Callbacks() {
-}
 
 Status::Status(Callbacks *callbacks, float start, float end) :
 	m_callbacks(callbacks), m_start(start), m_end(end) {
