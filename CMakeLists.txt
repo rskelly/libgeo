@@ -114,14 +114,14 @@ if (${BUILD_APPS})
 		src/pc/filter.cpp ${PC_COMPUTERS})
 	target_link_libraries (geopc geoutil georaster geoann ${LIBLAS_LIBRARY} ${CGAL_LIBRARY})
 
-	add_library (geoann SHARED src/geo.cpp ann/src/ANN.cpp ann/src/brute.cpp 
-		ann/src/kd_tree.cpp ann/src/kd_util.cpp 
-		ann/src/kd_split.cpp ann/src/kd_dump.cpp ann/src/kd_search.cpp ann/src/kd_pr_search.cpp 
-		ann/src/kd_fix_rad_search.cpp ann/src/bd_tree.cpp ann/src/bd_search.cpp ann/src/bd_pr_search.cpp 
-		ann/src/bd_fix_rad_search.cpp ann/src/perf.cpp)
-	target_link_libraries (geoann geoutil)
-
 endif()
+
+add_library (geoann SHARED src/geo.cpp ann/src/ANN.cpp ann/src/brute.cpp 
+	ann/src/kd_tree.cpp ann/src/kd_util.cpp 
+	ann/src/kd_split.cpp ann/src/kd_dump.cpp ann/src/kd_search.cpp ann/src/kd_pr_search.cpp 
+	ann/src/kd_fix_rad_search.cpp ann/src/bd_tree.cpp ann/src/bd_search.cpp ann/src/bd_pr_search.cpp 
+	ann/src/bd_fix_rad_search.cpp ann/src/perf.cpp)
+target_link_libraries (geoann geoutil)
 
 # Applications ##################################################################################################
 
