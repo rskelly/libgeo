@@ -1521,6 +1521,15 @@ namespace geo {
             static std::map<std::string, std::string> drivers();
 
             /**
+             * Return a map containing the raster driver short name and long name. Use filter
+             * to filter the returns on short name.
+             *
+             * @param filter A vector containing the short names of drivers to include.
+             * @return A map containing the raster driver short name and long name.
+             */
+            static std::map<std::string, std::string> drivers(const std::vector<std::string>& filter);
+
+            /**
              * Get the name of the driver that would be used to open a file
              * with the given path.
              *

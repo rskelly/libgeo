@@ -72,8 +72,22 @@ namespace geo {
             // as values.
             static std::map<std::string, std::set<std::string> > extensions();
 
-            // Returns a map with driver short names as keys and long names for values.
+            /**
+             * Returns a map with driver short names as keys and long names for values.
+             *
+             * @return A map of drivers with short name as key and long name as value.
+             */
             static std::map<std::string, std::string> drivers();
+
+            /**
+             * Returns a map with driver short names as keys and long names for values. The filter
+             * contains short names of drivers. Only those names will be included if the filter is
+             * not empty.
+             *
+             * @param filter A vector of short driver names.
+             * @return A map of drivers with short name as key and long name as value.
+             */
+            static std::map<std::string, std::string> drivers(const std::vector<std::string>& filter);
 
             // Returns a vector driver for the given filename.
             static std::string getDriverForFilename(const std::string &filename);

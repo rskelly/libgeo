@@ -1289,6 +1289,11 @@ std::map<std::string, std::set<std::string> > Raster::extensions() {
 }
 
 std::map<std::string, std::string> Raster::drivers() {
+	std::vector<std::string> f;
+	return drivers(f);
+}
+
+std::map<std::string, std::string> Raster::drivers(const std::vector<std::string>& filter) {
 	GDALAllRegister();
 	std::map<std::string, std::string> drivers;
 	GDALDriverManager *mgr = GetGDALDriverManager();
@@ -1299,7 +1304,18 @@ std::map<std::string, std::string> Raster::drivers() {
 			const char* name = drv->GetMetadataItem(GDAL_DMD_LONGNAME);
 			const char* desc = drv->GetDescription();
 			if(name != NULL && desc != NULL) {
-				drivers[desc] = name;
+				bool found = true;
+				if(!filter.empty()) {
+					found = false;
+					for(const std::string& f : filter) {
+						if(f == desc) {
+							found = true;
+							break;
+						}
+					}
+				}
+				if(found)
+					drivers[desc] = name;
 			}
 		}
 	}
