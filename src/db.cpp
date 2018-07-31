@@ -217,6 +217,11 @@ std::map<std::string, std::set<std::string> > DB::extensions() {
 }
 
 std::map<std::string, std::string> DB::drivers() {
+	std::vector<std::string> filter;
+	return drivers(filter);
+}
+
+std::map<std::string, std::string> DB::drivers(const std::vector<std::string>& filter) {
 	GDALAllRegister();
 	std::map<std::string, std::string> drivers;
 	GDALDriverManager *mgr = GetGDALDriverManager();
@@ -225,8 +230,20 @@ std::map<std::string, std::string> DB::drivers() {
 		if(!isRast(drv)) {
 			const char* name = drv->GetMetadataItem(GDAL_DMD_LONGNAME);
 			const char* desc = drv->GetDescription();
-			if(name != NULL && desc != NULL)
-				drivers[desc] = name;
+			if(name != NULL && desc != NULL) {
+				bool found = true;
+				if(!filter.empty()) {
+					found = false;
+					for(const std::string& f : filter) {
+						if(f == desc) {
+							found = true;
+							break;
+						}
+					}
+				}
+				if(found)
+					drivers[desc] = name;
+			}
 		}
 	}
 	return drivers;

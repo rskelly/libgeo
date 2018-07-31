@@ -457,6 +457,7 @@ void Tile::flush() {
 }
 
 void Tile::writeTo(Grid& dest) {
+	std::lock_guard<std::mutex> lk(dest.mutex());
 	m_tile->writeTo(dest, m_cols, m_rows, m_buffer, m_buffer, m_col, m_row);
 }
 
@@ -518,7 +519,10 @@ Tile* TileIterator::next() {
 	p.setSize(m_cols + m_buffer * 2, m_rows + m_buffer * 2);
 	std::unique_ptr<MemRaster> tile(new MemRaster(p));
 
-	m_source.writeTo(*tile, cols, rows, srcCol, srcRow, dstCol, dstRow, m_band, 1);
+	{
+		std::lock_guard<std::mutex> lk(m_source.mutex());
+		m_source.writeTo(*tile, cols, rows, srcCol, srcRow, dstCol, dstRow, m_band, 1);
+	}
 
 	return new Tile(tile.release(), &m_source, m_cols, m_rows, col, row,
 			m_buffer, srcCol, srcRow, dstCol, dstRow, m_band, props.writable());
@@ -529,8 +533,10 @@ Tile* TileIterator::create(Tile &tpl) {
 	p.setSize(m_cols + m_buffer * 2, m_rows + m_buffer * 2);
 	std::unique_ptr<MemRaster> tile(new MemRaster(p));
 
-	m_source.writeTo(*tile, tpl.m_cols, tpl.m_rows,
-			tpl.m_srcCol, tpl.m_srcRow, tpl.m_dstCol, tpl.m_dstRow, m_band, 1);
+	{
+		std::lock_guard<std::mutex> lk(m_source.mutex());
+		m_source.writeTo(*tile, tpl.m_cols, tpl.m_rows, tpl.m_srcCol, tpl.m_srcRow, tpl.m_dstCol, tpl.m_dstRow, m_band, 1);
+	}
 
 	return new Tile(tile.release(), &m_source, m_cols, m_rows, tpl.m_col, tpl.m_row,
 			m_buffer, tpl.m_srcCol, tpl.m_srcRow, tpl.m_dstCol, tpl.m_dstRow, m_band, p.writable());
@@ -898,6 +904,10 @@ void Grid::smooth(Grid& smoothed, double sigma, int size, int band,
 
 // Implementations for MemRaster
 
+std::mutex& MemRaster::mutex() {
+	return m_mtx;
+}
+
 bool MemRaster::mmapped() const {
 	return m_mmapped;
 }
@@ -1223,6 +1233,10 @@ void MemRaster::writeTo(Grid& grd,
 
 // Implementations for Raster
 
+std::mutex& Raster::mutex() {
+	return m_mtx;
+}
+
 std::map<std::string, std::set<std::string> > Raster::extensions() {
 	GDALAllRegister();
 	std::map<std::string, std::set<std::string> > extensions;
@@ -1248,6 +1262,11 @@ std::map<std::string, std::set<std::string> > Raster::extensions() {
 }
 
 std::map<std::string, std::string> Raster::drivers() {
+	std::vector<std::string> f;
+	return drivers(f);
+}
+
+std::map<std::string, std::string> Raster::drivers(const std::vector<std::string>& filter) {
 	GDALAllRegister();
 	std::map<std::string, std::string> drivers;
 	GDALDriverManager *mgr = GetGDALDriverManager();
@@ -1258,7 +1277,18 @@ std::map<std::string, std::string> Raster::drivers() {
 			const char* name = drv->GetMetadataItem(GDAL_DMD_LONGNAME);
 			const char* desc = drv->GetDescription();
 			if(name != NULL && desc != NULL) {
-				drivers[desc] = name;
+				bool found = true;
+				if(!filter.empty()) {
+					found = false;
+					for(const std::string& f : filter) {
+						if(f == desc) {
+							found = true;
+							break;
+						}
+					}
+				}
+				if(found)
+					drivers[desc] = name;
 			}
 		}
 	}
