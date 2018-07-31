@@ -157,7 +157,25 @@ GridProps::GridProps() :
 		m_writable(false),			// True if the grid is writable
 		m_nodata(0),
 		m_nodataSet(false),
+		m_compress(false),
+		m_bigTiff(false),
 		m_type(DataType::None) {	// The data type.
+}
+
+void GridProps::setCompress(bool compress) {
+	m_compress = compress;
+};
+
+bool GridProps::compress() const {
+	return m_compress;
+}
+
+void GridProps::setBigTiff(bool bigTiff) {
+	m_bigTiff = bigTiff;
+}
+
+bool GridProps::bigTiff() const {
+	return m_bigTiff;
 }
 
 std::string GridProps::driver() const {
@@ -1049,19 +1067,6 @@ int MemRaster::getFloatRow(int row, int band, float* buf) {
 	return 0;
 }
 
-/*
-int MemRaster::getInt(size_t idx, int band) {
-	checkInit();
-	if (idx < 0 || idx >= m_props.size())
-		g_argerr("Index out of bounds: " << idx << "; size: " << m_props.size());
-	if(m_props.isInt()) {
-		return *(((int*) m_grid) + idx);
-	} else {
-		return (int) getFloat(idx, band);
-	}
-}
-*/
-
 int MemRaster::getInt(int col, int row, int band) {
 	checkInit();
 	if(m_props.isInt()) {
@@ -1089,22 +1094,6 @@ void MemRaster::setFloat(int col, int row, double value, int band) {
 	}
 }
 
-/*
-void MemRaster::setFloat(size_t idx, double value, int band) {
-	checkInit();
-	size_t ps = m_props.size();
-	if (idx >= ps)
-		g_argerr("Index out of bounds: " << idx << "; size: " << m_props.size()
-						<< "; value: " << value << "; col: " << (idx % m_props.cols())
-						<< "; row: " << (idx / m_props.cols()));
-	if(m_props.isInt()) {
-		setInt(idx, (int) value, band);
-	} else {
-		*(((double *) m_grid) + idx) = value;
-	}
-}
-*/
-
 void MemRaster::setInt(int col, int row, int value, int band) {
 	checkInit();
 	if(m_props.isInt()) {
@@ -1119,22 +1108,6 @@ void MemRaster::setInt(int col, int row, int value, int band) {
 		setFloat(col, row, (double) value, band);
 	}
 }
-
-/*
-void MemRaster::setInt(size_t idx, int value, int band) {
-	checkInit();
-	size_t ps = m_props.size();
-	if (idx >= ps)
-		g_argerr("Index out of bounds: " << idx << "; size: " << m_props.size()
-						<< "; value: " << value << "; col: " << (idx % m_props.cols())
-						<< "; row: " << (idx / m_props.cols()));
-	if(m_props.isInt()) {
-		*(((int *) m_grid) + idx) = value;
-	} else {
-		setFloat(idx, (double) value, band);
-	}
-}
-*/
 
 void MemRaster::toMatrix(
 		Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic>& mtx, int band) {
@@ -1323,13 +1296,12 @@ Raster::Raster(const std::string& filename, const GridProps& props) :
 
 	// Create GDAL dataset.
 	char **opts = NULL;
-	// TODO: Compress option in props, for tiffs
-	/*
-	if(m_props.compress())
+	if(m_props.compress()) {
 		opts = CSLSetNameValue(opts, "COMPRESS", "LZW");
+		opts = CSLSetNameValue(opts, "PREDICTOR", "2");
+	}
 	if(m_props.bigTiff())
 		opts = CSLSetNameValue(opts, "BIGTIFF", "YES");
-	*/
 	GDALAllRegister();
 	std::string drvName = m_props.driver();
 	if(drvName.empty())
