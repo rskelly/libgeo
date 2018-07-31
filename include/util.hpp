@@ -624,6 +624,14 @@ namespace geo {
             // Move the file.
             static void copyfile(const std::string& srcfile, const std::string& dstfile);
 
+            /**
+             * Rename (i.e. move) a file.
+             *
+             * @param srcfile The source filename.
+             * @param dstfile The destination filename.
+             */
+            static void rename(const std::string& srcfile, const std::string& dstfile);
+
             // Return the basename of the file.
             static std::string basename(const std::string& filename);
 
