@@ -446,6 +446,10 @@ void Util::copyfile(const std::string &srcfile, const std::string &dstfile) {
 	dst << src.rdbuf();
 }
 
+void Util::rename(const std::string &srcfile, const std::string &dstfile) {
+	boost::filesystem::rename(boost::filesystem::path(srcfile), boost::filesystem::path(dstfile));
+}
+
 bool Util::exists(const std::string &name) {
 	boost::filesystem::path p(name);
 	return boost::filesystem::exists(p);
