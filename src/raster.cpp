@@ -839,7 +839,6 @@ void _smooth(TileIterator* iter, Grid* smoothed,
 			status->update(g_min(0.99f, 0.2f + (float) *curTile / tileCount * 0.97f));
 		}
 	} catch(const std::exception& e) {
-		std::cerr << e.what() << "\n";
 		*p = std::current_exception();
 	}
 }
