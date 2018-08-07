@@ -60,6 +60,8 @@ namespace geo {
             bool m_writable;            ///<! True if the raster is writable
             double m_nodata;			///<! The nodata value.
             bool m_nodataSet;			///<! True if nodata is set.
+            bool m_compress;			///<! True if the file is a TIF and will be compressed.
+            bool m_bigTiff;				///<! Use bigtiff.
     		DataType m_type;			///<! The data type.
     		std::string m_projection;	///<! The WKT representation of the projection
     		std::string m_driver;		///<! The name of the GDAL driver.
@@ -84,6 +86,34 @@ namespace geo {
     		 * @param bounds The geographic bounds of the raster.
     		 */
     		void setBounds(const Bounds& bounds);
+
+    		/**
+    		 * Use compression for tiff files.
+    		 *
+    		 * @param compress True to use compression for tiff files.
+    		 */
+    		void setCompress(bool compress);
+
+    		/**
+    		 * Use compression for tiff files.
+    		 *
+    		 * @return True to use compression for tiff files.
+    		 */
+    		bool compress() const;
+
+    		/**
+    		 * Use Big Tiff setting.
+    		 *
+    		 * @param bigTuff True to use Big Tiff setting.
+    		 */
+    		void setBigTiff(bool bigTiff);
+
+    		/**
+    		 * Use Big Tiff setting.
+    		 *
+    		 * @return True to use Big Tiff setting.
+    		 */
+    		bool bigTiff() const;
 
     		/**
     		 * Populate an (at least) 4-element double array with the bounding
