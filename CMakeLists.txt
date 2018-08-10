@@ -104,7 +104,7 @@ target_link_libraries (geoutil ${Boost_LIBRARIES} ${GDAL_LIBRARY} ${CRYPTO_LIBRA
 add_library (geodb SHARED src/geo.cpp src/db.cpp)
 target_link_libraries (geodb geoutil)
 
-add_library (georaster SHARED src/geo.cpp src/raster.cpp src/rast/polygonize.cpp)
+add_library (georaster SHARED src/geo.cpp src/raster.cpp src/rast/polygonize_gdal.cpp)
 target_link_libraries (georaster geoutil geodb Threads::Threads ${GEOS_LIBRARY})
 
 if (${BUILD_APPS})
