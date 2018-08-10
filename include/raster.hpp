@@ -1084,15 +1084,16 @@ namespace geo {
              * @param startrow The starting row.
              * @param goalCol The column of the goal.
              * @param goalRow The row of the goal.
-             * @param heuristic Used by the algorithm to cost the path.
+             * @param heuristic Used by the algorithm to estimate the future cost of the path.
              * @param inserter Used to accumulate the path results.
              */
             template <class U, class V>
             void searchAStar(int startCol, int startRow, int goalCol, int goalRow, U heuristic, V inserter) {
 
-            	size_t goal = ((size_t) goalCol << 32) | goalRow;
+            	static double offsets[4][2] = {{0, -1}, {-1, 0}, {1, 0}, {0, 1}};
 
-            	std::vector<std::pair<int, int> > offsets = squareKernel<std::pair<int, int> >(3, false);
+            	size_t goal = ((size_t) goalCol << 32) | goalRow;
+            	size_t start = ((size_t) startCol << 32) | startRow;
 
             	std::unordered_map<size_t, size_t> parents;
             	std::unordered_map<size_t, double> gscore;
@@ -1100,8 +1101,6 @@ namespace geo {
 
             	std::unordered_set<size_t> openSet;
             	std::unordered_set<size_t> closedSet;
-
-            	size_t start = ((size_t) startCol << 32) | startRow;
 
             	openSet.insert(start);
             	gscore[start] = 0; 						// Distance from start to neighbour
@@ -1130,12 +1129,14 @@ namespace geo {
             		int qcol = (top >> 32) & 0xffffffff;
             		int qrow = top & 0xffffffff;
 
-            		for(const auto& it : offsets) {
+            		for(int i = 0; i < 4; ++i) {
+            			int col = qcol + offsets[i][0];
+            			int row = qrow + offsets[i][1];
 
-            			if(qcol + it.first < 0 || qrow + it.second < 0 || qcol + it.first >= cols || qrow + it.second >= rows)
+            			if(col < 0 || row < 0 || col >= cols || row >= rows)
             				continue;
 
-            			size_t n = ((size_t) (qcol + it.first) << 32) | (qrow + it.second);
+            			size_t n = ((size_t) col << 32) | row;
 
             			if(closedSet.find(n) != closedSet.end())
             				continue;
@@ -1150,8 +1151,7 @@ namespace geo {
 
             			parents[n] = top;
             			gscore[n] = tgscore;
-            			double h = heuristic(n, goal);
-            			fscore[n] = tgscore + h;
+            			fscore[n] = tgscore + heuristic(n, goal);
             		}
             	}
             }
