@@ -797,61 +797,67 @@ using namespace geo::raster::util;
  * @param rmtx The read mutex.
  * @param wmtx The write mutex.
  * @param cancel If set to true during operation, cancels the operation.
+ * @param ex If the function terminates with an exception, this pointer should point to it.
  */
 void _smooth(TileIterator* iter, Grid* smoothed,
 		int size, double nodata, double* weights,
-		std::mutex* rmtx, std::mutex* wmtx, bool* cancel, Status* status, int* curTile) {
+		std::mutex* rmtx, std::mutex* wmtx, bool* cancel, Status* status, int* curTile,
+		std::exception_ptr* p) {
 
-	std::unique_ptr<Tile> tile;
-	int tileCount = iter->count();
+	try {
+		std::unique_ptr<Tile> tile;
+		int tileCount = iter->count();
 
-	while(!*cancel) {
+		while(!*cancel) {
 
-		{
-			std::lock_guard<std::mutex> lk(*rmtx);
-			tile.reset(iter->next());
-			if(!tile.get())
-				return;
-			++*curTile;
-		}
-
-		// Copy the tile to a buffer, process the buffer and write back to the grid.
-		Grid& grid = tile->grid();
-		const GridProps& props = grid.props();
-		MemRaster buf(props);
-		grid.writeTo(buf);
-
-		// Process the entire block, even the buffer parts.
-		for (int r = 0; !*cancel && r < props.rows() - size; ++r) {
-			for (int c = 0; !*cancel && c < props.cols() - size; ++c) {
-				double v, t = 0.0;
-				bool foundNodata = false;
-				for (int gr = 0; gr < size; ++gr) {
-					for (int gc = 0; gc < size; ++gc) {
-						v = buf.getFloat(c + gc, r + gr, 1);
-						if (v == nodata) {
-							foundNodata = true;
-							break;
-						} else {
-							t += weights[gr * size + gc] * v;
-						}
-					}
-					if(foundNodata) break;
-				}
-				if (!foundNodata)
-					grid.setFloat(c + size / 2, r + size / 2, t, 1);
+			{
+				std::lock_guard<std::mutex> lk(*rmtx);
+				tile.reset(iter->next());
+				if(!tile.get())
+					return;
+				++*curTile;
 			}
+
+			// Copy the tile to a buffer, process the buffer and write back to the grid.
+			Grid& grid = tile->grid();
+			const GridProps& props = grid.props();
+			MemRaster buf(props);
+			grid.writeTo(buf);
+
+			// Process the entire block, even the buffer parts.
+			for (int r = 0; !*cancel && r < props.rows() - size; ++r) {
+				for (int c = 0; !*cancel && c < props.cols() - size; ++c) {
+					double v, t = 0.0;
+					bool foundNodata = false;
+					for (int gr = 0; gr < size; ++gr) {
+						for (int gc = 0; gc < size; ++gc) {
+							v = buf.getFloat(c + gc, r + gr, 1);
+							if (v == nodata) {
+								foundNodata = true;
+								break;
+							} else {
+								t += weights[gr * size + gc] * v;
+							}
+						}
+						if(foundNodata) break;
+					}
+					if (!foundNodata)
+						grid.setFloat(c + size / 2, r + size / 2, t, 1);
+				}
+			}
+
+			if(*cancel)
+				break;
+
+			{
+				std::lock_guard<std::mutex> lk(*wmtx);
+				tile->writeTo(*smoothed);
+			}
+
+			status->update(g_min(0.99f, 0.2f + (float) *curTile / tileCount * 0.97f));
 		}
-
-		if(*cancel)
-			break;
-
-		{
-			std::lock_guard<std::mutex> lk(*wmtx);
-			tile->writeTo(*smoothed);
-		}
-
-		status->update(g_min(0.99f, 0.2f + (float) *curTile / tileCount * 0.97f));
+	} catch(const std::exception& e) {
+		*p = std::current_exception();
 	}
 }
 
@@ -886,17 +892,24 @@ void Grid::smooth(Grid& smoothed, double sigma, int size, int band,
 	int curTile = 0;
 
 	// Run the smoothing jobs.
-	std::vector<std::thread> threads;
 	int numThreads = 8;
+	std::vector<std::thread> threads;
+	std::vector<std::exception_ptr> exceptions(numThreads);
 	for(int i = 0; i < numThreads; ++i) {
 		threads.emplace_back(_smooth, &iter, &smoothed, size, nodata, weights,
-				&rmtx, &wmtx, &cancel, &status, &curTile);
+				&rmtx, &wmtx, &cancel, &status, &curTile, &exceptions[i]);
 	}
 
 	// Wait for jobs to complete.
 	for(int i = 0; i < numThreads; ++i) {
 		if(threads[i].joinable())
 			threads[i].join();
+	}
+
+	// Check if any exceptions were trapped. Raise the first one.
+	for(int i = 0; i < numThreads; ++i) {
+		if(exceptions[i])
+			std::rethrow_exception(exceptions[i]);
 	}
 
 	status.update(1.0);
