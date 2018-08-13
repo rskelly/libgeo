@@ -1077,8 +1077,11 @@ namespace geo {
 
             /**
              * Finds the least-cost path from the start cell to the goal cell,
-             * using the given heuristic. Returns the optimal path between the
-             * start cell and the goal.
+             * using the given heuristic. Populates the given iterator with
+             * the optimal path between the start cell and the goal.
+             *
+             * If the search fails for some reason, like exceeding the maxCost, returns
+             * false. Otherwise returns true.
              *
              * @param startCol The starting column.
              * @param startrow The starting row.
@@ -1086,9 +1089,11 @@ namespace geo {
              * @param goalRow The row of the goal.
              * @param heuristic Used by the algorithm to estimate the future cost of the path.
              * @param inserter Used to accumulate the path results.
+             * @param maxCost If the total cost exceeds this amount, just quit and return false.
+             * @return True if the search succeeded, false otherwise.
              */
             template <class U, class V>
-            void searchAStar(int startCol, int startRow, int goalCol, int goalRow, U heuristic, V inserter) {
+            bool searchAStar(int startCol, int startRow, int goalCol, int goalRow, U heuristic, V inserter, double maxCost = std::numeric_limits<double>::infinity()) {
 
             	static double offsets[4][2] = {{0, -1}, {-1, 0}, {1, 0}, {0, 1}};
 
@@ -1111,11 +1116,15 @@ namespace geo {
 
             	while(!openSet.empty()) {
 
+            		if(openSet.size() % 10000 == 0) {
+            			std::cerr << openSet.size() << "\n";
+            		}
+
             		size_t top = minValue(fscore);
 
             		if(top == goal) {
             			writeAStarPath(top, parents, inserter);
-            			break;
+            			return true;
             		}
 
             		double gscore0 = gscore[top];
@@ -1142,6 +1151,9 @@ namespace geo {
             				continue;
 
             			double tgscore = gscore0 + heuristic(top, n);
+
+            			if(tgscore > maxCost)
+            				return false;
 
             			if(openSet.find(n) == openSet.end()) {
             				openSet.insert(n);
