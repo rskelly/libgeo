@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.1)
 
+set (CMAKE_INCLUDE_DIRECTORIES_BEFORE ON)
+
 enable_language(C)
 enable_language(CXX)
 set (CMAKE_CXX_STANDARD 11)
@@ -62,6 +64,8 @@ elseif(${WIN32})
 	# Qt should be added to the prefix dir.
 	set (CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH};${QT_LIBRARYDIR}")
 else()
+	set (GEOS_INCLUDEDIR /opt/include)
+	set (GEOS_LIBRARYDIR /opt/lib)
 	set (EIGEN_INCLUDEDIR "/usr/include/eigen3")
 	set (BOOST_INCLUDEDIR "/usr/include")
 	set (BOOST_LIBRARYDIR "/usr/lib/x86_64-linux-gnu")
@@ -71,11 +75,9 @@ endif()
 set (THREADS_PREFER_PTHREAD_FLAG ON)
 
 find_package (Threads REQUIRED)
-find_package (OpenMP REQUIRED)
 find_package (Boost 1.58 COMPONENTS system filesystem date_time thread REQUIRED)
 find_package (GDAL 2.2 REQUIRED)
 find_package (CGAL REQUIRED COMPONENTS Core)
-#find_package (PCL 1.8 REQUIRED)
 
 find_library (LIBLAS_LIBRARY las)
 find_library (JSONCPP_LIBRARY jsoncpp)
@@ -83,19 +85,14 @@ find_library (CRYPTO_LIBRARY crypto libcrypto PATHS ${CRYPTO_LIBRARYDIR})
 find_library (GEOS_LIBRARY geos PATHS ${GEOS_LIBRARYDIR})
 find_library (PROJ_LIBRARY proj)
 
-if(OPENMP_FOUND)
-	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_C_FLAGS} -fopenmp")
-	set (CMAKE_C_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_C_FLAGS} -fopenmp")
-endif()
-
 project (libgeo)
 
 # Configure directories###################################################################################
 
 include_directories(BEFORE SYSTEM ./include ./ann/include /opt/include
 	${GEOS_INCLUDEDIR} ${OSGEO_INCLUDEDIR} ${GDAL_INCLUDE_DIR} ${PCL_INCLUDE_DIRS} 
-	${Boost_INCLUDE_DIRS} ${CRYPTO_INCLUDEDIR} ${EIGEN_INCLUDEDIR} ${JSON_INCLUDEDIR}) 
-link_directories(. /opt/lib /usr/local/lib /usr/lib/x86_64-linux-gnu/ /usr/lib ${Boost_LIBRARY_DIRS} ${GDAL_LIBRARYDIR} ${PCL_LIBRARY_DIRS})
+	${Boost_INCLUDE_DIRS} ${CRYPTO_INCLUDEDIR} ${EIGEN_INCLUDEDIR} ${JSON_INCLUDEDIR})
+link_directories(build/lib /opt/lib ${Boost_LIBRARY_DIRS} ${GDAL_LIBRARYDIR} ${LIB_PATH})
 
 # Build support libraries ################################################################################
 
@@ -116,14 +113,14 @@ if (${BUILD_APPS})
 		src/pc/filter.cpp ${PC_COMPUTERS})
 	target_link_libraries (geopc geoutil georaster geoann ${LIBLAS_LIBRARY} ${CGAL_LIBRARY})
 
-	add_library (geoann SHARED src/geo.cpp ann/src/ANN.cpp ann/src/brute.cpp 
-		ann/src/kd_tree.cpp ann/src/kd_util.cpp 
-		ann/src/kd_split.cpp ann/src/kd_dump.cpp ann/src/kd_search.cpp ann/src/kd_pr_search.cpp 
-		ann/src/kd_fix_rad_search.cpp ann/src/bd_tree.cpp ann/src/bd_search.cpp ann/src/bd_pr_search.cpp 
-		ann/src/bd_fix_rad_search.cpp ann/src/perf.cpp)
-	target_link_libraries (geoann geoutil)
-
 endif()
+
+add_library (geoann SHARED src/geo.cpp ann/src/ANN.cpp ann/src/brute.cpp 
+	ann/src/kd_tree.cpp ann/src/kd_util.cpp 
+	ann/src/kd_split.cpp ann/src/kd_dump.cpp ann/src/kd_search.cpp ann/src/kd_pr_search.cpp 
+	ann/src/kd_fix_rad_search.cpp ann/src/bd_tree.cpp ann/src/bd_search.cpp ann/src/bd_pr_search.cpp 
+	ann/src/bd_fix_rad_search.cpp ann/src/perf.cpp)
+target_link_libraries (geoann geoutil)
 
 # Applications ##################################################################################################
 

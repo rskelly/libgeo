@@ -69,8 +69,8 @@ namespace geo {
 
 using namespace geo::db::util;
 
-DB::DB(const std::string &file, const std::string &layer, const std::string &driver,
-		const std::unordered_map<std::string, FieldType> &fields,
+DB::DB(const std::string& file, const std::string& layer, const std::string& driver,
+		const std::unordered_map<std::string, FieldType>& fields,
 		GeomType type, int srid, bool replace) :
     m_type(type),
     m_srid(srid),
@@ -82,8 +82,7 @@ DB::DB(const std::string &file, const std::string &layer, const std::string &dri
 	m_layer(nullptr),
 	m_fdef(nullptr) {
 
-	// If the driver was not given, try to discover it from an existing file,
-	// otherwise fail.
+	// If the driver was not given, try to discover it from an existing file, otherwise fail.
 	if (m_driver.empty()) {
 		GDALDataset* ds = static_cast<GDALDataset*>(GDALOpenEx(m_file.c_str(), GDAL_OF_VECTOR | GDAL_OF_READONLY, NULL, NULL, NULL));
 		if (!ds)
@@ -122,20 +121,15 @@ DB::DB(const std::string &file, const std::string &layer, const std::string &dri
         g_runerr("Failed to create data set for " << m_file);
 
 	char **options = nullptr;
-	OGRSpatialReference *sr = NULL;
-	if(m_srid) {
-		sr = new OGRSpatialReference();
-		sr->importFromEPSG(m_srid);
-	}
-	m_layer = m_ds->CreateLayer(m_layerName.c_str(), sr, geomType(m_type), options);
-	// TODO: This causes a crash in Windows.
-	//if(sr)
-	//	sr->Release();
+	OGRSpatialReference sr;
+	if(m_srid)
+		sr.importFromEPSG(m_srid);
+	m_layer = m_ds->CreateLayer(m_layerName.c_str(), srid > 0 ? &sr : nullptr, geomType(m_type), options);
 
 	if(!m_layer)
 		g_runerr("Failed to create layer, " << m_layerName << ".");
 
-	for(const auto &it : m_fieldTypes) {
+	for(const auto& it : m_fieldTypes) {
 		OGRFieldDefn def(it.first.c_str(), fieldType(it.second));
 		m_layer->CreateField(&def);
 	}
@@ -145,7 +139,7 @@ DB::DB(const std::string &file, const std::string &layer, const std::string &dri
     m_geomName = std::string(gdef->GetNameRef());
 }
 
-DB::DB(const std::string &file, const std::string &layer) :
+DB::DB(const std::string& file, const std::string& layer) :
     m_type(GeomType::GTUnknown),
     m_srid(0),
     m_file(file),
@@ -184,14 +178,27 @@ DB::DB(const std::string &file, const std::string &layer) :
 	}
 }
 
+const std::string& DB::geomColumnName() const {
+	return m_geomName;
+}
+
 void DB::flush() {
 	if(OGRERR_NONE != m_layer->SyncToDisk())
 		g_warn("Failed to sync to disk.");
 }
 
+void DB::close(bool remove) {
+	if(m_ds) {
+		flush();
+		GDALClose(m_ds);
+		m_ds = nullptr;
+		if(remove)
+			Util::rm(m_file);
+	}
+}
+
 DB::~DB() {
-	flush();
-	GDALClose(m_ds);
+	close();
 }
 
 std::map<std::string, std::set<std::string> > DB::extensions() {
@@ -207,7 +214,7 @@ std::map<std::string, std::set<std::string> > DB::extensions() {
 				if(ext != NULL ) {
 					std::list<std::string> lst;
 					Util::splitString(std::back_inserter(lst), std::string(ext));
-					for(const std::string &item : lst)
+					for(const std::string& item : lst)
 						extensions[desc].insert("." + Util::lower(item));
 				}
 			}
@@ -217,6 +224,11 @@ std::map<std::string, std::set<std::string> > DB::extensions() {
 }
 
 std::map<std::string, std::string> DB::drivers() {
+	std::vector<std::string> filter;
+	return drivers(filter);
+}
+
+std::map<std::string, std::string> DB::drivers(const std::vector<std::string>& filter) {
 	GDALAllRegister();
 	std::map<std::string, std::string> drivers;
 	GDALDriverManager *mgr = GetGDALDriverManager();
@@ -225,18 +237,30 @@ std::map<std::string, std::string> DB::drivers() {
 		if(!isRast(drv)) {
 			const char* name = drv->GetMetadataItem(GDAL_DMD_LONGNAME);
 			const char* desc = drv->GetDescription();
-			if(name != NULL && desc != NULL)
-				drivers[desc] = name;
+			if(name != NULL && desc != NULL) {
+				bool found = true;
+				if(!filter.empty()) {
+					found = false;
+					for(const std::string& f : filter) {
+						if(f == desc) {
+							found = true;
+							break;
+						}
+					}
+				}
+				if(found)
+					drivers[desc] = name;
+			}
 		}
 	}
 	return drivers;
 }
 
-std::string DB::getDriverForFilename(const std::string &filename) {
+std::string DB::getDriverForFilename(const std::string& filename) {
 	std::string ext = Util::extension(filename);
 	std::map<std::string, std::set<std::string> > drivers = extensions();
 	std::string result;
-	for(const auto &it : drivers) {
+	for(const auto& it : drivers) {
 		if(it.second.find(ext) != it.second.end())
 			result = it.first;
 	}
@@ -249,6 +273,42 @@ void DB::clear() {
 
 void DB::setCacheSize(size_t size) {
 	g_runerr("Not implemented.");
+}
+
+void DB::convert(const std::string& filename, const std::string& driver) {
+
+	// If replace and file exists, delete the existing file.
+    if(Util::exists(filename))
+        Util::rm(filename);
+
+    GDALAllRegister();
+
+    GDALDriver* drv = GetGDALDriverManager()->GetDriverByName(driver.c_str());
+    if(!drv)
+        g_runerr("Driver not found for " << filename << " (" << driver << ")");
+
+	// If the file is sqlite, use the spatialite driver.
+	char **dopts = NULL;
+	if(driver == "SQLite")
+		dopts = CSLSetNameValue(dopts, "SPATIALITE", "YES");
+
+	GDALDataset* ds = drv->Create(filename.c_str(), 0, 0, 0, GDT_Unknown, dopts);
+
+	CPLFree(dopts);
+
+	if(!ds)
+        g_runerr("Failed to create data set for " << filename);
+
+	OGRLayer* layer = m_ds->GetLayerByName(m_layerName.c_str());
+	OGRLayer* newLayer = ds->CopyLayer(layer, m_layerName.c_str(), nullptr);
+	if(!newLayer) {
+		GDALClose(ds);
+		g_runerr("Failed to copy layer to new database.");
+	}
+
+	ds->FlushCache();
+	GDALClose(ds);
+
 }
 
 void DB::dropGeomIndex(const std::string& table, const std::string& column) {
@@ -277,7 +337,7 @@ uint64_t DB::getGeomCount() const {
 	return static_cast<uint64_t>(m_layer->GetFeatureCount(1));
 }
 
-void DB::execute(std::string &sql) {
+void DB::execute(std::string& sql) {
 	g_runerr("Not implemented.");
 }
 
