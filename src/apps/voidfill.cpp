@@ -81,7 +81,7 @@ int main(int argc, char** argv) {
 	}
 
 	Raster test(args[0]);
-	test.voidFillIDW(args[1], radius, count, exp, band, mask, maskBand);
+	test.voidFillIDW(args[1], band, mask, maskBand, radius, count, exp);
 
 	return 0;
 }

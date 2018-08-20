@@ -732,7 +732,7 @@ bool PCTreeIterator::next(geo::ds::KDTree<geo::pc::Point>& tree) {
 				double x = pt.x();
 				double y = pt.y();
 				if(x >= tileBounds[0] && x <= tileBounds[2] && y >= tileBounds[1] && y <= tileBounds[2])
-					tree.add(pt);
+					tree.add(new geo::pc::Point(pt));
 			}
 		}
 	}

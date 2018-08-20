@@ -11,7 +11,7 @@
 
 using namespace geo::raster;
 
-double interp(Raster& grid, double x, double y) {
+double interp(Raster& grid, double x, double y, int band) {
 
 	const GridProps& props = grid.props();
 	int col = props.toCol(x);
@@ -49,10 +49,10 @@ double interp(Raster& grid, double x, double y) {
 	double cy0 = props.toCentroidY(row0);
 	double cy1 = props.toCentroidY(row1);
 
-	double z0 = grid.getFloat(col0, row0); // TL
-	double z1 = grid.getFloat(col1, row0); // TR
-	double z2 = grid.getFloat(col0, row1); // BL
-	double z3 = grid.getFloat(col1, row1); // BR
+	double z0 = grid.getFloat(col0, row0, band); // TL
+	double z1 = grid.getFloat(col1, row0, band); // TR
+	double z2 = grid.getFloat(col0, row1, band); // BL
+	double z3 = grid.getFloat(col1, row1, band); // BR
 
 	double iz0 = z0 + (z1 - z0) * ((x - cx0) / (cx1 - cx0)); // Top horizontal interp.
 	double iz1 = z2 + (z3 - z2) * ((x - cx0) / (cx1 - cx0)); // Bottom horizontal interp.
@@ -82,6 +82,7 @@ int main(int argc, char** argv) {
 	std::string gridfile(argv[3]);
 	int ssrid = atoi(argv[4]);
 	int gsrid = atoi(argv[5]);
+	int band = 1; // TODO: Set band.
 
 	Raster input(inputfile);
 	const GridProps& iprops = input.props();
@@ -109,7 +110,7 @@ int main(int argc, char** argv) {
 	for(int row = 0; row < rows; ++row) {
 		for(int col = 0; col < cols; ++col) {
 
-			if((iz = input.getFloat(col, row)) == nodata)
+			if((iz = input.getFloat(col, row, band)) == nodata)
 				continue;
 
 			double x = iprops.toCentroidX(col);
@@ -117,9 +118,9 @@ int main(int argc, char** argv) {
 			if(pj_transform(sp, gp, 1, 1, &x, &y, NULL))
 				g_runerr("Failed to transform point.");
 
-			double z = interp(grid, toDeg(x), toDeg(y));
+			double z = interp(grid, toDeg(x), toDeg(y), band);
 
-			output.setFloat(col, row, std::isnan(z) ? nodata : iz - z);
+			output.setFloat(col, row, std::isnan(z) ? nodata : iz - z, band);
 
 		}
 	}

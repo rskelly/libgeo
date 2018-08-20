@@ -70,13 +70,17 @@ public:
 };
 
 
-
+/**
+ * Collect the pixel differences between the anchor rasters and the others.
+ * Populate the pts vector.
+ */
 void getDiffs(std::vector<Pt>& pts, 
 		const std::vector<std::string>& anchors, const std::vector<int>& abands,
 		const std::string& target, int tband, double difflimit) {
 
 	std::cerr << "get diffs\n";
 
+	// Create an in memory target raster.
 	Raster traster(target, false);
 	GridProps tprops(traster.props());
 	tprops.setBands(1);
@@ -88,6 +92,7 @@ void getDiffs(std::vector<Pt>& pts,
 
 	for(size_t i = 0; i < anchors.size(); ++i) {
 		
+		// Loop over the anchor rasters.
 		std::cerr << "anchor: " << anchors[i] << "\n";
 		Raster araster(anchors[i], false);
 		int aband = abands[i];
@@ -99,41 +104,30 @@ void getDiffs(std::vector<Pt>& pts,
 		araster.writeTo(arast, aprops.cols(), aprops.rows(), 0, 0, 0, 0, aband, 1);
 
 		for(int row = 0; row < aprops.rows(); ++row) {
-			//std::cerr << "row " << row << "\n";
 			for(int col = 0; col < aprops.cols(); ++col) {
+
 				double x = aprops.toCentroidX(col);
 				double y = aprops.toCentroidY(row);
+
 				if(tprops.hasCell(x, y) && aprops.hasCell(x, y)) {
+
 					int tc = tprops.toCol(x);
 					int tr = tprops.toRow(y);
-					double a = arast.getFloat(col, row);
-					if(a == aprops.nodata()) {// || ar.getInt(col, row, 1) < 100)
-						size_t idx = ((size_t) row<< 32) | col;
-						if(pxset.find(idx) == pxset.end()) {
-							pts.emplace_back(x, y, 0);
-							pxset.insert(idx);
-						}
+
+					// If the pixel is nodata, skip.
+					double a = arast.getFloat(col, row, 1);
+					if(a == aprops.nodata())
 						continue;
-					}
-					double b = trast.getFloat(tc, tr);
-					if(b == tprops.nodata()) {// || trast.getInt(tc, tr, 1) < 100)
-						size_t idx = ((size_t) row<< 32) | col;
-						if(pxset.find(idx) == pxset.end()) {
-							pts.emplace_back(x, y, 0);
-							pxset.insert(idx);
-						}
+
+					// If the pixel is nodata, skip.
+					double b = trast.getFloat(tc, tr, 1);
+					if(b == tprops.nodata())
 						continue;
-					}
+
+					// Get the difference and save the pixel.
 					double diff = a - b;
-					//if(std::abs(diff) > difflimit)
-					//	continue;
 					pts.emplace_back(x, y, diff);
-				} else {
-					size_t idx = ((size_t) row<< 32) | col;
-					if(pxset.find(idx) == pxset.end()) {
-						pts.emplace_back(x, y, 0);
-						pxset.insert(idx);
-					}
+
 				}
 			}
 		}
@@ -200,10 +194,88 @@ void doInterp(int tileSize, std::list<std::pair<int, int> >* tiles, const std::v
 			// Write all adjustments to the raster in one go.
 			std::lock_guard<std::mutex> lk(*rmtx);
 			for(auto& p : out)
-				adjmem->setFloat(adjprops->toCol(std::get<0>(p)), adjprops->toRow(std::get<1>(p)), std::get<2>(p));
+				adjmem->setFloat(adjprops->toCol(std::get<0>(p)), adjprops->toRow(std::get<1>(p)), std::get<2>(p), 1);
 			out.clear();
 		}
 	}
+
+}
+
+/**
+ * 1) For each point, generate a kernel with parameters given by the difference, and desired SD.
+ * 2) Normalize kernel to sum to 1.
+ * 3) Apply to all pixels within n SD of the centre pixel.
+ */
+void convolve(const std::vector<Pt>& pts,
+		const std::vector<std::string>& anchors, const std::vector<int>& abands,
+		const std::string& target, int tband, const std::string& adjustment) {
+
+	// Get the props and bounds for the target.
+	Raster traster(target, false);
+	GridProps tprops(traster.props());
+
+	// Create props and bounds for the adjustment raster.
+	GridProps adjprops(tprops);
+	Bounds adjbounds = adjprops.bounds();
+
+	// Build the list of props for anchors and extent
+	// the adjustment bounds.
+	std::vector<GridProps> apropss;
+	for(const std::string& a : anchors) {
+		Raster arast(a, false);
+		const GridProps& props = arast.props();
+		adjbounds.extend(props.bounds());
+		apropss.push_back(props);
+	}
+
+	// Create the adjustment raster.
+	adjprops.setBounds(adjbounds);
+	adjprops.setWritable(true);
+	adjprops.setBands(1);
+	MemRaster adjmem(adjprops, false);
+	adjmem.fillFloat(0, 1);
+
+	double sd = 100; 								// The radial distance from a point to 1 standard deviation. The kernel encompasses 3sd.
+	double res = std::abs(adjprops.resolutionX()); 	// Raster resolution.
+	double rad = sd * 8;							// The kernel radius -- 4sd x 2.
+	int ksize = (int) std::ceil(rad / res);				// The kernel size is double the radius.
+	if(ksize % 2 == 0) ++ksize;						// Kernel size must be odd-valued.
+	std::vector<double> kernel(ksize * ksize);		// Initialize the kernel.
+
+	// Populate the kernel.
+	double sum = 0;
+	for(int r = -ksize / 2; r < ksize / 2 + 1; ++r) {
+		for(int c = -ksize / 2; c < ksize / 2 + 1; ++c) {
+			double d2 = std::pow(c * res, 2.0) + std::pow(r * res, 2.0);
+			double v = 0;
+			if(d2 <= rad)
+				v = std::exp(-d2 / (2 * sd * sd));
+			kernel[(r + ksize / 2) * ksize + (c + ksize / 2)] = v;
+			sum += v;
+		}
+	}
+
+	// Normalize the kernel so it sums to 1.
+	for(size_t i = 0; i < kernel.size(); ++i)
+		kernel[i] /= sum;
+
+	// Iterate over every point in the list.
+	int pt0 = 0;
+	for(const Pt& pt : pts) {
+		std::cerr << (++pt0) << " of " << pts.size() << "\n";
+
+		// Run the kernel over the data.
+		for(int rr = 0, r = std::max(0, adjprops.toRow(pt.y) - ksize / 2); r < std::min(adjprops.rows(), adjprops.toRow(pt.y) + ksize / 2 + 1); ++rr, ++r) {
+			for(int cc = 0, c = std::max(0, adjprops.toCol(pt.x) - ksize / 2); c < std::min(adjprops.cols(), adjprops.toCol(pt.x) + ksize / 2 + 1); ++cc, ++c) {
+				double v = adjmem.getFloat(c, r, 1);
+				adjmem.setFloat(c, r, v + pt.z * kernel[rr * ksize + cc], 1);
+			}
+		}
+	}
+
+	// Write the adjustment raster to the output.
+	Raster adjraster(adjustment, adjprops);
+	adjmem.writeTo(adjraster);
 
 }
 
@@ -320,32 +392,21 @@ int main(int argc, char** argv) {
 		}
 	}
 
-	bool test = false;
-	if(!test) {
+	std::vector<Pt> pts;
 
-		std::vector<Pt> pts;
-		{
-			getDiffs(pts, anchors, abands, target, tband, difflimit);
-			//buffer(pts, 500, 100);
-			std::cerr << pts.size() << " points\n";
-			std::ofstream of(ptsFile);
-			of << std::setprecision(12);
-			of << "x,y,diff\n";
-			for(const Pt& pt : pts) {
-				if(pt.z != 0)
-					of << pt.x << "," << pt.y << "," << pt.z << "\n";
-			}
-		}
-
-		interpolate(pts, anchors, abands, target, tband, adjustment);
-
-	} else {
-
-		Loess<Pt> loess({Pt(453090.43146641052, 6496285.181080793, 0), Pt(453286.44630423211, 6496305.0442587472, 0), Pt(453090.43146641052, 6496265.3179028388, 0)}, 100);
-		double z = loess.estimate(Pt(453088, 6496285, 0));
-		std::cerr << "z: " << z << "\n";
-
+	{
+		getDiffs(pts, anchors, abands, target, tband, difflimit);
+		//buffer(pts, 500, 100);
+		std::cerr << pts.size() << " points\n";
+		std::ofstream of(ptsFile);
+		of << std::setprecision(12);
+		of << "x,y,diff\n";
+		for(const Pt& pt : pts)
+			of << pt.x << "," << pt.y << "," << pt.z << "\n";
 	}
+
+	convolve(pts, anchors, abands, target, tband, adjustment);
+
 
  	return 0;
 }

@@ -70,6 +70,7 @@ else()
 	set (BOOST_INCLUDEDIR "/usr/include")
 	set (BOOST_LIBRARYDIR "/usr/lib/x86_64-linux-gnu")
 	set (JSON_INCLUDEDIR "/usr/include/jsoncpp")
+	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fopenmp")
 endif()
 
 set (THREADS_PREFER_PTHREAD_FLAG ON)

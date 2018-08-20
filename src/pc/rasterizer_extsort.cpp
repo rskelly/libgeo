@@ -320,18 +320,18 @@ void Rasterizer::finalize(int row, double radius,
 		if(count)
 			count = m_filter->filter(points.begin(), points.end(), std::back_inserter(m_filtered));
 		
-		m_rasters[band++].setFloat(col, 0, count);
+		m_rasters[band++].setFloat(col, 0, count, 1);
 		
 		if(count) {
 			for(size_t i = 0; i < m_computers.size(); ++i) {
 				m_computers[i]->compute(x, y, points, m_filtered, radius, m_out);
 				for(double val : m_out)
-					m_rasters[band++].setFloat(col, 0, std::isnan(val) ? NODATA : val);
+					m_rasters[band++].setFloat(col, 0, std::isnan(val) ? NODATA : val, 1);
 			}
 		} else {
 			for(size_t i = 0; i < m_computers.size(); ++i) {
 				for(int j = 0; j < m_computers[i]->bandCount(); ++j)
-					m_rasters[band++].setFloat(col, 0, NODATA);
+					m_rasters[band++].setFloat(col, 0, NODATA, 1);
 			}
 		}
 		m_filtered.clear();
