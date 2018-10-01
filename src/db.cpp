@@ -69,8 +69,8 @@ namespace geo {
 
 using namespace geo::db::util;
 
-DB::DB(const std::string &file, const std::string &layer, const std::string &driver,
-		const std::unordered_map<std::string, FieldType> &fields,
+DB::DB(const std::string& file, const std::string& layer, const std::string& driver,
+		const std::unordered_map<std::string, FieldType>& fields,
 		GeomType type, int srid, bool replace) :
     m_type(type),
     m_srid(srid),
@@ -134,7 +134,7 @@ DB::DB(const std::string &file, const std::string &layer, const std::string &dri
 	if(!m_layer)
 		g_runerr("Failed to create layer, " << m_layerName << ".");
 
-	for(const auto &it : m_fieldTypes) {
+	for(const auto& it : m_fieldTypes) {
 		OGRFieldDefn def(it.first.c_str(), fieldType(it.second));
 		m_layer->CreateField(&def);
 	}
@@ -144,7 +144,7 @@ DB::DB(const std::string &file, const std::string &layer, const std::string &dri
     m_geomName = std::string(gdef->GetNameRef());
 }
 
-DB::DB(const std::string &file, const std::string &layer) :
+DB::DB(const std::string& file, const std::string& layer) :
     m_type(GeomType::GTUnknown),
     m_srid(0),
     m_file(file),
@@ -215,7 +215,7 @@ std::map<std::string, std::set<std::string> > DB::extensions() {
 				if(ext != NULL ) {
 					std::list<std::string> lst;
 					Util::splitString(std::back_inserter(lst), std::string(ext));
-					for(const std::string &item : lst)
+					for(const std::string& item : lst)
 						extensions[desc].insert("." + Util::lower(item));
 				}
 			}
@@ -257,11 +257,11 @@ std::map<std::string, std::string> DB::drivers(const std::vector<std::string>& f
 	return drivers;
 }
 
-std::string DB::getDriverForFilename(const std::string &filename) {
+std::string DB::getDriverForFilename(const std::string& filename) {
 	std::string ext = Util::extension(filename);
 	std::map<std::string, std::set<std::string> > drivers = extensions();
 	std::string result;
-	for(const auto &it : drivers) {
+	for(const auto& it : drivers) {
 		if(it.second.find(ext) != it.second.end())
 			result = it.first;
 	}
@@ -338,7 +338,7 @@ uint64_t DB::getGeomCount() const {
 	return static_cast<uint64_t>(m_layer->GetFeatureCount(1));
 }
 
-void DB::execute(std::string &sql) {
+void DB::execute(std::string& sql) {
 	g_runerr("Not implemented.");
 }
 
