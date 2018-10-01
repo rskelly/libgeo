@@ -56,9 +56,9 @@ namespace geo {
             std::string m_driver;										///<! The OGR driver to use. Availability may differ from system to system.
             std::string m_geomName;										///<! The name of the geometry field.
             std::unordered_map<std::string, FieldType> m_fieldTypes;	///<! A map containing field names and their types.
-            GDALDataset *m_ds;											///<! Pointer to dataset.
-            OGRLayer *m_layer;											///<! Pointer to layer.
-            OGRFeatureDefn *m_fdef;										///<! Pointer to an OGR vector feature.
+            GDALDataset* m_ds;											///<! Pointer to dataset.
+            OGRLayer* m_layer;											///<! Pointer to layer.
+            OGRFeatureDefn* m_fdef;										///<! Pointer to an OGR vector feature.
 
         public:
 
@@ -120,6 +120,13 @@ namespace geo {
             virtual void clear();
 
             /**
+             * Return the name of the geometry column.
+             *
+             * @return The name of the geometry column.
+             */
+            const std::string& geomColumnName() const;
+
+            /**
              * Re-save the database to the new filename using the given driver.
              *
              * @param filename 	The filename for the new database. Will be overwritten if it exists.
@@ -135,7 +142,7 @@ namespace geo {
 
             uint64_t getGeomCount() const;
 
-            void execute(std::string &sql);
+            void execute(std::string& sql);
 
             void begin();
 

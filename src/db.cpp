@@ -121,15 +121,10 @@ DB::DB(const std::string& file, const std::string& layer, const std::string& dri
         g_runerr("Failed to create data set for " << m_file);
 
 	char **options = nullptr;
-	OGRSpatialReference *sr = NULL;
-	if(m_srid) {
-		sr = new OGRSpatialReference();
-		sr->importFromEPSG(m_srid);
-	}
-	m_layer = m_ds->CreateLayer(m_layerName.c_str(), sr, geomType(m_type), options);
-	// TODO: This causes a crash in Windows.
-	//if(sr)
-	//	sr->Release();
+	OGRSpatialReference sr;
+	if(m_srid)
+		sr.importFromEPSG(m_srid);
+	m_layer = m_ds->CreateLayer(m_layerName.c_str(), srid > 0 ? &sr : nullptr, geomType(m_type), options);
 
 	if(!m_layer)
 		g_runerr("Failed to create layer, " << m_layerName << ".");
@@ -181,6 +176,10 @@ DB::DB(const std::string& file, const std::string& layer) :
 		OGRFieldDefn *def = m_fdef->GetFieldDefn(i);
 		m_fieldTypes[std::string(def->GetNameRef())] = fieldType(def->GetType());
 	}
+}
+
+const std::string& DB::geomColumnName() const {
+	return m_geomName;
 }
 
 void DB::flush() {
