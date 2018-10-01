@@ -59,9 +59,6 @@
 #ifndef ANN_H
 #define ANN_H
 
-#pragma message("win32?")
-#pragma message(WIN32)
-
 #ifdef WIN32
   //----------------------------------------------------------------------
   // For Microsoft Visual C++, externally accessible symbols must be
