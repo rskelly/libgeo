@@ -31,19 +31,17 @@ elseif(${WIN32})
 	set (BOOST_ROOT "${DEV_DIR}\\boost_1_67_0")
 	set (GIT_DIR "${DEV_DIR}\\git")
 	set (GIS_DIR "${DEV_DIR}\\gisinternals")
-	set (GEOS_LIBRARYDIR "${DEV_DIR}\\geos\\lib")
+	set (GEOS_LIBRARYDIR "${DEV_DIR}\\geos\\lib;${DEV_DIR}\\geos\\bin")
 	set (GEOS_INCLUDEDIR "${DEV_DIR}\\geos\\include")
 	set (EIGEN_INCLUDEDIR "${DEV_DIR}\\eigen3")
 	set (GDAL_INCLUDE_DIR "${GIS_DIR}\\include")
-	set (GDAL_LIBRARYDIR "${GIS_DIR}\\lib")
-	set (libLAS_INCLUDE_DIR "${GIS_DIR}\\include")
-	set (libLAS_LIBRARY_DIRS "${GIS_DIR}\\lib")
+	set (GDAL_LIBRARYDIR "${GIS_DIR}\\lib;${GIS_DIR}\\bin")
+	set (GIS_INCLUDE_DIR "${GIS_DIR}\\include")
+	set (GIS_LIBRARYDIR "${GIS_DIR}\\lib;${GIS_DIR}\\bin")
 	set (CMAKE_PREFIX_PATH "${CMAKE_PREFIX_PATH};${GIS_DIR}\\bin;${DEV_DIR}\\Qt\\5.11.0\\msvc2017_64\\lib\\cmake")
 	set (SQLITE_LIBRARY sqlite3_i)
 	set (SPATIALITE_LIBRARY spatialite_i)
 	set (GDAL_LIBRARY gdal_i)
-	include_directories(BEFORE SYSTEM .\\build\\ui_util_autogen\\include ${EIGEN_INCLUDEDIR} ${GEOS_INCLUDEDIR} ${GDAL_INCLUDE_DIR})
-	link_directories(${LIBGEO_LIBRARYDIR} ${GEOS_LIBRARYDIR} ${GEOS_LIBRARYDIR} ${GDAL_LIBRARYDIR})
 else()
 	set (CMAKE_CXX_COMPILER_LAUNCHER ccache)
 	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-pragmas")
@@ -63,7 +61,7 @@ find_package (GDAL 2.2 REQUIRED)
 
 find_library (LIBLAS_LIBRARY las)
 find_library (JSONCPP_LIBRARY jsoncpp)
-find_library (CRYPTO_LIBRARY crypto libeay32 PATHS ${GDAL_LIBRARYDIR})
+find_library (CRYPTO_LIBRARY crypto libeay32 PATHS ${GIS_LIBRARYDIR})
 find_library (GEOS_LIBRARY geos PATHS ${GEOS_LIBRARYDIR})
 find_library (PROJ_LIBRARY proj)
 
@@ -72,11 +70,11 @@ project (libgeo)
 # Configure directories###################################################################################
 
 include_directories(BEFORE SYSTEM ./include ./ann/include /opt/include
-	${Boost_INCLUDE_DIRS} ${GEOS_INCLUDEDIR} ${OSGEO_INCLUDEDIR} ${GDAL_INCLUDE_DIR} ${PCL_INCLUDE_DIRS} 
-	${CRYPTO_INCLUDEDIR} ${EIGEN_INCLUDEDIR} ${JSON_INCLUDEDIR}
+	${GEOS_INCLUDEDIR} ${GIS_INCLUDEDIR} ${EIGEN_INCLUDEDIR} ${JSON_INCLUDEDIR}
 	${GDAL_INCLUDE_DIR} ${Boost_INCLUDE_DIRS})
 	 
-link_directories(./build/lib ./build/bin /opt/lib ${Boost_LIBRARY_DIRS} ${GDAL_LIBRARYDIR} ${Boost_LIBRARY_DIRS})
+link_directories(./build/lib ./build/bin /opt/lib ${GDAL_LIBRARYDIR} 
+	${GIS_LIBRARYDIR} ${Boost_LIBRARY_DIRS})
 
 # Build support libraries ################################################################################
 
