@@ -16,7 +16,11 @@ set (CMAKE_INSTALL_RPATH "/opt/lib;/usr/local/lib")
 set (CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
 set (Boost_DEBUG OFF)
-set (Boost_USE_STATIC_LIBS ON)
+if(WIN32)
+	set (Boost_USE_STATIC_LIBS ON)
+else()
+	set (Boost_USE_STATIC_LIBS OFF)
+endif()
 set (Boost_USE_STATIC_RUNTIME OFF)
 set (Boost_USE_MULTITHREADED ON)
 set (Boost_NO_SYSTEM_PATHS ON)
@@ -48,8 +52,8 @@ else()
 	set (GEOS_INCLUDEDIR /opt/include)
 	set (GEOS_LIBRARYDIR /opt/lib)
 	set (EIGEN_INCLUDEDIR "/usr/include/eigen3")
-	#set (BOOST_INCLUDEDIR "/usr/include")
-	#set (BOOST_LIBRARYDIR "/usr/lib/x86_64-linux-gnu")
+	set (BOOST_INCLUDEDIR "/usr/include")
+	set (BOOST_LIBRARYDIR "/usr/lib/x86_64-linux-gnu")
 	set (JSON_INCLUDEDIR "/usr/include/jsoncpp")
 endif()
 
@@ -80,20 +84,20 @@ link_directories(./build/lib ./build/bin /opt/lib ${GDAL_LIBRARYDIR}
 
 set (geoutilsrc src/geo.cpp src/util.cpp src/md5.cpp)
 add_library (geoutilobj OBJECT ${geoutilsrc})
-set_property (TARGET geoutilobj PROPERTY POSITION_INDEPENDENT_CODE 1)
+set_target_properties (geoutilobj PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_library(geoutil SHARED $<TARGET_OBJECTS:geoutilobj>)
 target_link_libraries (geoutil ${Boost_LIBRARIES} ${GDAL_LIBRARY} ${CRYPTO_LIBRARY})
 # is rt needed here doesn't work on windows.
 
 set (geodbsrc src/geo.cpp src/db.cpp)
 add_library (geodbobj OBJECT ${geodbsrc})
-set_property (TARGET geodbobj PROPERTY POSITION_INDEPENDENT_CODE 1)
+set_target_properties (geodbobj PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_library (geodb SHARED $<TARGET_OBJECTS:geodbobj>)
 target_link_libraries (geodb geoutil ${GDAL_LIBRARY})
 
 set (georastersrc src/geo.cpp src/raster.cpp src/rast/polygonize_gdal.cpp)
 add_library (georasterobj OBJECT ${georastersrc})
-set_property (TARGET georasterobj PROPERTY POSITION_INDEPENDENT_CODE 1)
+set_target_properties (georasterobj PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_library (georaster SHARED $<TARGET_OBJECTS:georasterobj>)
 target_link_libraries (georaster geoutil geodb Threads::Threads ${GEOS_LIBRARY} ${GDAL_LIBRARY})
 
@@ -112,7 +116,7 @@ set (geoannsrc src/geo.cpp ann/src/ANN.cpp ann/src/brute.cpp
 	ann/src/kd_fix_rad_search.cpp ann/src/bd_tree.cpp ann/src/bd_search.cpp ann/src/bd_pr_search.cpp 
 	ann/src/bd_fix_rad_search.cpp ann/src/perf.cpp)
 add_library (geoannobj OBJECT ${geoannsrc})
-set_property (TARGET geoannobj PROPERTY POSITION_INDEPENDENT_CODE 1)
+set_target_properties (geoannobj PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_compile_definitions (geoannobj PRIVATE DLL_EXPORTS=1)
 add_library (geoann SHARED $<TARGET_OBJECTS:geoannobj>)
 target_link_libraries (geoann geoutil)
@@ -167,6 +171,6 @@ if(${BUILD_APPS})
 
 else()
 
-	install(TARGETS georaster geoutil geodb RUNTIME DESTINATION bin) 
+	install(TARGETS georaster geoutil geodb RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
 
 endif()
