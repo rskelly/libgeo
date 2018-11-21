@@ -15,6 +15,7 @@
 #include <Eigen/Core>
 
 #define MAX_INT std::numeric_limits<int>::max()
+#define MID(a, b) (a + (b - a) / 2.0)
 
 namespace geo {
 namespace interp {
@@ -41,48 +42,54 @@ private:
 
 	QNode* getNode(int idx) {
 		switch(idx) {
-		case 0: return m_a ? m_a : (m_a = new QNode(m_binSize, m_pts, m_minx, m_miny, m_minx + (m_maxx - m_minx) / 2.0, m_miny + (m_maxy - m_miny) / 2.0));
-		case 1: return m_b ? m_b : (m_b = new QNode(m_binSize, m_pts, m_minx + (m_maxx - m_minx) / 2.0, m_miny, m_maxx, m_miny + (m_maxy - m_miny) / 2.0));
-		case 2: return m_d ? m_d : (m_d = new QNode(m_binSize, m_pts, m_minx, m_miny + (m_maxy - m_miny) / 2.0, m_minx + (m_maxx - m_minx) / 2.0, m_maxy));
-		case 3: return m_c ? m_c : (m_c = new QNode(m_binSize, m_pts, m_minx + (m_maxx - m_minx) / 2.0, m_miny + (m_maxy - m_miny) / 2.0, m_maxx, m_maxy));
+		case 0:
+			if(m_a) {
+				return m_a;
+			} else {
+				return (m_a = new QNode(m_binSize, m_pts, m_minx, m_miny, MID(m_minx, m_maxx), MID(m_miny, m_maxy)));
+			}
+		case 1:
+			if(m_b) {
+				return m_b;
+			} else {
+				return (m_b = new QNode(m_binSize, m_pts, MID(m_minx, m_maxx), m_miny, m_maxx, MID(m_miny, m_maxy)));
+			}
+		case 2:
+			if(m_d) {
+				return m_d;
+			} else {
+				return (m_d = new QNode(m_binSize, m_pts, m_minx, MID(m_miny, m_maxy), MID(m_minx, m_maxx), m_maxy));
+			}
+		case 3:
+			if(m_c) {
+				return m_c;
+			} else {
+				return (m_c = new QNode(m_binSize, m_pts, MID(m_minx, m_maxx), MID(m_miny, m_maxy), m_maxx, m_maxy));
+			}
 		default:
 			throw std::runtime_error("Unknown node index.");
 		}
 	}
 
 	void split() {
-		double midx = m_minx + (m_maxx - m_minx) / 2.0;
-		double midy = m_miny + (m_maxy - m_miny) / 2.0;
-		for(size_t idx : m_indices) {
-			const T& pt = m_pts->at(idx);
-			int nidx = (((int) (pt.y >= midy)) << 1) | ((int) (pt.x >= midx));
-			getNode(nidx)->m_indices.push_back(idx);
+		if(m_binSize < m_indices.size()) {
+			double midx = MID(m_minx, m_maxx);
+			double midy = MID(m_miny, m_maxy);
+			for(size_t idx : m_indices) {
+				const T& pt = m_pts->at(idx);
+				int nidx = (((int) (pt.y >= midy)) << 1) | ((int) (pt.x >= midx));
+				QNode* n = getNode(nidx);
+				n->m_indices.push_back(idx);
+				n->split();
+			}
+			m_indices.clear();
+			m_split = true;
 		}
-		m_indices.clear();
-		m_split = true;
-	}
-
-
-public:
-	QNode(int binSize, const std::vector<T>* pts, double minx, double miny, double maxx, double maxy) :
-		m_binSize(binSize), m_split(false), m_pts(pts),
-		m_minx(minx), m_maxx(maxx), m_miny(miny), m_maxy(maxy),
-		m_a(nullptr), m_b(nullptr), m_c(nullptr), m_d(nullptr) {
-	}
-
-	void build() {
-		for(size_t i = 0; i < m_pts->size(); ++i) {
-			const T& pt = m_pts->at(i);
-			if(pt.x >= m_minx && pt.x < m_maxx && pt.y >= m_miny && pt.y < m_maxy)
-				m_indices.push_back(i);
-		}
-		if(m_binSize < m_indices.size())
-			split();
 	}
 
 	template <class Iter>
-	int find(const T& pt, double radius, Iter out) {
-		if((pt.x + radius) < m_minx || (pt.x - radius) > m_maxx || (pt.y + radius) < m_miny || (pt.y - radius) > m_miny)
+	int find(const T& pt, double radius, Iter out, double* box) {
+		if(box[2] < m_minx || box[0] > m_maxx || box[3] < m_miny || box[1] > m_maxy)
 			return 0;
 		int count = 0;
 		if(!m_split) {
@@ -97,15 +104,37 @@ public:
 			}
 		} else {
 			if(m_a)
-				count += m_a->find(pt, radius, out);
+				count += m_a->find(pt, radius, out, box);
 			if(m_b)
-				count += m_b->find(pt, radius, out);
+				count += m_b->find(pt, radius, out, box);
 			if(m_c)
-				count += m_c->find(pt, radius, out);
+				count += m_c->find(pt, radius, out, box);
 			if(m_d)
-				count += m_d->find(pt, radius, out);
+				count += m_d->find(pt, radius, out, box);
 		}
 		return count;
+	}
+
+public:
+	QNode(int binSize, const std::vector<T>* pts, double minx, double miny, double maxx, double maxy) :
+		m_binSize(binSize), m_split(false), m_pts(pts),
+		m_minx(minx), m_maxx(maxx), m_miny(miny), m_maxy(maxy),
+		m_a(nullptr), m_b(nullptr), m_c(nullptr), m_d(nullptr) {
+	}
+
+	void build() {
+		for(size_t i = 0; i < m_pts->size(); ++i) {
+			const T& pt = m_pts->at(i);
+			if(pt.x >= m_minx && pt.x < m_maxx && pt.y >= m_miny && pt.y < m_maxy)
+				m_indices.push_back(i);
+		}
+		split();
+	}
+
+	template <class Iter>
+	int find(const T& pt, double radius, Iter out) {
+		double box[4] {pt.x - radius, pt.y - radius, pt.x + radius, pt.y + radius};
+		return find(pt, radius, out, box);
 	}
 
 	~QNode() {
@@ -125,11 +154,12 @@ private:
 public:
 	QTree() : m_node(nullptr) {}
 
-	QTree(const std::vector<T>& pts, int binSize = 100) : QTree() {
+	QTree(const std::vector<T>& pts, int binSize) : QTree() {
 		build(pts, binSize);
 	}
 
-	void build(const std::vector<T>& pts, int binSize = 100) {
+	void build(const std::vector<T>& pts, int binSize) {
+		// Get the point ranges.
 		double xmin = 99999999, ymin = 99999999;
 		double xmax = -99999999, ymax = -99999999;
 		for(const T& pt : pts) {
@@ -138,6 +168,16 @@ public:
 			if(pt.y < ymin) ymin = pt.y;
 			if(pt.y > ymax) ymax = pt.y;
 		}
+		// Square the box.
+		double xdif, ydif;
+		if((xdif = xmax - xmin) > (ydif = ymax - ymin)) {
+			ymin = MID(ymin, ymax) - xdif / 2.0;
+			ymax = MID(ymin, ymax) + xdif / 2.0;
+		} else {
+			xmin = MID(xmin, xmax) - ydif / 2.0;
+			xmax = MID(xmin, xmax) + ydif / 2.0;
+		}
+		// Build the tree.
 		m_node = new QNode<T>(binSize, &pts, xmin - 0.0001, ymin - 0.0001, xmax + 0.0001, ymax + 0.0001);
 		m_node->build();
 	}
@@ -182,7 +222,7 @@ public:
 	Loess(const std::vector<T>& data, double bandwidth) :
 		m_bandwidth(bandwidth) {
 		m_data = data;
-		m_tree.build(m_data, 100);
+		m_tree.build(m_data, 1000);
 	}
 
 	/**
@@ -194,26 +234,28 @@ public:
 		std::vector<size_t> found;
 		int count = m_tree.find(pt, m_bandwidth, std::back_inserter(found));
 		if(count >= 3) {
+			bool diff = false;
+			int xx;
+			for(size_t i = 1; i < count; ++i) {
+				if(m_data[found[i]].z != 0)
+					xx = 0;
+				if(m_data[found[i - 1]].z != m_data[found[i]].z) {
+					diff = true;
+					break;
+				}
+			}
+			if(!diff)
+				return m_data[found[0]].z;
+
 			Eigen::Matrix<double, 3, Eigen::Dynamic> mtx(3, count);
 
-			bool equal = true;
-			double z = 0;
 			for(size_t i = 0; i < count; ++i) {
 				const T& f = m_data[found[i]];
 				double d = __dist(f, pt);
 				double t = __tricube(d, m_bandwidth);
-				z = f[2];
 				mtx(0, i) = f.x;
 				mtx(1, i) = f.y;
-				mtx(2, i) = t * z;
-				if(i > 0 && z != m_data[found[i - 1]].z)
-					equal = false;
-			}
-
-			// All the elevations are equal, just return the elevation.
-			if(equal) {
-				//std::cerr << "skip\n";
-				return z;
+				mtx(2, i) = f.z; //t * f.z;
 			}
 
 			// Recenter on zero.
@@ -221,18 +263,9 @@ public:
 			mtx.colwise() -= cent;
 			Eigen::JacobiSVD<Eigen::MatrixXd> svd(mtx, Eigen::ComputeThinU | Eigen::ComputeThinV);
 			Eigen::Vector3d norm = svd.matrixU().col(2);
-			z = norm.dot(Eigen::Vector3d(0, 0, cent[2]));
+			double z = norm.dot(Eigen::Vector3d(0, 0, cent[2]));
 			z = cent[2] > 0 ? std::abs(z) : -std::abs(z);
-			/*
-			{
-				std::lock_guard<std::mutex> lk(_mtx);
-				//std::cerr << "solve " << slv << "\n";
-				std::cerr << "cent " << cent << "\n";
-				std::cerr << "mtx " << mtx << "\n";
-				std::cerr << "norm " << norm << "\n";
-				std::cerr << "z " << z << "\n";
-			}
-			*/
+
 			return z;
 		}
 		return 0;
