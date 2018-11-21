@@ -27,6 +27,7 @@
 
 #include "raster.hpp"
 #include "interp/loess.hpp"
+#include "ds/kdtree.hpp"
 
 using namespace geos::geom;
 using namespace geos::linearref;
@@ -200,6 +201,82 @@ void doInterp(int tileSize, std::list<std::pair<int, int> >* tiles, const std::v
 	}
 
 }
+
+void lowess(const std::vector<Pt>& pts,
+		const std::vector<std::string>& anchors, const std::vector<int>& abands,
+		const std::string& target, int tband, const std::string& adjustment) {
+
+	// Get the props and bounds for the target.
+	Raster traster(target, false);
+	GridProps tprops(traster.props());
+
+	// Create props and bounds for the adjustment raster.
+	GridProps adjprops(tprops);
+	Bounds adjbounds = adjprops.bounds();
+
+	// Build the list of props for anchors and extent
+	// the adjustment bounds.
+	std::vector<GridProps> apropss;
+	for(const std::string& a : anchors) {
+		Raster arast(a, false);
+		const GridProps& props = arast.props();
+		adjbounds.extend(props.bounds());
+		apropss.push_back(props);
+	}
+
+	// Create the adjustment raster.
+	adjprops.setBounds(adjbounds);
+	adjprops.setWritable(true);
+	adjprops.setBands(1);
+	MemRaster adjmem(adjprops, false);
+	adjmem.fillFloat(0, 1);
+
+
+	geo::ds::KDTree<Pt> tree(2);
+	for(const Pt& pt : pts)
+		tree.add(new Pt(pt));
+	tree.build();
+
+	std::list<Pt*> items;
+	std::list<double> dist;
+
+	double radius = 25;
+
+	for(int row = 1000; row < adjprops.rows(); ++row) {
+		std::cerr << row << " of " << adjprops.rows() << "\n";
+		for(int col = 0; col < adjprops.cols(); ++col) {
+
+			Pt pt(adjprops.toCentroidX(col), adjprops.toCentroidY(row), 0);
+
+			// Find the points in the neighbourhood.
+			tree.radSearch(pt, radius, 99999, std::back_inserter(items), std::back_inserter(dist));
+
+			if(dist.empty()) {
+				adjmem.setFloat(col, row, 0, 1);
+			} else {
+				Eigen::Matrix<double, Eigen::Dynamic, 3> A(items.size(), 3);
+				Eigen::Matrix<double, Eigen::Dynamic, 1> B(items.size(), 1);
+
+				size_t i = 0;
+				for(const Pt* p : items) {
+					A(i, 0) = p->x;
+					A(i, 1) = p->y;
+					A(i, 2) = 1;
+					B(i, 0) = p->z;
+					++i;
+				}
+
+				Eigen::Matrix<double, 3, Eigen::Dynamic> At = A.transpose();
+				Eigen::Matrix<double, 3, 1> c = (At * A).inverse() * At * B;
+
+				adjmem.setFloat(col, row, c(0, 0) * pt.x + c(1, 0) * pt.y + c(2, 0), 1);
+			}
+			items.clear();
+			dist.clear();
+		}
+	}
+}
+
 
 /**
  * 1) For each point, generate a kernel with parameters given by the difference, and desired SD.
@@ -405,7 +482,8 @@ int main(int argc, char** argv) {
 			of << pt.x << "," << pt.y << "," << pt.z << "\n";
 	}
 
-	convolve(pts, anchors, abands, target, tband, adjustment);
+	//convolve(pts, anchors, abands, target, tband, adjustment);
+	lowess(pts, anchors, abands, target, tband, adjustment);
 
 
  	return 0;
