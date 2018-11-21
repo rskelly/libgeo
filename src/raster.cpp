@@ -1037,19 +1037,6 @@ void MemRaster::fillInt(int value, int band) {
 	}
 }
 
-/*
-double MemRaster::getFloat(size_t idx, int band) {
-	checkInit();
-	if (idx < 0 || idx >= m_props.size())
-		g_argerr("Index out of bounds: " << idx << "; size: " << m_props.size());
-	if(m_props.isInt()) {
-		return (double) getInt(idx, band);
-	} else {
-		return *(((double*) m_grid) + idx);
-	}
-}
-*/
-
 double MemRaster::getFloat(int col, int row, int band) {
 	checkInit();
 	if(m_props.isInt()) {
@@ -1345,6 +1332,8 @@ Raster::Raster(const std::string& filename, const GridProps& props) :
 	}
 	if(m_props.bigTiff())
 		opts = CSLSetNameValue(opts, "BIGTIFF", "YES");
+	opts = CSLSetNameValue(opts, "INTERLEAVE", "BAND");
+
 	GDALAllRegister();
 	std::string drvName = m_props.driver();
 	if(drvName.empty())
