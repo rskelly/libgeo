@@ -152,7 +152,7 @@ namespace geo {
 			 * @param maxCount The maximum number of items in a leaf.
 			 */
 			QTree(const Bounds& bounds, int maxDepth, int maxCount) :
-				QTree(bounds, maxDepth, maxCount, 0) {
+				QTree::QTree(bounds, maxDepth, maxCount, 0) {
 			}
 
 			/**
