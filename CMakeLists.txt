@@ -95,7 +95,7 @@ set_target_properties (geodbobj PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_library (geodb SHARED $<TARGET_OBJECTS:geodbobj>)
 target_link_libraries (geodb geoutil ${GDAL_LIBRARY})
 
-set (georastersrc src/geo.cpp src/raster.cpp src/rast/polygonize_gdal.cpp)
+set (georastersrc src/geo.cpp src/raster.cpp src/rast/polygonize_ff.cpp)
 add_library (georasterobj OBJECT ${georastersrc})
 set_target_properties (georasterobj PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_library (georaster SHARED $<TARGET_OBJECTS:georasterobj>)
