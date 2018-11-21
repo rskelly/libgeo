@@ -47,7 +47,7 @@ namespace geo {
         /**
          * Provides some easy database read/write methods.
          */
-        class DB {
+        class G_DLL_EXPORT DB {
         protected:
             GeomType m_type;											///<! The geometry column type.
             int m_srid;													///<! The horizontal spatial reference ID.
