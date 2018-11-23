@@ -807,7 +807,7 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 	if(!props().isInt())
 		g_runerr("Only integer rasters can be polygonized.");
 
-	// There need to be at least three threads for readin from the raster(1),
+	// There need to be at least three threads for reading from the raster(1),
 	// writing output (1), and unioning and transferring to the write queue (n - 2).
 	if(threads < 3)
 		threads = 3;
