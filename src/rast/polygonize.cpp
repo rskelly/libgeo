@@ -447,7 +447,7 @@ public:
 		m_transferFinish = true;
 	}
 
-	void initOutput(const std::string& driver, const std::string& filename, const std::string& layerName, int srid) {
+	void initOutput(const std::string& driver, const std::string& filename, const std::string& layerName, const std::string& projection) {
 		GDALAllRegister();
 
 		// Create the GEOS context and factory.
@@ -469,11 +469,14 @@ public:
 			g_runerr("Failed to create dataset " << filename << ".");
 
 		// Create the layer.
-		m_sr.importFromEPSG(srid);
+		if(!projection.empty()) {
+			char* wkt = projection.c_str();
+			m_sr.importFromWkt(&wkt);
+		}
 		char **lopts = NULL;
 		if(Util::lower(driver) == "sqlite")
 			lopts = CSLSetNameValue(lopts, "FORMAT", "SPATIALITE");
-		m_layer = m_ds->CreateLayer(layerName.c_str(), &m_sr, wkbMultiPolygon, lopts);
+		m_layer = m_ds->CreateLayer(layerName.c_str(), projection.empty() ? nullptr : &m_sr, wkbMultiPolygon, lopts);
 		CPLFree(lopts);
 		if(!m_layer) {
 			g_runerr("Failed to create layer " << layerName << ".");
@@ -800,7 +803,7 @@ public:
 };
 
 void Grid::polygonize(const std::string& filename, const std::string& layerName,
-		const std::string& driver, int srid, int band, bool removeHoles, bool removeDangles,
+		const std::string& driver, const std::string& projection, int band, bool removeHoles, bool removeDangles,
 		const std::string& mask, int maskBand, int threads,
 		bool& cancel, Status& status) {
 
@@ -831,7 +834,7 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 	PolyContext ctx(this, &status, &block, &cancel, bufSize, band, removeHoles, removeDangles, maskRaster, maskBand);
 
 	// Initialize database.
-	ctx.initOutput(driver, filename, layerName, srid);
+	ctx.initOutput(driver, filename, layerName, projection);
 
 	// Start the read thread.
 	std::thread readT(&PolyContext::polyReadBlocks, &ctx);

@@ -1174,7 +1174,7 @@ namespace geo {
              * @param filename The filename of the output vector.
              * @param layerName The name of the output layer.
              * @param driver The name of the output driver. Any of the GDAL options.
-             * @param srid The spatial reference ID of the dataset.
+             * @param projection The WKT projection for the database.
              * @param band The band to vectorize.
              * @param removeHoles Remove holes from the polygons.
              * @param removeDangles Remove small polygons attached to larger ones diagonally.
@@ -1185,7 +1185,7 @@ namespace geo {
              * @param cancel A boolean that will be set to true if the algorithm should quit.
              */
             void polygonize(const std::string &filename, const std::string &layerName,
-                const std::string &driver, int srid, int band, bool removeHoles, bool removeDangles,
+                const std::string &driver, const std::string& projection, int band, bool removeHoles, bool removeDangles,
 				const std::string& mask, int maskBand, int threads,
 				bool& cancel, geo::util::Status& status);
         };

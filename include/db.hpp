@@ -51,6 +51,7 @@ namespace geo {
         protected:
             GeomType m_type;											///<! The geometry column type.
             int m_srid;													///<! The horizontal spatial reference ID.
+            std::string m_projection;									///<! The projection as a WKT string.
             std::string m_file;											///<! The output filename.
             std::string m_layerName;									///<! The name of the table or layer.
             std::string m_driver;										///<! The OGR driver to use. Availability may differ from system to system.
@@ -59,6 +60,7 @@ namespace geo {
             GDALDataset* m_ds;											///<! Pointer to dataset.
             OGRLayer* m_layer;											///<! Pointer to layer.
             OGRFeatureDefn* m_fdef;										///<! Pointer to an OGR vector feature.
+            OGRSpatialReference m_sref;									///<! A spatial reference object. If it is used, it must persist for the lifetime of the features that use it.
 
         public:
 
@@ -76,6 +78,21 @@ namespace geo {
             DB(const std::string &file, const std::string &layer, const std::string &driver,
             		const std::unordered_map<std::string, FieldType> &fields,
             		GeomType type, int srid = 0, bool replace = false);
+
+            /**
+             * Construct a database object.
+             *
+             * @param file The filename for the database. Presumably a connection string could be used here.
+             * @param layer The layer or table name.
+             * @param driver The OGR driver.
+             * @param fields A map of field names and their types.
+             * @param type The geometry type.
+             * @param srid The horizontal spatial reference ID.
+             * @param replace If true, removes and replaces an existing database.
+             */
+            DB(const std::string &file, const std::string &layer, const std::string &driver,
+            		const std::unordered_map<std::string, FieldType> &fields,
+            		GeomType type, const std::string& projection, bool replace = false);
 
             /**
              * Construct a database object.
@@ -151,6 +168,8 @@ namespace geo {
             void commit();
 
             int srid() const;
+
+            const std::string& projection() const;
 
             void flush();
 

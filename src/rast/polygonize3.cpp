@@ -160,14 +160,14 @@ Polygon* _makeGeom(double x0, double y0, double x1, double y1, GeometryFactory::
 }
 
 // Make an OGR database to write the polygons to.
-std::tuple<GDALDataset*, OGRLayer*> _makeDataset(const std::string& filename, const std::string& driver, const std::string& layerName, int srid) {
+std::tuple<GDALDataset*, OGRLayer*> _makeDataset(const std::string& filename, const std::string& driver, const std::string& layerName, OGRSpatialReference* sr) {
 	// Get the vector driver.
 	GDALDriver *drv = GetGDALDriverManager()->GetDriverByName(driver.c_str());
 	if(!drv)
 		g_runerr("Failed to find driver for " << driver << ".");
 
 	// Create an output dataset for the polygons.
-	char **dopts = NULL;
+	char** dopts = NULL;
 	if(Util::lower(driver) == "sqlite")
 		dopts = CSLSetNameValue(dopts, "SPATIALITE", "YES");
 	GDALDataset* ds = drv->Create(filename.c_str(), 0, 0, 0, GDT_Unknown, dopts);
@@ -176,17 +176,15 @@ std::tuple<GDALDataset*, OGRLayer*> _makeDataset(const std::string& filename, co
 		g_runerr("Failed to create dataset " << filename << ".");
 
 	// Create the layer.
-	OGRSpatialReference sr;
-	if(srid > 0)
-		sr.importFromEPSG(srid);
-	char **lopts = NULL;
+	char** lopts = NULL;
 	if(Util::lower(driver) == "sqlite")
 		lopts = CSLSetNameValue(lopts, "FORMAT", "SPATIALITE");
-	OGRLayer* layer = ds->CreateLayer(layerName.c_str(), srid > 0 ? &sr : nullptr, wkbMultiPolygon, lopts);
+
+	OGRLayer* layer = ds->CreateLayer(layerName.c_str(), sr, wkbMultiPolygon, lopts);
 	CPLFree(lopts);
-	if(!layer) {
+
+	if(!layer)
 		g_runerr("Failed to create layer " << layerName << ".");
-	}
 
 	// There's only one field -- an ID.
 	OGRFieldDefn field( "id", OFTInteger);
@@ -203,7 +201,7 @@ std::string _rowStatus(int r, int rows) {
 }
 
 void Grid::polygonize(const std::string& filename, const std::string& layerName,
-		const std::string& driver, int srid, int band, bool removeHoles, bool removeDangles,
+		const std::string& driver, const std::string& projection, int band, bool removeHoles, bool removeDangles,
 		const std::string& mask, int maskBand, int threads,
 		bool& cancel, Status& status) {
 
@@ -248,10 +246,14 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 	// Create the output dataset
 	GEOSContextHandle_t gctx = OGRGeometry::createGEOSContext();
 	GeometryFactory::unique_ptr fact = GeometryFactory::create(new PrecisionModel());
+	OGRSpatialReference* sr = nullptr;
+	if(!projection.empty())
+		sr = new OGRSpatialReference(projection.c_str());
+
 	std::unique_ptr<GDALDataset> ds;
 	std::unique_ptr<OGRLayer> layer;
 	{
-		std::tuple<GDALDataset*, OGRLayer*> t = _makeDataset(filename, driver, layerName, srid);
+		std::tuple<GDALDataset*, OGRLayer*> t = _makeDataset(filename, driver, layerName, sr);
 		ds.reset(std::get<0>(t));
 		layer.reset(std::get<1>(t));
 	}

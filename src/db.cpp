@@ -60,7 +60,7 @@ namespace geo {
 
 			bool isRast(GDALDriver *drv) {
 				const char* cc = drv->GetMetadataItem(GDAL_DCAP_RASTER);
-				return cc != NULL && std::strncmp(cc, "YES", 3) == 0;
+				return cc != nullptr && std::strncmp(cc, "YES", 3) == 0;
 			}
 
 		} // util
@@ -71,9 +71,10 @@ using namespace geo::db::util;
 
 DB::DB(const std::string& file, const std::string& layer, const std::string& driver,
 		const std::unordered_map<std::string, FieldType>& fields,
-		GeomType type, int srid, bool replace) :
+		GeomType type, const std::string& projection, bool replace) :
     m_type(type),
-    m_srid(srid),
+	m_srid(0),
+    m_projection(projection),
     m_file(file),
 	m_layerName(layer),
 	m_driver(driver),
@@ -84,7 +85,7 @@ DB::DB(const std::string& file, const std::string& layer, const std::string& dri
 
 	// If the driver was not given, try to discover it from an existing file, otherwise fail.
 	if (m_driver.empty()) {
-		GDALDataset* ds = static_cast<GDALDataset*>(GDALOpenEx(m_file.c_str(), GDAL_OF_VECTOR | GDAL_OF_READONLY, NULL, NULL, NULL));
+		GDALDataset* ds = static_cast<GDALDataset*>(GDALOpenEx(m_file.c_str(), GDAL_OF_VECTOR | GDAL_OF_READONLY, nullptr, nullptr, nullptr));
 		if (!ds)
 			g_runerr("Driver not given and no existing file to read from.");
 		const char* drv = ds->GetDriverName();
@@ -107,24 +108,119 @@ DB::DB(const std::string& file, const std::string& layer, const std::string& dri
 
     GDALAllRegister();
 
-    GDALDriver *drv = GetGDALDriverManager()->GetDriverByName(m_driver.c_str());
+    GDALDriver* drv = GetGDALDriverManager()->GetDriverByName(m_driver.c_str());
     if(!drv)
         g_runerr("Driver not found for " << m_file << " (" << driver << ")");
 
 	// If the file is sqlite, use the spatialite driver.
-	char **dopts = NULL;
+	char** dopts = nullptr;
 	if(m_driver == "SQLite")
 		dopts = CSLSetNameValue(dopts, "SPATIALITE", "YES");
-    m_ds = drv->Create(m_file.c_str(), 0, 0, 0, GDT_Unknown, dopts);
-    CPLFree(dopts);
-    if(!m_ds)
+
+	m_ds = drv->Create(m_file.c_str(), 0, 0, 0, GDT_Unknown, dopts);
+
+	CPLFree(dopts);
+
+	if(!m_ds)
         g_runerr("Failed to create data set for " << m_file);
 
-	char **options = nullptr;
-	OGRSpatialReference sr;
-	if(m_srid)
-		sr.importFromEPSG(m_srid);
-	m_layer = m_ds->CreateLayer(m_layerName.c_str(), srid > 0 ? &sr : nullptr, geomType(m_type), options);
+	OGRSpatialReference* sr = nullptr;
+	if(!m_projection.empty())
+		sr = new OGRSpatialReference(m_projection.c_str());
+
+	dopts = nullptr;
+	if(m_driver == "SQLite") {
+		dopts = CSLSetNameValue(dopts, "FORMAT", "SPATIALITE");
+		dopts = CSLSetNameValue(dopts, "GEOMETRY_NAME", "geom");
+	}
+
+	m_layer = m_ds->CreateLayer(m_layerName.c_str(), sr, geomType(m_type), dopts);
+
+	CPLFree(dopts);
+
+	if(!m_layer)
+		g_runerr("Failed to create layer, " << m_layerName << ".");
+
+	for(const auto& it : m_fieldTypes) {
+		OGRFieldDefn def(it.first.c_str(), fieldType(it.second));
+		m_layer->CreateField(&def);
+	}
+	m_fdef = m_layer->GetLayerDefn();
+
+    OGRGeomFieldDefn* gdef = m_layer->GetLayerDefn()->GetGeomFieldDefn(0);
+    m_geomName = std::string(gdef->GetNameRef());
+
+}
+
+DB::DB(const std::string& file, const std::string& layer, const std::string& driver,
+		const std::unordered_map<std::string, FieldType>& fields,
+		GeomType type, int srid, bool replace) :
+    m_type(type),
+    m_srid(srid),
+    m_file(file),
+	m_layerName(layer),
+	m_driver(driver),
+	m_fieldTypes(fields),
+	m_ds(nullptr),
+	m_layer(nullptr),
+	m_fdef(nullptr) {
+
+	// If the driver was not given, try to discover it from an existing file, otherwise fail.
+	if (m_driver.empty()) {
+		GDALDataset* ds = static_cast<GDALDataset*>(GDALOpenEx(m_file.c_str(), GDAL_OF_VECTOR | GDAL_OF_READONLY, nullptr, nullptr, nullptr));
+		if (!ds)
+			g_runerr("Driver not given and no existing file to read from.");
+		const char* drv = ds->GetDriverName();
+		GDALClose(ds);
+		if(!drv)
+			g_runerr("Driver not given and no existing file to read from.");
+		m_driver = drv;
+		g_warn("Using driver " << drv << " from existing file.");
+	}
+
+	// Check layer name.
+	if (m_layerName.empty()) {
+		m_layerName = "data";
+		g_warn("Using layer name data as none given.");
+	}
+
+	// If replace and file exists, delete the existing file.
+    if(replace && Util::exists(file))
+        Util::rm(file);
+
+    GDALAllRegister();
+
+    GDALDriver* drv = GetGDALDriverManager()->GetDriverByName(m_driver.c_str());
+    if(!drv)
+        g_runerr("Driver not found for " << m_file << " (" << driver << ")");
+
+	// If the file is sqlite, use the spatialite driver.
+	char** dopts = nullptr;
+	if(m_driver == "SQLite")
+		dopts = CSLSetNameValue(dopts, "SPATIALITE", "YES");
+
+	m_ds = drv->Create(m_file.c_str(), 0, 0, 0, GDT_Unknown, dopts);
+
+	CPLFree(dopts);
+
+	if(!m_ds)
+        g_runerr("Failed to create data set for " << m_file);
+
+	OGRSpatialReference* sr = nullptr;
+	if(m_srid) {
+		sr = new OGRSpatialReference();
+		sr->importFromEPSG(m_srid);
+	}
+
+	dopts = nullptr;
+	if(m_driver == "SQLite") {
+		dopts = CSLSetNameValue(dopts, "FORMAT", "SPATIALITE");
+		dopts = CSLSetNameValue(dopts, "GEOMETRY_NAME", "geom");
+	}
+
+	m_layer = m_ds->CreateLayer(m_layerName.c_str(), sr, geomType(m_type), dopts);
+
+	CPLFree(dopts);
 
 	if(!m_layer)
 		g_runerr("Failed to create layer, " << m_layerName << ".");
@@ -150,7 +246,7 @@ DB::DB(const std::string& file, const std::string& layer) :
 
     GDALAllRegister();
 
-    m_ds = static_cast<GDALDataset*>(GDALOpenEx(m_file.c_str(), GDAL_OF_VECTOR|GDAL_OF_UPDATE, NULL, NULL, NULL));
+    m_ds = static_cast<GDALDataset*>(GDALOpenEx(m_file.c_str(), GDAL_OF_VECTOR|GDAL_OF_UPDATE, nullptr, nullptr, nullptr));
     if(!m_ds)
         g_runerr("Failed to open data set for " << m_file);
 
@@ -168,12 +264,12 @@ DB::DB(const std::string& file, const std::string& layer) :
 
 	m_type = geomType(m_layer->GetGeomType());
 
-	OGRGeomFieldDefn *gdef = m_layer->GetLayerDefn()->GetGeomFieldDefn(0);
+	OGRGeomFieldDefn* gdef = m_layer->GetLayerDefn()->GetGeomFieldDefn(0);
 	m_geomName = std::string(gdef->GetNameRef());
 
 	m_fdef = m_layer->GetLayerDefn();
 	for(int i = 0; i < m_fdef->GetFieldCount(); ++i) {
-		OGRFieldDefn *def = m_fdef->GetFieldDefn(i);
+		OGRFieldDefn* def = m_fdef->GetFieldDefn(i);
 		m_fieldTypes[std::string(def->GetNameRef())] = fieldType(def->GetType());
 	}
 }
@@ -209,9 +305,9 @@ std::map<std::string, std::set<std::string> > DB::extensions() {
 		GDALDriver* drv = mgr->GetDriver(i);
 		if(!isRast(drv)) {
 			const char* desc = drv->GetDescription();
-			if(desc != NULL) {
+			if(desc != nullptr) {
 				const char *ext = drv->GetMetadataItem(GDAL_DMD_EXTENSION);
-				if(ext != NULL ) {
+				if(ext != nullptr ) {
 					std::list<std::string> lst;
 					Util::splitString(std::back_inserter(lst), std::string(ext));
 					for(const std::string& item : lst)
@@ -237,7 +333,7 @@ std::map<std::string, std::string> DB::drivers(const std::vector<std::string>& f
 		if(!isRast(drv)) {
 			const char* name = drv->GetMetadataItem(GDAL_DMD_LONGNAME);
 			const char* desc = drv->GetDescription();
-			if(name != NULL && desc != NULL) {
+			if(name != nullptr && desc != nullptr) {
 				bool found = true;
 				if(!filter.empty()) {
 					found = false;
@@ -288,7 +384,7 @@ void DB::convert(const std::string& filename, const std::string& driver) {
         g_runerr("Driver not found for " << filename << " (" << driver << ")");
 
 	// If the file is sqlite, use the spatialite driver.
-	char **dopts = NULL;
+	char **dopts = nullptr;
 	if(driver == "SQLite")
 		dopts = CSLSetNameValue(dopts, "SPATIALITE", "YES");
 
@@ -319,7 +415,7 @@ void DB::dropGeomIndex(const std::string& table, const std::string& column) {
 		_table = table;
 	}
 	std::string sql = "SELECT DisableSpatialIndex('" + _table + "', '" + column + "'); DropTable idx_" + _table + "_Geometry; VACUUM;";
-	m_ds->ExecuteSQL(sql.c_str(), NULL, NULL);
+	m_ds->ExecuteSQL(sql.c_str(), nullptr, nullptr);
 }
 
 void DB::createGeomIndex(const std::string& table, const std::string& column) {
@@ -330,7 +426,7 @@ void DB::createGeomIndex(const std::string& table, const std::string& column) {
 		_table = table;
 	}
 	std::string sql = "SELECT CreateSpatialIndex('" + _table + "', '" + column + "');";
-	m_ds->ExecuteSQL(sql.c_str(), NULL, NULL);
+	m_ds->ExecuteSQL(sql.c_str(), nullptr, nullptr);
 }
 
 uint64_t DB::getGeomCount() const {
