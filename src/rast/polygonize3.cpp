@@ -198,7 +198,7 @@ std::tuple<GDALDataset*, OGRLayer*> _makeDataset(const std::string& filename, co
 // Produce a status message from the current and total row counds.
 std::string _rowStatus(int r, int rows) {
 	std::stringstream ss;
-	ss << "Row " << (r + 1) << " of " << rows;
+	ss << "Polygonizing row " << (r + 1) << " of " << rows;
 	return ss.str();
 }
 
@@ -345,7 +345,7 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 	layer.release();
 	GDALClose(ds.release());
 
-	status.update(1.0f, "Finished");
+	status.update(1.0f, "Finished polygonization");
 
 }
 
