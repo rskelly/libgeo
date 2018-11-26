@@ -42,7 +42,7 @@ std::condition_variable __cv;	// For waiting on the queue.
 // On each loop, extracts a single finalized poly ID and loads those polys for unioning.
 void _writeToFile(std::unordered_map<int, std::vector<Polygon*> >* geoms, std::set<int>* finalIds,
 		OGRLayer* layer, GeometryFactory::unique_ptr* fact, GEOSContextHandle_t* gctx,
-		bool* running) {
+		bool removeHoles, bool removeDangles, bool* running) {
 
 	while(*running || !finalIds->empty()) {
 
@@ -76,9 +76,44 @@ void _writeToFile(std::unordered_map<int, std::vector<Polygon*> >* geoms, std::s
 		if(polys.empty())
 			continue;
 
-		// Union the polys. If the result is not a multi, make it one.
+		// Union the polys.
 		geom = geos::operation::geounion::CascadedPolygonUnion::CascadedPolygonUnion::Union(&polys);
 		polys.clear();
+
+		// If we're removing dangles, throw away all but the
+		// largest single polygon. If it was originally a polygon, there are no dangles.
+		if(removeDangles) {
+			size_t idx = 0;
+			double area = 0;
+			for(size_t i = 0; i < geom->getNumGeometries(); ++i) {
+				const Geometry* p = geom->getGeometryN(i);
+				double a = p->getArea();
+				if(a > area) {
+					area = a;
+					idx = i;
+				}
+			}
+			Geometry *g = geom->getGeometryN(idx)->clone(); // Force copy.
+			delete geom;
+			geom = g;
+		}
+
+		// If we're removing holes, extract the exterior rings
+		// of all constituent polygons.
+		if(removeHoles) {
+			std::vector<Geometry*>* geoms0 = new std::vector<Geometry*>();
+			for(size_t i = 0; i < geom->getNumGeometries(); ++i) {
+				const Polygon* p = dynamic_cast<const Polygon*>(geom->getGeometryN(i));
+				const LineString* l = p->getExteriorRing();
+				LinearRing* r = (*fact)->createLinearRing(l->getCoordinates());
+				geoms0->push_back((*fact)->createPolygon(r, nullptr));
+			}
+			Geometry* g = (*fact)->createMultiPolygon(geoms0); // Do not copy -- take ownership.
+			delete geom;
+			geom = g;
+		}
+
+		// If the result is not a multi, make it one.
 		if(geom->getGeometryTypeId() != GEOS_MULTIPOLYGON) {
 			std::vector<Geometry*>* gs = new std::vector<Geometry*>();
 			gs->push_back(geom);
@@ -232,7 +267,7 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 
 	// Start output threads.
 	for(int i = 0; i < threads; ++i)
-		ths.emplace_back(&_writeToFile, &geoms, &finalIds, layer.get(), &fact, &gctx, &running);
+		ths.emplace_back(&_writeToFile, &geoms, &finalIds, layer.get(), &fact, &gctx, removeHoles, removeDangles, &running);
 
 	// Process raster.
 	for(int r = 0; r < rows; ++r) {
