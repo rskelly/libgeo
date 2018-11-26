@@ -78,6 +78,8 @@ void _writeToFile(std::unordered_map<int, std::vector<Polygon*> >* geoms, std::s
 
 		// Union the polys.
 		geom = geos::operation::geounion::CascadedPolygonUnion::CascadedPolygonUnion::Union(&polys);
+		for(Polygon* p : polys)
+			delete p;
 		polys.clear();
 
 		// If we're removing dangles, throw away all but the
