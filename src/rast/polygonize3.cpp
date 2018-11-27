@@ -42,19 +42,19 @@ std::condition_variable __cv;	// For waiting on the queue.
 // On each loop, extracts a single finalized poly ID and loads those polys for unioning.
 void _writeToFile(std::unordered_map<int, std::vector<Polygon*> >* geoms, std::set<int>* finalIds,
 		OGRLayer* layer, GeometryFactory::unique_ptr* fact, GEOSContextHandle_t* gctx,
-		bool removeHoles, bool removeDangles, bool* running) {
+		bool removeHoles, bool removeDangles, bool* running, bool* cancel) {
 
-	while(*running || !finalIds->empty()) {
+	std::vector<Polygon*> polys;
+	Geometry* geom;
+	int id;
 
-		std::vector<Polygon*> polys;
-		Geometry* geom;
-		int id;
+	while(!*cancel && (*running || !finalIds->empty())) {
 
 		// Get an ID and the list of polys from the queue.
 		{
 			std::unique_lock<std::mutex> lk(__fmtx);
 			// Wait for a notification if the queue is empty.
-			while(*running && finalIds->empty())
+			while(!*cancel && *running && finalIds->empty())
 				__cv.wait(lk);
 			// If the wakeup is spurious, skip.
 			if(finalIds->empty())
@@ -73,7 +73,7 @@ void _writeToFile(std::unordered_map<int, std::vector<Polygon*> >* geoms, std::s
 			geoms->erase(id);
 		}
 
-		if(polys.empty())
+		if(polys.empty() || *cancel)
 			continue;
 
 		// Union the polys.
@@ -84,7 +84,7 @@ void _writeToFile(std::unordered_map<int, std::vector<Polygon*> >* geoms, std::s
 
 		// If we're removing dangles, throw away all but the
 		// largest single polygon. If it was originally a polygon, there are no dangles.
-		if(removeDangles) {
+		if(removeDangles && geom->getNumGeometries() > 1) {
 			size_t idx = 0;
 			double area = 0;
 			for(size_t i = 0; i < geom->getNumGeometries(); ++i) {
@@ -100,8 +100,7 @@ void _writeToFile(std::unordered_map<int, std::vector<Polygon*> >* geoms, std::s
 			geom = g;
 		}
 
-		// If we're removing holes, extract the exterior rings
-		// of all constituent polygons.
+		// If we're removing holes, extract the exterior rings of all constituent polygons.
 		if(removeHoles) {
 			std::vector<Geometry*>* geoms0 = new std::vector<Geometry*>();
 			for(size_t i = 0; i < geom->getNumGeometries(); ++i) {
@@ -122,10 +121,11 @@ void _writeToFile(std::unordered_map<int, std::vector<Polygon*> >* geoms, std::s
 			geom = (*fact)->createMultiPolygon(gs);
 		}
 
-		// Create and write the OGR geometry.
-		OGRGeometry* ogeom = OGRGeometryFactory::createFromGEOS(*gctx, (GEOSGeom) geom);
 		if(!geom)
 			g_runerr("Null geometry.");
+
+		// Create and write the OGR geometry.
+		OGRGeometry* ogeom = OGRGeometryFactory::createFromGEOS(*gctx, (GEOSGeom) geom);
 		OGRFeature feat(layer->GetLayerDefn());
 		feat.SetGeometry(ogeom);
 		feat.SetField("id", (GIntBig) id);
@@ -140,8 +140,7 @@ void _writeToFile(std::unordered_map<int, std::vector<Polygon*> >* geoms, std::s
 
 		// Delete the polys.
 		delete ogeom;
-		for(Polygon* p : polys)
-			delete p;
+		delete geom;
 
 		if(OGRERR_NONE != err)
 			g_runerr("Failed to add geometry.");
@@ -271,7 +270,7 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 
 	// Start output threads.
 	for(int i = 0; i < threads; ++i)
-		ths.emplace_back(&_writeToFile, &geoms, &finalIds, layer.get(), &fact, &gctx, removeHoles, removeDangles, &running);
+		ths.emplace_back(&_writeToFile, &geoms, &finalIds, layer.get(), &fact, &gctx, removeHoles, removeDangles, &running, &cancel);
 
 	// Process raster.
 	for(int r = 0; r < rows; ++r) {
