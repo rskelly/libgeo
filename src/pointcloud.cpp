@@ -572,6 +572,10 @@ geo::pc::Point::Point(double x, double y, double z, double intensity, double ang
 	m_returnNum(returnNum) {
 }
 
+geo::pc::Point::Point(const geo::pc::Point& pt) :
+		geo::pc::Point(pt.x(), pt.y(), pt.z(), pt.intensity(), pt.scanAngle(),
+				pt.classId(), pt.returnNum(), pt.numReturns(), pt.isEdge()) {}
+
 geo::pc::Point::Point(const liblas::Point& pt) :
 	geo::pc::Point(pt.GetX(), pt.GetY(), pt.GetZ(),
 			pt.GetIntensity(),
@@ -732,7 +736,7 @@ bool PCTreeIterator::next(geo::ds::KDTree<geo::pc::Point>& tree) {
 				double x = pt.x();
 				double y = pt.y();
 				if(x >= tileBounds[0] && x <= tileBounds[2] && y >= tileBounds[1] && y <= tileBounds[2])
-					tree.add(pt);
+					tree.add(new geo::pc::Point(pt));
 			}
 		}
 	}

@@ -48,7 +48,7 @@ elseif(${WIN32})
 	set (GDAL_LIBRARY gdal_i)
 else()
 	set (CMAKE_CXX_COMPILER_LAUNCHER ccache)
-	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-pragmas")
+	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-pragmas -fopenmp")
 	set (GEOS_INCLUDEDIR /opt/include)
 	set (GEOS_LIBRARYDIR /opt/lib)
 	set (EIGEN_INCLUDEDIR "/usr/include/eigen3")
@@ -62,6 +62,7 @@ set (THREADS_PREFER_PTHREAD_FLAG ON)
 find_package (Threads REQUIRED)
 find_package (Boost 1.58 COMPONENTS system filesystem date_time REQUIRED)
 find_package (GDAL 2.2 REQUIRED)
+find_package (CGAL REQUIRED)
 
 find_library (LIBLAS_LIBRARY las)
 find_library (JSONCPP_LIBRARY jsoncpp)
@@ -102,11 +103,11 @@ add_library (georaster SHARED $<TARGET_OBJECTS:georasterobj>)
 target_link_libraries (georaster geoutil geodb Threads::Threads ${GEOS_LIBRARY} ${GDAL_LIBRARY})
 
 if (${BUILD_APPS})
-
+	message(STATUS ${CGAL_LIBRARY})
 	file(GLOB PC_COMPUTERS src/pc/computers/*.cpp)
 	add_library (geopc SHARED src/geo.cpp src/pointcloud.cpp src/pc/normalizer.cpp src/pc/rasterizer_extsort.cpp 
 		src/pc/filter.cpp ${PC_COMPUTERS})
-	target_link_libraries (geopc geoutil georaster geoann ${LIBLAS_LIBRARY})# ${CGAL_LIBRARY})
+	target_link_libraries (geopc geoutil georaster geoann ${LIBLAS_LIBRARY} CGAL CGAL_Core)
 
 endif()
 
@@ -128,8 +129,8 @@ if(${BUILD_APPS})
 	# add_executable (polygonize src/apps/polygonize.cpp)
 	# target_link_libraries (polygonize geoutil georaster ${Boost_LIBRARIES})
 
-	# add_executable (pc2grid src/apps/pc2grid.cpp)
-	# target_link_libraries (pc2grid geoann geoutil georaster geopc geoann ${GEOS_LIBRARY})
+	add_executable (pc2grid src/apps/pc2grid.cpp)
+	target_link_libraries (pc2grid geoann geoutil georaster geopc geoann ${GEOS_LIBRARY})
 
 	# add_executable (pc2tile src/apps/pc2tile.cpp)
 	# target_link_libraries (pc2tile geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY} ${GEOS_LIBRARY})
