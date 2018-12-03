@@ -396,7 +396,17 @@ void DB::convert(const std::string& filename, const std::string& driver) {
         g_runerr("Failed to create data set for " << filename);
 
 	OGRLayer* layer = m_ds->GetLayerByName(m_layerName.c_str());
-	OGRLayer* newLayer = ds->CopyLayer(layer, m_layerName.c_str(), nullptr);
+
+	dopts = nullptr;
+	if(m_driver == "SQLite") {
+		dopts = CSLSetNameValue(dopts, "FORMAT", "SPATIALITE");
+		dopts = CSLSetNameValue(dopts, "GEOMETRY_NAME", "geom");
+	}
+
+	OGRLayer* newLayer = ds->CopyLayer(layer, m_layerName.c_str(), dopts);
+
+	CPLFree(dopts);
+
 	if(!newLayer) {
 		GDALClose(ds);
 		g_runerr("Failed to copy layer to new database.");
