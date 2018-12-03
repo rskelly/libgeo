@@ -974,8 +974,6 @@ void MemRaster::freeMem() {
 
 void MemRaster::init(const GridProps& pr, bool mapped) {
 	std::lock_guard<std::mutex> lk(m_initMtx);
-	m_grid = nullptr;
-	m_mmapped = false;
 	if (pr.cols() != m_props.cols() || pr.rows() != m_props.rows()) {
 		freeMem();
 		m_props = GridProps(pr);
