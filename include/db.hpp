@@ -104,6 +104,8 @@ namespace geo {
 
             virtual ~DB();
 
+            void open();
+
             /**
              * Returns a map with file extensions for keys, and a list of driver names as values.
              *

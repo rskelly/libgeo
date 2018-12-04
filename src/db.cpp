@@ -132,6 +132,8 @@ DB::DB(const std::string& file, const std::string& layer, const std::string& dri
 	if(m_driver == "SQLite") {
 		dopts = CSLSetNameValue(dopts, "FORMAT", "SPATIALITE");
 		dopts = CSLSetNameValue(dopts, "GEOMETRY_NAME", "geom");
+	} else if(m_driver == "ESRI Shapefile") {
+		dopts = CSLSetNameValue(dopts, "2GB_LIMIT", "YES");
 	}
 
 	m_layer = m_ds->CreateLayer(m_layerName.c_str(), sr, geomType(m_type), dopts);
@@ -216,6 +218,8 @@ DB::DB(const std::string& file, const std::string& layer, const std::string& dri
 	if(m_driver == "SQLite") {
 		dopts = CSLSetNameValue(dopts, "FORMAT", "SPATIALITE");
 		dopts = CSLSetNameValue(dopts, "GEOMETRY_NAME", "geom");
+	} else if(m_driver == "ESRI Shapefile") {
+		dopts = CSLSetNameValue(dopts, "2GB_LIMIT", "YES");
 	}
 
 	m_layer = m_ds->CreateLayer(m_layerName.c_str(), sr, geomType(m_type), dopts);
@@ -243,6 +247,12 @@ DB::DB(const std::string& file, const std::string& layer) :
 	m_ds(nullptr),
 	m_layer(nullptr),
 	m_fdef(nullptr) {
+
+	open();
+
+}
+
+void DB::open() {
 
     GDALAllRegister();
 
@@ -398,9 +408,11 @@ void DB::convert(const std::string& filename, const std::string& driver) {
 	OGRLayer* layer = m_ds->GetLayerByName(m_layerName.c_str());
 
 	dopts = nullptr;
-	if(m_driver == "SQLite") {
+	if(driver == "SQLite") {
 		dopts = CSLSetNameValue(dopts, "FORMAT", "SPATIALITE");
 		dopts = CSLSetNameValue(dopts, "GEOMETRY_NAME", "geom");
+	} else if(m_driver == "ESRI Shapefile") {
+		dopts = CSLSetNameValue(dopts, "2GB_LIMIT", "YES");
 	}
 
 	OGRLayer* newLayer = ds->CopyLayer(layer, m_layerName.c_str(), dopts);
