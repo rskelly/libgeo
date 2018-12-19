@@ -453,6 +453,8 @@ public:
 	Point(double x, double y, double z, double intensity, double angle,
 			int cls, int returnNum, int numReturns, bool isEdge);
 
+	Point(const geo::pc::Point& pt);
+
 	/**
 	 * Construct an empty point.
 	 */
@@ -715,6 +717,7 @@ class Rasterizer {
 private:
 	std::vector<PCFile> m_files;		///< A list of PCFile instances.
 	PCPointFilter* m_filter;
+	int m_thin;
 
 	// Used by finalizer.
 	std::vector<std::unique_ptr<Computer> > m_computers;
@@ -765,6 +768,15 @@ public:
 	 * @return The estimated point density per cell.
 	 */
 	double density(double resolution, double radius);
+
+	/**
+	 * If given and larger than zero, any cell with more than this number
+	 * of points will be randomly thinned. Any cell with fewer will be zeroed
+	 * out.
+	 *
+	 * @param thin The number of points in each cell.
+	 */
+	void setThin(int thin);
 
 	/**
 	 * Set a point filter to use for filtering points. Removes the old filter.

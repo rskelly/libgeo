@@ -107,6 +107,7 @@ void getDiffs(std::vector<Pt>& pts,
 					int tc = tprops.toCol(x);
 					int tr = tprops.toRow(y);
 					double a = arast.getFloat(col, row);
+					/*
 					if(a == aprops.nodata()) {// || ar.getInt(col, row, 1) < 100)
 						size_t idx = ((size_t) row<< 32) | col;
 						if(pxset.find(idx) == pxset.end()) {
@@ -115,7 +116,9 @@ void getDiffs(std::vector<Pt>& pts,
 						}
 						continue;
 					}
+					*/
 					double b = trast.getFloat(tc, tr);
+					/*
 					if(b == tprops.nodata()) {// || trast.getInt(tc, tr, 1) < 100)
 						size_t idx = ((size_t) row<< 32) | col;
 						if(pxset.find(idx) == pxset.end()) {
@@ -124,16 +127,19 @@ void getDiffs(std::vector<Pt>& pts,
 						}
 						continue;
 					}
+					*/
 					double diff = a - b;
 					//if(std::abs(diff) > difflimit)
 					//	continue;
 					pts.emplace_back(x, y, diff);
+				/*
 				} else {
 					size_t idx = ((size_t) row<< 32) | col;
 					if(pxset.find(idx) == pxset.end()) {
 						pts.emplace_back(x, y, 0);
 						pxset.insert(idx);
 					}
+				*/
 				}
 			}
 		}
@@ -248,7 +254,7 @@ void interpolate(const std::vector<Pt>& pts,
 
 	// Start the threads.
 	g_debug("starting")
-	int threadCount = 8;
+	int threadCount = 1;
 	std::mutex qmtx, rmtx;
 	std::vector<std::thread> threads;
 	for(int i = 0; i < threadCount; ++i)

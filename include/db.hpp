@@ -44,43 +44,116 @@ namespace geo {
         };
 
 
-        // Provides some easy database read/write methods.
-        class DB {
+        /**
+         * Provides some easy database read/write methods.
+         */
+        class G_DLL_EXPORT DB {
         protected:
-            GeomType m_type;
-            int m_srid;
-            std::string m_file;
-            std::string m_layerName;
-            std::string m_driver;
-            std::string m_geomName;
-            std::unordered_map<std::string, FieldType> m_fieldTypes;
-            GDALDataset *m_ds;
-            OGRLayer *m_layer;
-            OGRFeatureDefn *m_fdef;
+            GeomType m_type;											///<! The geometry column type.
+            int m_srid;													///<! The horizontal spatial reference ID.
+            std::string m_projection;									///<! The projection as a WKT string.
+            std::string m_file;											///<! The output filename.
+            std::string m_layerName;									///<! The name of the table or layer.
+            std::string m_driver;										///<! The OGR driver to use. Availability may differ from system to system.
+            std::string m_geomName;										///<! The name of the geometry field.
+            std::unordered_map<std::string, FieldType> m_fieldTypes;	///<! A map containing field names and their types.
+            GDALDataset* m_ds;											///<! Pointer to dataset.
+            OGRLayer* m_layer;											///<! Pointer to layer.
+            OGRFeatureDefn* m_fdef;										///<! Pointer to an OGR vector feature.
+            OGRSpatialReference m_sref;									///<! A spatial reference object. If it is used, it must persist for the lifetime of the features that use it.
 
         public:
 
+            /**
+             * Construct a database object.
+             *
+             * @param file The filename for the database. Presumably a connection string could be used here.
+             * @param layer The layer or table name.
+             * @param driver The OGR driver.
+             * @param fields A map of field names and their types.
+             * @param type The geometry type.
+             * @param srid The horizontal spatial reference ID.
+             * @param replace If true, removes and replaces an existing database.
+             */
             DB(const std::string &file, const std::string &layer, const std::string &driver,
             		const std::unordered_map<std::string, FieldType> &fields,
             		GeomType type, int srid = 0, bool replace = false);
 
+            /**
+             * Construct a database object.
+             *
+             * @param file The filename for the database. Presumably a connection string could be used here.
+             * @param layer The layer or table name.
+             * @param driver The OGR driver.
+             * @param fields A map of field names and their types.
+             * @param type The geometry type.
+             * @param srid The horizontal spatial reference ID.
+             * @param replace If true, removes and replaces an existing database.
+             */
+            DB(const std::string &file, const std::string &layer, const std::string &driver,
+            		const std::unordered_map<std::string, FieldType> &fields,
+            		GeomType type, const std::string& projection, bool replace = false);
+
+            /**
+             * Construct a database object.
+             *
+             * @param file The filename for the database. Presumably a connection string could be used here.
+             * @param layer The layer or table name.
+             */
             DB(const std::string &file, const std::string &layer);
 
-            ~DB();
+            virtual ~DB();
 
-            // Returns a map with file extensions for keys, and a list of driver names
-            // as values.
+            void open();
+
+            /**
+             * Returns a map with file extensions for keys, and a list of driver names as values.
+             *
+             * @return A map with file extensions for keys, and a list of driver names as values.
+             */
             static std::map<std::string, std::set<std::string> > extensions();
 
-            // Returns a map with driver short names as keys and long names for values.
+            /**
+             * Returns a map with driver short names as keys and long names for values.
+             *
+             * @return A map of drivers with short name as key and long name as value.
+             */
             static std::map<std::string, std::string> drivers();
+
+            /**
+             * Returns a map with driver short names as keys and long names for values. The filter
+             * contains short names of drivers. Only those names will be included if the filter is
+             * not empty.
+             *
+             * @param filter A vector of short driver names.
+             * @return A map of drivers with short name as key and long name as value.
+             */
+            static std::map<std::string, std::string> drivers(const std::vector<std::string>& filter);
 
             // Returns a vector driver for the given filename.
             static std::string getDriverForFilename(const std::string &filename);
 
-            void clear();
+            /**
+             * Clear the database -- delete all rows.
+             */
+            virtual void clear();
 
-            void setCacheSize(size_t size);
+            /**
+             * Return the name of the geometry column.
+             *
+             * @return The name of the geometry column.
+             */
+            const std::string& geomColumnName() const;
+
+            /**
+             * Re-save the database to the new filename using the given driver.
+             *
+             * @param filename 	The filename for the new database. Will be overwritten if it exists.
+             * @param driver	The database driver.
+             */
+            virtual void convert(const std::string& filename, const std::string& driver);
+
+            virtual void setCacheSize(size_t size);
 
             void dropGeomIndex(const std::string& table = "", const std::string& column = "GEOMETRY");
 
@@ -88,7 +161,7 @@ namespace geo {
 
             uint64_t getGeomCount() const;
 
-            void execute(std::string &sql);
+            void execute(std::string& sql);
 
             void begin();
 
@@ -98,8 +171,16 @@ namespace geo {
 
             int srid() const;
 
+            const std::string& projection() const;
+
             void flush();
 
+            /**
+             * Close the database. Implies flush. Called by destructor.
+             *
+             * @param remove If true, the file is deleted if it exists.
+             */
+            void close(bool remove = false);
         };
 
     } // db

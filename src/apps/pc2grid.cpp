@@ -35,7 +35,10 @@ void usage() {
 			<< "                  n is the percentile (no % sign); 1 - 99.\n"
 			<< " -v               Verbose. Enable debug and warning messages.\n"
 			<< " -h               If given *do not* trust the LAS file headers to contain\n"
-			<< "                  good bounds (etc.) info\n";
+			<< "                  good bounds (etc.) info\n"
+			<< " -t <min>         Normalize the point density in each cell. Any cell with more than this\n"
+			<< "                  number of points will be randomly thinned. Any cell with less will be\n"
+			<< "                  reduced to zero. This occurs after filtering.\n";
 
 	PCPointFilter::printHelp(std::cerr);
 
@@ -63,6 +66,7 @@ int main(int argc, char** argv) {
 	std::vector<std::string> types;
 	std::vector<std::string> args;
 	PCPointFilter filter;
+	int thin = 0;
 
 	for(int i = 1; i < argc; ++i) {
 		if(filter.parseArgs(i, argv))
@@ -89,6 +93,8 @@ int main(int argc, char** argv) {
 			easting = atof(argv[++i]);
 		} else if(v == "-n") {
 			northing = atof(argv[++i]);
+		} else if(v == "-t") {
+			thin = atoi(argv[++i]);
 		} else {
 			args.push_back(argv[i]);
 		}
@@ -107,6 +113,7 @@ int main(int argc, char** argv) {
 	try {
 		Rasterizer r(infiles);
 		r.setFilter(&filter);
+		r.setThin(thin);
 		r.rasterize(args[0], types, resX, resY, easting, northing, radius, srid, memory, useHeader);
 	} catch(const std::exception& ex) {
 		std::cerr << ex.what() << "\n";

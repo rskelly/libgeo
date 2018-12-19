@@ -60,6 +60,8 @@ namespace geo {
             bool m_writable;            ///<! True if the raster is writable
             double m_nodata;			///<! The nodata value.
             bool m_nodataSet;			///<! True if nodata is set.
+            bool m_compress;			///<! True if the file is a TIF and will be compressed.
+            bool m_bigTiff;				///<! Use bigtiff.
     		DataType m_type;			///<! The data type.
     		std::string m_projection;	///<! The WKT representation of the projection
     		std::string m_driver;		///<! The name of the GDAL driver.
@@ -84,6 +86,34 @@ namespace geo {
     		 * @param bounds The geographic bounds of the raster.
     		 */
     		void setBounds(const Bounds& bounds);
+
+    		/**
+    		 * Use compression for tiff files.
+    		 *
+    		 * @param compress True to use compression for tiff files.
+    		 */
+    		void setCompress(bool compress);
+
+    		/**
+    		 * Use compression for tiff files.
+    		 *
+    		 * @return True to use compression for tiff files.
+    		 */
+    		bool compress() const;
+
+    		/**
+    		 * Use Big Tiff setting.
+    		 *
+    		 * @param bigTuff True to use Big Tiff setting.
+    		 */
+    		void setBigTiff(bool bigTiff);
+
+    		/**
+    		 * Use Big Tiff setting.
+    		 *
+    		 * @return True to use Big Tiff setting.
+    		 */
+    		bool bigTiff() const;
 
     		/**
     		 * Populate an (at least) 4-element double array with the bounding
@@ -671,6 +701,13 @@ namespace geo {
             virtual ~Grid() {}
             
             /**
+             * Return a mutex that can be used to protect the resource.
+             *
+             * @return A mutex.
+             */
+            virtual std::mutex& mutex() = 0;
+
+            /**
              * Return a TileIterator.
              *
              * @param cols The number of columns in each tile.
@@ -877,7 +914,7 @@ namespace geo {
                 int area = 0;
 
                 std::queue<Cell> q;
-                q.push(Cell(col, row));
+                q.emplace(col, row);
 
                 std::vector<bool> visited(size, false); // Tracks visited pixels.
 
@@ -1041,22 +1078,28 @@ namespace geo {
 
             /**
              * Finds the least-cost path from the start cell to the goal cell,
-             * using the given heuristic. Returns the optimal path between the
-             * start cell and the goal.
+             * using the given heuristic. Populates the given iterator with
+             * the optimal path between the start cell and the goal.
+             *
+             * If the search fails for some reason, like exceeding the maxCost, returns
+             * false. Otherwise returns true.
              *
              * @param startCol The starting column.
              * @param startrow The starting row.
              * @param goalCol The column of the goal.
              * @param goalRow The row of the goal.
-             * @param heuristic Used by the algorithm to cost the path.
+             * @param heuristic Used by the algorithm to estimate the future cost of the path.
              * @param inserter Used to accumulate the path results.
+             * @param maxCost If the total cost exceeds this amount, just quit and return false.
+             * @return True if the search succeeded, false otherwise.
              */
             template <class U, class V>
-            void searchAStar(int startCol, int startRow, int goalCol, int goalRow, U heuristic, V inserter) {
+            bool searchAStar(int startCol, int startRow, int goalCol, int goalRow, U heuristic, V inserter, double maxCost = std::numeric_limits<double>::infinity()) {
+
+            	static double offsets[4][2] = {{0, -1}, {-1, 0}, {1, 0}, {0, 1}};
 
             	size_t goal = ((size_t) goalCol << 32) | goalRow;
-
-            	std::vector<std::pair<int, int> > offsets = squareKernel<std::pair<int, int> >(3, false);
+            	size_t start = ((size_t) startCol << 32) | startRow;
 
             	std::unordered_map<size_t, size_t> parents;
             	std::unordered_map<size_t, double> gscore;
@@ -1064,8 +1107,6 @@ namespace geo {
 
             	std::unordered_set<size_t> openSet;
             	std::unordered_set<size_t> closedSet;
-
-            	size_t start = ((size_t) startCol << 32) | startRow;
 
             	openSet.insert(start);
             	gscore[start] = 0; 						// Distance from start to neighbour
@@ -1076,11 +1117,15 @@ namespace geo {
 
             	while(!openSet.empty()) {
 
+            		if(openSet.size() % 10000 == 0) {
+            			std::cerr << openSet.size() << "\n";
+            		}
+
             		size_t top = minValue(fscore);
 
             		if(top == goal) {
             			writeAStarPath(top, parents, inserter);
-            			break;
+            			return true;
             		}
 
             		double gscore0 = gscore[top];
@@ -1094,17 +1139,22 @@ namespace geo {
             		int qcol = (top >> 32) & 0xffffffff;
             		int qrow = top & 0xffffffff;
 
-            		for(const auto& it : offsets) {
+            		for(int i = 0; i < 4; ++i) {
+            			int col = qcol + offsets[i][0];
+            			int row = qrow + offsets[i][1];
 
-            			if(qcol + it.first < 0 || qrow + it.second < 0 || qcol + it.first >= cols || qrow + it.second >= rows)
+            			if(col < 0 || row < 0 || col >= cols || row >= rows)
             				continue;
 
-            			size_t n = ((size_t) (qcol + it.first) << 32) | (qrow + it.second);
+            			size_t n = ((size_t) col << 32) | row;
 
             			if(closedSet.find(n) != closedSet.end())
             				continue;
 
             			double tgscore = gscore0 + heuristic(top, n);
+
+            			if(tgscore > maxCost)
+            				return false;
 
             			if(openSet.find(n) == openSet.end()) {
             				openSet.insert(n);
@@ -1114,8 +1164,7 @@ namespace geo {
 
             			parents[n] = top;
             			gscore[n] = tgscore;
-            			double h = heuristic(n, goal);
-            			fscore[n] = tgscore + h;
+            			fscore[n] = tgscore + heuristic(n, goal);
             		}
             	}
             }
@@ -1126,7 +1175,7 @@ namespace geo {
              * @param filename The filename of the output vector.
              * @param layerName The name of the output layer.
              * @param driver The name of the output driver. Any of the GDAL options.
-             * @param srid The spatial reference ID of the dataset.
+             * @param projection The WKT projection for the database.
              * @param band The band to vectorize.
              * @param removeHoles Remove holes from the polygons.
              * @param removeDangles Remove small polygons attached to larger ones diagonally.
@@ -1137,7 +1186,7 @@ namespace geo {
              * @param cancel A boolean that will be set to true if the algorithm should quit.
              */
             void polygonize(const std::string &filename, const std::string &layerName,
-                const std::string &driver, int srid, int band, bool removeHoles, bool removeDangles,
+                const std::string &driver, const std::string& projection, int band, bool removeHoles, bool removeDangles,
 				const std::string& mask, int maskBand, int threads,
 				bool& cancel, geo::util::Status& status);
         };
@@ -1257,6 +1306,9 @@ namespace geo {
             void *m_grid;							///<! The allocated memory pointer.
             geo::util::MappedFile* m_mappedFile;	///<! The mapped file container.
             GridProps m_props;						///<! Grid properties.
+            std::mutex m_freeMtx;					///<! Mutex to protect memory resources.
+            std::mutex m_initMtx;					///<! Mutex to protect memory resources.
+            std::mutex m_mtx;						///<! Mutex for use by callers.
 
             /**
              * Checks if the grid has been initialized. Throws exception otherwise.
@@ -1346,6 +1398,8 @@ namespace geo {
              */
             void fromMatrix(Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic>& mtx, int band);
 
+            std::mutex& mutex();
+
             const GridProps& props() const;
 
             void fillFloat(double value, int band);
@@ -1394,15 +1448,16 @@ namespace geo {
         class G_DLL_EXPORT Raster : public Grid {
         	friend class MemRaster;
         private:
-            GDALDataset *m_ds;          				///< GDAL data set pointer.
-            int m_bcols, m_brows;						///< The size of the GDAL block.
-            int m_bcol, m_brow;							///< The current loaded block position.
-            int m_bband;								///< The band corresponding to the current block.
-            bool m_dirty;								///< True if the current block has been written to and must be flushed.
-            std::string m_filename;     				///< Raster filename
-            GridProps m_props;							///< Properties of the raster.
-            GDALDataType m_type;        				///< GDALDataType -- limits the possible template types.
-            std::unordered_map<int, void*> m_blocks;	///< The block cache.
+            GDALDataset *m_ds;          				///<! GDAL data set pointer.
+            int m_bcols, m_brows;						///<! The size of the GDAL block.
+            int m_bcol, m_brow;							///<! The current loaded block position.
+            int m_bband;								///<! The band corresponding to the current block.
+            bool m_dirty;								///<! True if the current block has been written to and must be flushed.
+            std::string m_filename;     				///<! Raster filename
+            GridProps m_props;							///<! Properties of the raster.
+            GDALDataType m_type;        				///<! GDALDataType -- limits the possible template types.
+            std::unordered_map<int, void*> m_blocks;	///<! The block cache.
+            std::mutex m_mtx;							///<! Mutex for use by callers.
 
             /**
              * Returns the GDAL data type.
@@ -1509,6 +1564,15 @@ namespace geo {
             static std::map<std::string, std::string> drivers();
 
             /**
+             * Return a map containing the raster driver short name and long name. Use filter
+             * to filter the returns on short name.
+             *
+             * @param filter A vector containing the short names of drivers to include.
+             * @return A map containing the raster driver short name and long name.
+             */
+            static std::map<std::string, std::string> drivers(const std::vector<std::string>& filter);
+
+            /**
              * Get the name of the driver that would be used to open a file
              * with the given path.
              *
@@ -1582,6 +1646,8 @@ namespace geo {
              * Flush a dirty read/write block to the dataset.
              */
             void flushDirty();
+
+            std::mutex& mutex();
 
             const GridProps& props() const;
 

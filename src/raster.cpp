@@ -157,7 +157,25 @@ GridProps::GridProps() :
 		m_writable(false),			// True if the grid is writable
 		m_nodata(0),
 		m_nodataSet(false),
+		m_compress(false),
+		m_bigTiff(false),
 		m_type(DataType::None) {	// The data type.
+}
+
+void GridProps::setCompress(bool compress) {
+	m_compress = compress;
+};
+
+bool GridProps::compress() const {
+	return m_compress;
+}
+
+void GridProps::setBigTiff(bool bigTiff) {
+	m_bigTiff = bigTiff;
+}
+
+bool GridProps::bigTiff() const {
+	return m_bigTiff;
 }
 
 std::string GridProps::driver() const {
@@ -439,6 +457,7 @@ void Tile::flush() {
 }
 
 void Tile::writeTo(Grid& dest) {
+	std::lock_guard<std::mutex> lk(dest.mutex());
 	m_tile->writeTo(dest, m_cols, m_rows, m_buffer, m_buffer, m_col, m_row);
 }
 
@@ -500,7 +519,10 @@ Tile* TileIterator::next() {
 	p.setSize(m_cols + m_buffer * 2, m_rows + m_buffer * 2);
 	std::unique_ptr<MemRaster> tile(new MemRaster(p));
 
-	m_source.writeTo(*tile, cols, rows, srcCol, srcRow, dstCol, dstRow, m_band, 1);
+	{
+		std::lock_guard<std::mutex> lk(m_source.mutex());
+		m_source.writeTo(*tile, cols, rows, srcCol, srcRow, dstCol, dstRow, m_band, 1);
+	}
 
 	return new Tile(tile.release(), &m_source, m_cols, m_rows, col, row,
 			m_buffer, srcCol, srcRow, dstCol, dstRow, m_band, props.writable());
@@ -511,8 +533,10 @@ Tile* TileIterator::create(Tile &tpl) {
 	p.setSize(m_cols + m_buffer * 2, m_rows + m_buffer * 2);
 	std::unique_ptr<MemRaster> tile(new MemRaster(p));
 
-	m_source.writeTo(*tile, tpl.m_cols, tpl.m_rows,
-			tpl.m_srcCol, tpl.m_srcRow, tpl.m_dstCol, tpl.m_dstRow, m_band, 1);
+	{
+		std::lock_guard<std::mutex> lk(m_source.mutex());
+		m_source.writeTo(*tile, tpl.m_cols, tpl.m_rows, tpl.m_srcCol, tpl.m_srcRow, tpl.m_dstCol, tpl.m_dstRow, m_band, 1);
+	}
 
 	return new Tile(tile.release(), &m_source, m_cols, m_rows, tpl.m_col, tpl.m_row,
 			m_buffer, tpl.m_srcCol, tpl.m_srcRow, tpl.m_dstCol, tpl.m_dstRow, m_band, p.writable());
@@ -772,61 +796,67 @@ using namespace geo::raster::util;
  * @param rmtx The read mutex.
  * @param wmtx The write mutex.
  * @param cancel If set to true during operation, cancels the operation.
+ * @param ex If the function terminates with an exception, this pointer should point to it.
  */
 void _smooth(TileIterator* iter, Grid* smoothed,
 		int size, double nodata, double* weights,
-		std::mutex* rmtx, std::mutex* wmtx, bool* cancel, Status* status, int* curTile) {
+		std::mutex* rmtx, std::mutex* wmtx, bool* cancel, Status* status, int* curTile,
+		std::exception_ptr* p) {
 
-	std::unique_ptr<Tile> tile;
-	int tileCount = iter->count();
+	try {
+		std::unique_ptr<Tile> tile;
+		int tileCount = iter->count();
 
-	while(!*cancel) {
+		while(!*cancel) {
 
-		{
-			std::lock_guard<std::mutex> lk(*rmtx);
-			tile.reset(iter->next());
-			if(!tile.get())
-				return;
-			++*curTile;
-		}
-
-		// Copy the tile to a buffer, process the buffer and write back to the grid.
-		Grid& grid = tile->grid();
-		const GridProps& props = grid.props();
-		MemRaster buf(props);
-		grid.writeTo(buf);
-
-		// Process the entire block, even the buffer parts.
-		for (int r = 0; !*cancel && r < props.rows() - size; ++r) {
-			for (int c = 0; !*cancel && c < props.cols() - size; ++c) {
-				double v, t = 0.0;
-				bool foundNodata = false;
-				for (int gr = 0; gr < size; ++gr) {
-					for (int gc = 0; gc < size; ++gc) {
-						v = buf.getFloat(c + gc, r + gr, 1);
-						if (v == nodata) {
-							foundNodata = true;
-							break;
-						} else {
-							t += weights[gr * size + gc] * v;
-						}
-					}
-					if(foundNodata) break;
-				}
-				if (!foundNodata)
-					grid.setFloat(c + size / 2, r + size / 2, t, 1);
+			{
+				std::lock_guard<std::mutex> lk(*rmtx);
+				tile.reset(iter->next());
+				if(!tile.get())
+					return;
+				++*curTile;
 			}
+
+			// Copy the tile to a buffer, process the buffer and write back to the grid.
+			Grid& grid = tile->grid();
+			const GridProps& props = grid.props();
+			MemRaster buf(props);
+			grid.writeTo(buf);
+
+			// Process the entire block, even the buffer parts.
+			for (int r = 0; !*cancel && r < props.rows() - size; ++r) {
+				for (int c = 0; !*cancel && c < props.cols() - size; ++c) {
+					double v, t = 0.0;
+					bool foundNodata = false;
+					for (int gr = 0; gr < size; ++gr) {
+						for (int gc = 0; gc < size; ++gc) {
+							v = buf.getFloat(c + gc, r + gr, 1);
+							if (v == nodata) {
+								foundNodata = true;
+								break;
+							} else {
+								t += weights[gr * size + gc] * v;
+							}
+						}
+						if(foundNodata) break;
+					}
+					if (!foundNodata)
+						grid.setFloat(c + size / 2, r + size / 2, t, 1);
+				}
+			}
+
+			if(*cancel)
+				break;
+
+			{
+				std::lock_guard<std::mutex> lk(*wmtx);
+				tile->writeTo(*smoothed);
+			}
+
+			status->update(g_min(0.99f, 0.2f + (float) *curTile / tileCount * 0.97f));
 		}
-
-		if(*cancel)
-			break;
-
-		{
-			std::lock_guard<std::mutex> lk(*wmtx);
-			tile->writeTo(*smoothed);
-		}
-
-		status->update(g_min(0.99f, 0.2f + (float) *curTile / tileCount * 0.97f));
+	} catch(const std::exception& e) {
+		*p = std::current_exception();
 	}
 }
 
@@ -861,11 +891,12 @@ void Grid::smooth(Grid& smoothed, double sigma, int size, int band,
 	int curTile = 0;
 
 	// Run the smoothing jobs.
-	std::vector<std::thread> threads;
 	int numThreads = 8;
+	std::vector<std::thread> threads;
+	std::vector<std::exception_ptr> exceptions(numThreads);
 	for(int i = 0; i < numThreads; ++i) {
 		threads.emplace_back(_smooth, &iter, &smoothed, size, nodata, weights,
-				&rmtx, &wmtx, &cancel, &status, &curTile);
+				&rmtx, &wmtx, &cancel, &status, &curTile, &exceptions[i]);
 	}
 
 	// Wait for jobs to complete.
@@ -874,10 +905,20 @@ void Grid::smooth(Grid& smoothed, double sigma, int size, int band,
 			threads[i].join();
 	}
 
+	// Check if any exceptions were trapped. Raise the first one.
+	for(int i = 0; i < numThreads; ++i) {
+		if(exceptions[i])
+			std::rethrow_exception(exceptions[i]);
+	}
+
 	status.update(1.0);
 }
 
 // Implementations for MemRaster
+
+std::mutex& MemRaster::mutex() {
+	return m_mtx;
+}
 
 bool MemRaster::mmapped() const {
 	return m_mmapped;
@@ -917,6 +958,7 @@ void* MemRaster::grid() {
 }
 
 void MemRaster::freeMem() {
+	std::lock_guard<std::mutex> lk(m_freeMtx);
 	if (m_grid) {
 		if (m_mmapped) {
 			delete m_mappedFile;
@@ -930,8 +972,7 @@ void MemRaster::freeMem() {
 }
 
 void MemRaster::init(const GridProps& pr, bool mapped) {
-	m_grid = nullptr;
-	m_mmapped = false;
+	std::lock_guard<std::mutex> lk(m_initMtx);
 	if (pr.cols() != m_props.cols() || pr.rows() != m_props.rows()) {
 		freeMem();
 		m_props = GridProps(pr);
@@ -993,19 +1034,6 @@ void MemRaster::fillInt(int value, int band) {
 	}
 }
 
-/*
-double MemRaster::getFloat(size_t idx, int band) {
-	checkInit();
-	if (idx < 0 || idx >= m_props.size())
-		g_argerr("Index out of bounds: " << idx << "; size: " << m_props.size());
-	if(m_props.isInt()) {
-		return (double) getInt(idx, band);
-	} else {
-		return *(((double*) m_grid) + idx);
-	}
-}
-*/
-
 double MemRaster::getFloat(int col, int row, int band) {
 	checkInit();
 	if(m_props.isInt()) {
@@ -1046,19 +1074,6 @@ int MemRaster::getFloatRow(int row, int band, float* buf) {
 	return 0;
 }
 
-/*
-int MemRaster::getInt(size_t idx, int band) {
-	checkInit();
-	if (idx < 0 || idx >= m_props.size())
-		g_argerr("Index out of bounds: " << idx << "; size: " << m_props.size());
-	if(m_props.isInt()) {
-		return *(((int*) m_grid) + idx);
-	} else {
-		return (int) getFloat(idx, band);
-	}
-}
-*/
-
 int MemRaster::getInt(int col, int row, int band) {
 	checkInit();
 	if(m_props.isInt()) {
@@ -1086,22 +1101,6 @@ void MemRaster::setFloat(int col, int row, double value, int band) {
 	}
 }
 
-/*
-void MemRaster::setFloat(size_t idx, double value, int band) {
-	checkInit();
-	size_t ps = m_props.size();
-	if (idx >= ps)
-		g_argerr("Index out of bounds: " << idx << "; size: " << m_props.size()
-						<< "; value: " << value << "; col: " << (idx % m_props.cols())
-						<< "; row: " << (idx / m_props.cols()));
-	if(m_props.isInt()) {
-		setInt(idx, (int) value, band);
-	} else {
-		*(((double *) m_grid) + idx) = value;
-	}
-}
-*/
-
 void MemRaster::setInt(int col, int row, int value, int band) {
 	checkInit();
 	if(m_props.isInt()) {
@@ -1116,22 +1115,6 @@ void MemRaster::setInt(int col, int row, int value, int band) {
 		setFloat(col, row, (double) value, band);
 	}
 }
-
-/*
-void MemRaster::setInt(size_t idx, int value, int band) {
-	checkInit();
-	size_t ps = m_props.size();
-	if (idx >= ps)
-		g_argerr("Index out of bounds: " << idx << "; size: " << m_props.size()
-						<< "; value: " << value << "; col: " << (idx % m_props.cols())
-						<< "; row: " << (idx / m_props.cols()));
-	if(m_props.isInt()) {
-		*(((int *) m_grid) + idx) = value;
-	} else {
-		setFloat(idx, (double) value, band);
-	}
-}
-*/
 
 void MemRaster::toMatrix(
 		Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic>& mtx, int band) {
@@ -1247,6 +1230,10 @@ void MemRaster::writeTo(Grid& grd,
 
 // Implementations for Raster
 
+std::mutex& Raster::mutex() {
+	return m_mtx;
+}
+
 std::map<std::string, std::set<std::string> > Raster::extensions() {
 	GDALAllRegister();
 	std::map<std::string, std::set<std::string> > extensions;
@@ -1272,6 +1259,11 @@ std::map<std::string, std::set<std::string> > Raster::extensions() {
 }
 
 std::map<std::string, std::string> Raster::drivers() {
+	std::vector<std::string> f;
+	return drivers(f);
+}
+
+std::map<std::string, std::string> Raster::drivers(const std::vector<std::string>& filter) {
 	GDALAllRegister();
 	std::map<std::string, std::string> drivers;
 	GDALDriverManager *mgr = GetGDALDriverManager();
@@ -1282,7 +1274,18 @@ std::map<std::string, std::string> Raster::drivers() {
 			const char* name = drv->GetMetadataItem(GDAL_DMD_LONGNAME);
 			const char* desc = drv->GetDescription();
 			if(name != NULL && desc != NULL) {
-				drivers[desc] = name;
+				bool found = true;
+				if(!filter.empty()) {
+					found = false;
+					for(const std::string& f : filter) {
+						if(f == desc) {
+							found = true;
+							break;
+						}
+					}
+				}
+				if(found)
+					drivers[desc] = name;
 			}
 		}
 	}
@@ -1320,13 +1323,14 @@ Raster::Raster(const std::string& filename, const GridProps& props) :
 
 	// Create GDAL dataset.
 	char **opts = NULL;
-	// TODO: Compress option in props, for tiffs
-	/*
-	if(m_props.compress())
+	if(m_props.compress()) {
 		opts = CSLSetNameValue(opts, "COMPRESS", "LZW");
+		opts = CSLSetNameValue(opts, "PREDICTOR", "2");
+	}
 	if(m_props.bigTiff())
 		opts = CSLSetNameValue(opts, "BIGTIFF", "YES");
-	*/
+	opts = CSLSetNameValue(opts, "INTERLEAVE", "BAND");
+
 	GDALAllRegister();
 	std::string drvName = m_props.driver();
 	if(drvName.empty())

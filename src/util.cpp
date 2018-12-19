@@ -67,8 +67,6 @@ void Callbacks::statusCallback(const std::string &msg) const {
 	g_debug("Status: " << msg);
 }
 
-Callbacks::~Callbacks() {
-}
 
 Status::Status(Callbacks *callbacks, float start, float end) :
 	m_callbacks(callbacks), m_start(start), m_end(end) {
@@ -446,6 +444,10 @@ void Util::copyfile(const std::string &srcfile, const std::string &dstfile) {
 	std::ifstream src(srcfile.c_str(), std::ios::binary);
 	std::ofstream dst(dstfile.c_str(), std::ios::binary);
 	dst << src.rdbuf();
+}
+
+void Util::rename(const std::string &srcfile, const std::string &dstfile) {
+	boost::filesystem::rename(boost::filesystem::path(srcfile), boost::filesystem::path(dstfile));
 }
 
 bool Util::exists(const std::string &name) {
