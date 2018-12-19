@@ -688,8 +688,9 @@ namespace geo {
              * @param weights The list of weights.
              * @param size The size of the weights list.
              * @param sigma The standard deviation.
+             * @param mean The centre of the curve.
              */
-            static void gaussianWeights(double *weights, int size, double sigma);
+            static void gaussianWeights(double *weights, int size, double sigma, double mean = 0);
 
             /**
              * Compute and return the statistics for the band.

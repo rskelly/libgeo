@@ -528,7 +528,7 @@ TileIterator Grid::iterator(int cols, int rows, int buffer, int band) {
 	return TileIterator(*this, cols, rows, buffer, band);
 }
 
-void Grid::gaussianWeights(double *weights, int size, double sigma) {
+void Grid::gaussianWeights(double *weights, int size, double sigma, double mean) {
 	// If size is an even number, bump it up.
 	if (size % 2 == 0) {
 		++size;
@@ -538,8 +538,7 @@ void Grid::gaussianWeights(double *weights, int size, double sigma) {
 		for (int c = 0; c < size; ++c) {
 			int x = size / 2 - c;
 			int y = size / 2 - r;
-			weights[r * size + c] = (1 / (2 * G_PI * sigma * sigma))
-					* pow(G_E, -((x * x + y * y) / (2.0 * sigma * sigma)));
+			weights[r * size + c] = (1 / (2 * G_PI * sigma * sigma)) * std::pow(G_E, -((x * x + y * y) / (2.0 * sigma * sigma)));
 		}
 	}
 }
