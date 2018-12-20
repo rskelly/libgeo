@@ -447,7 +447,26 @@ void Util::copyfile(const std::string &srcfile, const std::string &dstfile) {
 }
 
 void Util::rename(const std::string &srcfile, const std::string &dstfile) {
-	boost::filesystem::rename(boost::filesystem::path(srcfile), boost::filesystem::path(dstfile));
+	using namespace boost::filesystem;
+	try {
+		boost::filesystem::rename(path(srcfile), path(dstfile));
+	} catch(...) {
+		// If there's a cross-link or some other crap, try a copy-verify-remove
+		boost::filesystem::remove(path(dstfile));
+		boost::filesystem::copy(path(srcfile), path(dstfile));
+		std::ifstream src(srcfile, std::ios::binary);
+		std::ifstream dst(dstfile, std::ios::binary);
+		char sc;
+		char dc;
+		while(!src.eof()) {
+			src >> sc;
+			dst >> dc;
+			if(sc != dc)
+				g_runerr("Failed to copy file " << srcfile << " to " << dstfile << ".");
+		}
+		if(!dst.eof())
+			g_warn("File lengths not the same.");
+	}
 }
 
 bool Util::exists(const std::string &name) {
