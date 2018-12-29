@@ -155,6 +155,16 @@ namespace geo {
 				QTree::QTree(bounds, maxDepth, maxCount, 0) {
 			}
 
+			QTree() :
+				m_maxDepth(0),
+				m_maxCount(0),
+				m_depth(0),
+				m_iterIdx(0),
+				m_split(false) {
+				for(int i = 0; i < 4; ++i)
+					m_nodes[i] = nullptr;
+			}
+
 			/**
 			 * Initialize a QTree with the given bounds, depth and count.
 			 *
