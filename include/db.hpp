@@ -32,7 +32,9 @@ namespace geo {
             GTPolygon = 3,
             GTMultiPoint = 4,
             GTMultiLine = 5,
-            GTMultiPolygon = 6
+            GTMultiPolygon = 6,
+			GTPointZ = 7,
+			GTMultiPolygonZ = 8
         };
 
         enum FieldType {
@@ -107,6 +109,17 @@ namespace geo {
             void open();
 
             /**
+             * Return the layer name. For shapefiles this is the filename. For others,
+             * it's just the first layer's name.
+             */
+            std::string layerName() const;
+
+            /**
+             * Return a list of the field names for the given named layer.
+             */
+            std::vector<std::string> fieldNames(const std::string& layerName) const;
+
+            /**
              * Returns a map with file extensions for keys, and a list of driver names as values.
              *
              * @return A map with file extensions for keys, and a list of driver names as values.
@@ -161,7 +174,7 @@ namespace geo {
 
             uint64_t getGeomCount() const;
 
-            void execute(std::string& sql);
+            void execute(const std::string& sql);
 
             void begin();
 

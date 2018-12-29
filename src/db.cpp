@@ -14,11 +14,13 @@ namespace geo {
 			GeomType geomType(OGRwkbGeometryType type) {
 				switch(type) {
 				case wkbPoint: return GeomType::GTPoint;
+				case wkbPoint25D: return GeomType::GTPointZ;
 				case wkbLineString: return GeomType::GTLine;
 				case wkbPolygon: return GeomType::GTPolygon;
 				case wkbMultiPoint: return GeomType::GTMultiPoint;
 				case wkbMultiLineString: return GeomType::GTMultiLine;
 				case wkbMultiPolygon: return GeomType::GTMultiPolygon;
+				case wkbMultiPolygon25D: return GeomType::GTMultiPolygonZ;
 				default: return GeomType::GTUnknown;
 				}
 			}
@@ -26,11 +28,13 @@ namespace geo {
 			OGRwkbGeometryType geomType(GeomType type) {
 				switch(type) {
 				case GeomType::GTPoint: return wkbPoint;
+				case GeomType::GTPointZ: return wkbPoint25D;
 				case GeomType::GTLine: return wkbLineString;
 				case GeomType::GTPolygon: return wkbPolygon;
 				case GeomType::GTMultiPoint: return wkbMultiPoint;
 				case GeomType::GTMultiLine: return wkbMultiLineString;
 				case GeomType::GTMultiPolygon: return wkbMultiPolygon;
+				case GeomType::GTMultiPolygonZ: return wkbMultiPolygon25D;
 				default: return wkbUnknown;
 				}
 			}
@@ -112,9 +116,11 @@ DB::DB(const std::string& file, const std::string& layer, const std::string& dri
     if(!drv)
         g_runerr("Driver not found for " << m_file << " (" << driver << ")");
 
+    std::string drvl = Util::lower(m_driver);
+
 	// If the file is sqlite, use the spatialite driver.
 	char** dopts = nullptr;
-	if(m_driver == "SQLite")
+	if(drvl == "sqlite")
 		dopts = CSLSetNameValue(dopts, "SPATIALITE", "YES");
 
 	m_ds = drv->Create(m_file.c_str(), 0, 0, 0, GDT_Unknown, dopts);
@@ -129,10 +135,10 @@ DB::DB(const std::string& file, const std::string& layer, const std::string& dri
 		sr = new OGRSpatialReference(m_projection.c_str());
 
 	dopts = nullptr;
-	if(m_driver == "SQLite") {
+	if(drvl == "sqlite") {
 		dopts = CSLSetNameValue(dopts, "FORMAT", "SPATIALITE");
 		dopts = CSLSetNameValue(dopts, "GEOMETRY_NAME", "geom");
-	} else if(m_driver == "ESRI Shapefile") {
+	} else if(drvl == "esri shapefile") {
 		dopts = CSLSetNameValue(dopts, "2GB_LIMIT", "YES");
 	}
 
@@ -196,9 +202,11 @@ DB::DB(const std::string& file, const std::string& layer, const std::string& dri
     if(!drv)
         g_runerr("Driver not found for " << m_file << " (" << driver << ")");
 
+    std::string drvl = Util::lower(m_driver);
+
 	// If the file is sqlite, use the spatialite driver.
 	char** dopts = nullptr;
-	if(m_driver == "SQLite")
+	if(drvl == "sqlite")
 		dopts = CSLSetNameValue(dopts, "SPATIALITE", "YES");
 
 	m_ds = drv->Create(m_file.c_str(), 0, 0, 0, GDT_Unknown, dopts);
@@ -215,10 +223,10 @@ DB::DB(const std::string& file, const std::string& layer, const std::string& dri
 	}
 
 	dopts = nullptr;
-	if(m_driver == "SQLite") {
+	if(drvl == "sqlite") {
 		dopts = CSLSetNameValue(dopts, "FORMAT", "SPATIALITE");
 		dopts = CSLSetNameValue(dopts, "GEOMETRY_NAME", "geom");
-	} else if(m_driver == "ESRI Shapefile") {
+	} else if(drvl == "esri shapefile") {
 		dopts = CSLSetNameValue(dopts, "2GB_LIMIT", "YES");
 	}
 
@@ -393,9 +401,11 @@ void DB::convert(const std::string& filename, const std::string& driver) {
     if(!drv)
         g_runerr("Driver not found for " << filename << " (" << driver << ")");
 
+    std::string drvl = Util::lower(driver);
+
 	// If the file is sqlite, use the spatialite driver.
 	char **dopts = nullptr;
-	if(driver == "SQLite")
+	if(drvl == "sqlite")
 		dopts = CSLSetNameValue(dopts, "SPATIALITE", "YES");
 
 	GDALDataset* ds = drv->Create(filename.c_str(), 0, 0, 0, GDT_Unknown, dopts);
@@ -408,10 +418,10 @@ void DB::convert(const std::string& filename, const std::string& driver) {
 	OGRLayer* layer = m_ds->GetLayerByName(m_layerName.c_str());
 
 	dopts = nullptr;
-	if(driver == "SQLite") {
+	if(drvl == "sqlite") {
 		dopts = CSLSetNameValue(dopts, "FORMAT", "SPATIALITE");
 		dopts = CSLSetNameValue(dopts, "GEOMETRY_NAME", "geom");
-	} else if(m_driver == "ESRI Shapefile") {
+	} else if(drvl == "ESRI Shapefile") {
 		dopts = CSLSetNameValue(dopts, "2GB_LIMIT", "YES");
 	}
 
@@ -437,7 +447,7 @@ void DB::dropGeomIndex(const std::string& table, const std::string& column) {
 		_table = table;
 	}
 	std::string sql = "SELECT DisableSpatialIndex('" + _table + "', '" + column + "'); DropTable idx_" + _table + "_Geometry; VACUUM;";
-	m_ds->ExecuteSQL(sql.c_str(), nullptr, nullptr);
+	m_ds->ExecuteSQL(sql.c_str(), nullptr, "SQLite");
 }
 
 void DB::createGeomIndex(const std::string& table, const std::string& column) {
@@ -448,15 +458,27 @@ void DB::createGeomIndex(const std::string& table, const std::string& column) {
 		_table = table;
 	}
 	std::string sql = "SELECT CreateSpatialIndex('" + _table + "', '" + column + "');";
-	m_ds->ExecuteSQL(sql.c_str(), nullptr, nullptr);
+	m_ds->ExecuteSQL(sql.c_str(), nullptr, "SQLite");
 }
 
 uint64_t DB::getGeomCount() const {
 	return static_cast<uint64_t>(m_layer->GetFeatureCount(1));
 }
 
-void DB::execute(std::string& sql) {
-	g_runerr("Not implemented.");
+std::string DB::layerName() const {
+	return std::string(m_ds->GetLayer(0)->GetLayerDefn()->GetName());
+}
+
+std::vector<std::string> DB::fieldNames(const std::string& layerName) const {
+	OGRFeatureDefn* defn = m_ds->GetLayerByName(layerName.c_str())->GetLayerDefn();
+	std::vector<std::string> names;
+	for(int i = 0; i < defn->GetFieldCount(); ++i)
+		names.emplace_back(defn->GetFieldDefn(i)->GetNameRef());
+	return names;
+}
+
+void DB::execute(const std::string& sql) {
+	m_ds->ExecuteSQL(sql.c_str(), nullptr, "SQLite");
 }
 
 void DB::begin() {
