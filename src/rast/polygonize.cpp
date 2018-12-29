@@ -41,7 +41,7 @@ std::condition_variable __cv;	// For waiting on the queue.
 // Write to the file from the map of geometry lists.
 // On each loop, extracts a single finalized poly ID and loads those polys for unioning.
 void _writeToFile(std::unordered_map<int, std::vector<Polygon*> >* geoms, std::set<int>* finalIds,
-		OGRLayer* layer, GeometryFactory::unique_ptr* fact, GEOSContextHandle_t* gctx,
+		const std::string* idField, OGRLayer* layer, GeometryFactory::unique_ptr* fact, GEOSContextHandle_t* gctx,
 		bool removeHoles, bool removeDangles, bool* running, bool* cancel) {
 
 	std::vector<Polygon*> polys;
@@ -126,17 +126,19 @@ void _writeToFile(std::unordered_map<int, std::vector<Polygon*> >* geoms, std::s
 
 		// Create and write the OGR geometry.
 		OGRGeometry* ogeom = OGRGeometryFactory::createFromGEOS(*gctx, (GEOSGeom) geom);
-		OGRFeature feat(layer->GetLayerDefn());
-		feat.SetGeometry(ogeom);
-		feat.SetField("id", (GIntBig) id);
-		feat.SetFID(++__fid);
+		OGRFeature* feat = OGRFeature::CreateFeature(layer->GetLayerDefn()); // Creates on the OGR heap.
+		feat->SetGeometry(ogeom);
+		feat->SetField(idField->c_str(), (GIntBig) id);
+		feat->SetFID(++__fid);
 
 		// Write to the output file.
 		int err;
 		{
 			std::lock_guard<std::mutex> lk(__omtx);
-			err = layer->CreateFeature(&feat);
+			err = layer->CreateFeature(feat);
 		}
+
+		OGRFeature::DestroyFeature(feat);
 
 		// Delete the polys.
 		delete ogeom;
@@ -148,54 +150,63 @@ void _writeToFile(std::unordered_map<int, std::vector<Polygon*> >* geoms, std::s
 }
 
 // Produce a rectangular polygon from the four corners.
-Polygon* _makeGeom(double x0, double y0, double x1, double y1, GeometryFactory::unique_ptr* fact) {
+Polygon* _makeGeom(double x0, double y0, double x1, double y1, GeometryFactory::unique_ptr* fact, int dims) {
+
 	// Build the geometry.
-	CoordinateSequence* seq = (*fact)->getCoordinateSequenceFactory()->create(5, 2);
-	seq->setAt(Coordinate(x0, y0), 0);
-	seq->setAt(Coordinate(x0, y1), 1);
-	seq->setAt(Coordinate(x1, y1), 2);
-	seq->setAt(Coordinate(x1, y0), 3);
-	seq->setAt(Coordinate(x0, y0), 4);
+	CoordinateSequence* seq = (*fact)->getCoordinateSequenceFactory()->create(5, dims);
+	seq->setAt(Coordinate(x0, y0, 0), 0);
+	seq->setAt(Coordinate(x0, y1, 0), 1);
+	seq->setAt(Coordinate(x1, y1, 0), 2);
+	seq->setAt(Coordinate(x1, y0, 0), 3);
+	seq->setAt(Coordinate(x0, y0, 0), 4);
 	LinearRing* ring = (*fact)->createLinearRing(seq);
 	return (*fact)->createPolygon(ring, NULL);
 }
 
-// Make an OGR database to write the polygons to.
-std::tuple<GDALDataset*, OGRLayer*> _makeDataset(const std::string& filename, const std::string& driver, const std::string& layerName, OGRSpatialReference* sr) {
-	// Get the vector driver.
-	GDALDriver *drv = GetGDALDriverManager()->GetDriverByName(driver.c_str());
-	if(!drv)
-		g_runerr("Failed to find driver for " << driver << ".");
+// Make or open an OGR database to write the polygons to.
+void _makeDataset(const std::string& filename, const std::string& driver, const std::string& layerName, const std::string& idField,
+		OGRSpatialReference* sr, OGRwkbGeometryType gType,
+		GDALDataset** ds, OGRLayer** layer) {
 
-	// Create an output dataset for the polygons.
-	char** dopts = NULL;
-	if(Util::lower(driver) == "sqlite")
-		dopts = CSLSetNameValue(dopts, "SPATIALITE", "YES");
-	GDALDataset* ds = drv->Create(filename.c_str(), 0, 0, 0, GDT_Unknown, dopts);
-	CPLFree(dopts);
-	if(!ds)
-		g_runerr("Failed to create dataset " << filename << ".");
+	*ds = (GDALDataset*) GDALOpenEx(filename.c_str(), GDAL_OF_VECTOR | GDAL_OF_UPDATE, nullptr, nullptr, nullptr);
+
+	std::string drvl = Util::lower(driver);
+
+	if(!*ds) {
+		// Get the vector driver.
+		GDALDriver *drv = GetGDALDriverManager()->GetDriverByName(driver.c_str());
+		if(!drv)
+			g_runerr("Failed to find driver for " << driver << ".");
+
+		// Create an output dataset for the polygons.
+		char** dopts = NULL;
+		if(drvl == "sqlite")
+			dopts = CSLSetNameValue(dopts, "SPATIALITE", "YES");
+
+		*ds = drv->Create(filename.c_str(), 0, 0, 0, GDT_Unknown, dopts);
+		CPLFree(dopts);
+		if(!*ds)
+			g_runerr("Failed to create dataset " << filename << ".");
+
+	}
 
 	// Create the layer.
 	char** lopts = NULL;
-	std::string drvl = Util::lower(driver);
 	if(drvl == "sqlite") {
 		lopts = CSLSetNameValue(lopts, "FORMAT", "SPATIALITE");
 	} else if(drvl == "esri shapefile") {
 		lopts = CSLSetNameValue(lopts, "2GB_LIMIT", "YES");
 	}
-
-	OGRLayer* layer = ds->CreateLayer(layerName.c_str(), sr, wkbMultiPolygon, lopts);
+	*layer = (*ds)->CreateLayer(layerName.c_str(), sr, gType, lopts);
 	CPLFree(lopts);
 
-	if(!layer)
+	if(!*layer)
 		g_runerr("Failed to create layer " << layerName << ".");
 
 	// There's only one field -- an ID.
-	OGRFieldDefn field( "id", OFTInteger);
-	layer->CreateField(&field);
+	OGRFieldDefn field(idField.c_str(), OFTInteger);
+	(*layer)->CreateField(&field);
 
-	return std::make_tuple(ds, layer);
 }
 
 // Produce a status message from the current and total row counds.
@@ -205,9 +216,18 @@ std::string _rowStatus(int r, int rows) {
 	return ss.str();
 }
 
-void Grid::polygonize(const std::string& filename, const std::string& layerName,
+void Grid::polygonize(const std::string& filename, const std::string& layerName, const std::string& idField,
 		const std::string& driver, const std::string& projection, int band, bool removeHoles, bool removeDangles,
-		const std::string& mask, int maskBand, int threads,
+		const std::string& mask, int maskBand, int threads, bool d3,
+		bool& cancel, Status& status) {
+	std::vector<std::pair<std::string, OGRFieldType> > fields;
+	polygonize(filename, layerName, idField, driver, projection, band, removeHoles, removeDangles,
+			mask, maskBand, threads, d3, fields, cancel, status);
+}
+
+void Grid::polygonize(const std::string& filename, const std::string& layerName, const std::string& idField,
+		const std::string& driver, const std::string& projection, int band, bool removeHoles, bool removeDangles,
+		const std::string& mask, int maskBand, int threads, bool d3, const std::vector<std::pair<std::string, OGRFieldType> >& fields,
 		bool& cancel, Status& status) {
 
 	if(!props().isInt())
@@ -255,12 +275,19 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 	if(!projection.empty())
 		sr = new OGRSpatialReference(projection.c_str());
 
-	std::unique_ptr<GDALDataset> ds;
-	std::unique_ptr<OGRLayer> layer;
-	{
-		std::tuple<GDALDataset*, OGRLayer*> t = _makeDataset(filename, driver, layerName, sr);
-		ds.reset(std::get<0>(t));
-		layer.reset(std::get<1>(t));
+	GDALDataset* ds;
+	OGRLayer* layer;
+	_makeDataset(filename, driver, layerName, idField, sr, d3 ? wkbMultiPolygon25D : wkbMultiPolygon, &ds, &layer);
+
+	if(!fields.empty()) {
+		for(const std::pair<std::string, OGRFieldType>& field : fields) {
+			if(idField == field.first) {
+				g_warn("The ID field matches one of the additional field names. Ignored.")
+				continue;
+			}
+			OGRFieldDefn dfn(field.first.c_str(), field.second);
+			layer->CreateField(&dfn);
+		}
 	}
 
 	// Data containers.
@@ -274,7 +301,7 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 
 	// Start output threads.
 	for(int i = 0; i < threads; ++i)
-		ths.emplace_back(&_writeToFile, &geoms, &finalIds, layer.get(), &fact, &gctx, removeHoles, removeDangles, &running, &cancel);
+		ths.emplace_back(&_writeToFile, &geoms, &finalIds, &idField, layer, &fact, &gctx, removeHoles, removeDangles, &running, &cancel);
 
 	// Process raster.
 	for(int r = 0; r < rows; ++r) {
@@ -305,7 +332,7 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 				x1 = startX + c * resX + epsX;
 				// If the value is a valid ID, create and the geometry and save it for writing.
 				if(v0 > 0) {
-					geoms[v0].push_back(_makeGeom(x0, y0, x1, y1, &fact));
+					geoms[v0].push_back(_makeGeom(x0, y0, x1, y1, &fact, d3 ? 3 : 2));
 					activeIds.insert(v0);
 				}
 				// Update values for next loop.
@@ -325,10 +352,8 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 		}
 		__cv.notify_all();
 
-		while(!finalIds.empty()) {
-			//std::this_thread::sleep_for(std::chrono::duration<double, std::milli>(1));
+		while(!finalIds.empty())
 			std::this_thread::yield();
-		}
 	}
 
 	// Finalize all remaining geometries.
@@ -349,8 +374,8 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 	}
 
 	// Release the layer -- GDAL will take care of it. But close the dataset so that can happen.
-	layer.release();
-	GDALClose(ds.release());
+	layer->Dereference();
+	GDALClose(ds);
 
 	status.update(1.0f, "Finished polygonization");
 
