@@ -1,3 +1,4 @@
+#include <unordered_set>
 #include "db.hpp"
 #include "util.hpp"
 #include "geo.hpp"
@@ -14,6 +15,7 @@ namespace geo {
 			GeomType geomType(OGRwkbGeometryType type) {
 				switch(type) {
 				case wkbPoint: return GeomType::GTPoint;
+				case wkbPoint25D: return GeomType::GTPoint3D;
 				case wkbLineString: return GeomType::GTLine;
 				case wkbPolygon: return GeomType::GTPolygon;
 				case wkbMultiPoint: return GeomType::GTMultiPoint;
@@ -31,6 +33,7 @@ namespace geo {
 				case GeomType::GTMultiPoint: return wkbMultiPoint;
 				case GeomType::GTMultiLine: return wkbMultiLineString;
 				case GeomType::GTMultiPolygon: return wkbMultiPolygon;
+				case GeomType::GTPoint3D: return wkbPoint25D;
 				default: return wkbUnknown;
 				}
 			}
@@ -381,7 +384,22 @@ void DB::setCacheSize(size_t size) {
 	g_runerr("Not implemented.");
 }
 
-void DB::convert(const std::string& filename, const std::string& driver) {
+/**
+ * Join the names together as a comma-delimited string of quoted names.
+ */
+std::string nameJoin(std::unordered_set<std::string>& names) {
+	std::stringstream ss;
+	bool first = true;
+	for(const std::string& n : names) {
+		if(!first)
+			ss << ",";
+		ss << '"' << n << '"';
+		first = false;
+	}
+	return ss.str();
+}
+
+void DB::convert(const std::string& filename, const std::string& driver, const std::vector<std::string>& dropFields) {
 
 	// If replace and file exists, delete the existing file.
     if(Util::exists(filename))
@@ -389,44 +407,78 @@ void DB::convert(const std::string& filename, const std::string& driver) {
 
     GDALAllRegister();
 
-    GDALDriver* drv = GetGDALDriverManager()->GetDriverByName(driver.c_str());
-    if(!drv)
-        g_runerr("Driver not found for " << filename << " (" << driver << ")");
+	// If there are drop fields, create a new table without them.
+	if(!dropFields.empty()) {
 
-	// If the file is sqlite, use the spatialite driver.
-	char **dopts = nullptr;
-	if(driver == "SQLite")
-		dopts = CSLSetNameValue(dopts, "SPATIALITE", "YES");
+		GDALDataset* ds = static_cast<GDALDataset*>(GDALOpenEx(m_file.c_str(), GDAL_OF_VECTOR | GDAL_OF_UPDATE, nullptr, nullptr, nullptr));
+		OGRLayer* layer = ds->GetLayerByName(m_layerName.c_str());
 
-	GDALDataset* ds = drv->Create(filename.c_str(), 0, 0, 0, GDT_Unknown, dopts);
+		// Get a list of the field names.
+		std::unordered_set<std::string> namest;//(dropFields.begin(), dropFields.end());
+		OGRFeatureDefn* defn = layer->GetLayerDefn();
+		for(int i = 0; i < defn->GetFieldCount(); ++i) {
+			OGRFieldDefn* fd = defn->GetFieldDefn(i);
+			namest.insert(fd->GetNameRef());
+		}
 
-	CPLFree(dopts);
+		// Remove the drop column names.
+		for(const std::string& n : dropFields)
+			namest.erase(n);
 
-	if(!ds)
-        g_runerr("Failed to create data set for " << filename);
+		// Rename the existing table.
+		std::string sql = "ALTER TABLE \"" + m_layerName + "\" RENAME TO convert_tmp;";
+		ds->ExecuteSQL(sql.c_str(), nullptr, nullptr);
 
-	OGRLayer* layer = m_ds->GetLayerByName(m_layerName.c_str());
+		// Create the new table with the old name.
+		sql = "CREATE TABLE \"" + m_layerName + "\" AS SELECT " + nameJoin(namest) + " FROM convert_tmp;";
+		ds->ExecuteSQL(sql.c_str(), nullptr, nullptr);
 
-	dopts = nullptr;
-	if(driver == "SQLite") {
-		dopts = CSLSetNameValue(dopts, "FORMAT", "SPATIALITE");
-		dopts = CSLSetNameValue(dopts, "GEOMETRY_NAME", "geom");
-	} else if(m_driver == "ESRI Shapefile") {
-		dopts = CSLSetNameValue(dopts, "2GB_LIMIT", "YES");
-	}
+		// Drop the temp table.
+		sql = "DROP TABLE convert_tmp";
+		ds->ExecuteSQL(sql.c_str(), nullptr, nullptr);
 
-	OGRLayer* newLayer = ds->CopyLayer(layer, m_layerName.c_str(), dopts);
-
-	CPLFree(dopts);
-
-	if(!newLayer) {
+		ds->FlushCache();
 		GDALClose(ds);
-		g_runerr("Failed to copy layer to new database.");
 	}
 
-	ds->FlushCache();
-	GDALClose(ds);
+	{
+		GDALDriver* drv = GetGDALDriverManager()->GetDriverByName(driver.c_str());
+		if(!drv)
+			g_runerr("Driver not found for " << filename << " (" << driver << ")");
 
+		// If the file is sqlite, use the spatialite driver.
+		char **dopts = nullptr;
+		if(driver == "SQLite")
+			dopts = CSLSetNameValue(dopts, "SPATIALITE", "YES");
+
+		GDALDataset* ds = drv->Create(filename.c_str(), 0, 0, 0, GDT_Unknown, dopts);
+
+		CPLFree(dopts);
+
+		if(!ds)
+			g_runerr("Failed to create data set for " << filename);
+
+		OGRLayer* layer = m_ds->GetLayerByName(m_layerName.c_str());
+
+		dopts = nullptr;
+		if(driver == "SQLite") {
+			dopts = CSLSetNameValue(dopts, "FORMAT", "SPATIALITE");
+			dopts = CSLSetNameValue(dopts, "GEOMETRY_NAME", "geom");
+		} else if(m_driver == "ESRI Shapefile") {
+			dopts = CSLSetNameValue(dopts, "2GB_LIMIT", "YES");
+		}
+
+		OGRLayer* newLayer = ds->CopyLayer(layer, m_layerName.c_str(), dopts);
+		CPLFree(dopts);
+
+		if(!newLayer) {
+			GDALClose(ds);
+			g_runerr("Failed to copy layer to new database.");
+		}
+
+		ds->FlushCache();
+		GDALClose(ds);
+    }
 }
 
 void DB::dropGeomIndex(const std::string& table, const std::string& column) {
@@ -448,6 +500,34 @@ void DB::createGeomIndex(const std::string& table, const std::string& column) {
 		_table = table;
 	}
 	std::string sql = "SELECT CreateSpatialIndex('" + _table + "', '" + column + "');";
+	m_ds->ExecuteSQL(sql.c_str(), nullptr, nullptr);
+}
+
+void DB::dropFields(const std::vector<std::string>& names) {
+	// Not doable without dropping the entire table.
+	g_runerr("Not implemented.");
+}
+
+std::string typeStr(FieldType type) {
+	switch(type) {
+	case FieldType::FTDouble:
+		return "DOUBLE PRECISION";
+	case FieldType::FTInt:
+		return "INTEGER";
+	case FieldType::FTString:
+		return "TEXT";
+	default:
+		g_runerr("Unknown or unimplemented field type: " << type);
+	}
+}
+
+void DB::addField(const std::string& name, FieldType type, bool index) {
+	std::string sql = "ALTER TABLE \"" + m_layerName + "\" ADD COLUMN \"" + name + "\" (" + typeStr(type) + ");";
+	m_ds->ExecuteSQL(sql.c_str(), nullptr, nullptr);
+}
+
+void DB::renameField(const std::string& fromName, const std::string& toName) {
+	std::string sql = "ALTER TABLE \"" + m_layerName + "\" RENAME COLUMN \"" + fromName + "\" to \"" + toName + "\";";
 	m_ds->ExecuteSQL(sql.c_str(), nullptr, nullptr);
 }
 

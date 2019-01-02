@@ -32,7 +32,8 @@ namespace geo {
             GTPolygon = 3,
             GTMultiPoint = 4,
             GTMultiLine = 5,
-            GTMultiPolygon = 6
+            GTMultiPolygon = 6,
+			GTPoint3D = 7
         };
 
         enum FieldType {
@@ -75,9 +76,9 @@ namespace geo {
              * @param srid The horizontal spatial reference ID.
              * @param replace If true, removes and replaces an existing database.
              */
-            DB(const std::string &file, const std::string &layer, const std::string &driver,
-            		const std::unordered_map<std::string, FieldType> &fields,
-            		GeomType type, int srid = 0, bool replace = false);
+            DB(const std::string& file, const std::string& layer, const std::string& driver,
+            		const std::unordered_map<std::string, FieldType>& fields,
+            		GeomType type,	int srid = 0, bool replace = false);
 
             /**
              * Construct a database object.
@@ -90,8 +91,8 @@ namespace geo {
              * @param srid The horizontal spatial reference ID.
              * @param replace If true, removes and replaces an existing database.
              */
-            DB(const std::string &file, const std::string &layer, const std::string &driver,
-            		const std::unordered_map<std::string, FieldType> &fields,
+            DB(const std::string& file, const std::string& layer, const std::string& driver,
+            		const std::unordered_map<std::string, FieldType>& fields,
             		GeomType type, const std::string& projection, bool replace = false);
 
             /**
@@ -100,7 +101,7 @@ namespace geo {
              * @param file The filename for the database. Presumably a connection string could be used here.
              * @param layer The layer or table name.
              */
-            DB(const std::string &file, const std::string &layer);
+            DB(const std::string& file, const std::string& layer);
 
             virtual ~DB();
 
@@ -148,10 +149,11 @@ namespace geo {
             /**
              * Re-save the database to the new filename using the given driver.
              *
-             * @param filename 	The filename for the new database. Will be overwritten if it exists.
-             * @param driver	The database driver.
+             * @param filename 		The filename for the new database. Will be overwritten if it exists.
+             * @param driver		The database driver.
+             * @param dropFields	A list of fields to drop.
              */
-            virtual void convert(const std::string& filename, const std::string& driver);
+            virtual void convert(const std::string& filename, const std::string& driver, const std::vector<std::string>& dropFields);
 
             virtual void setCacheSize(size_t size);
 
@@ -160,6 +162,12 @@ namespace geo {
             void createGeomIndex(const std::string& table = "", const std::string& column = "GEOMETRY");
 
             uint64_t getGeomCount() const;
+
+            void dropFields(const std::vector<std::string>& names);
+
+            void addField(const std::string& name, FieldType type, bool index = false);
+
+            void renameField(const std::string& fromName, const std::string& toName);
 
             void execute(std::string& sql);
 
