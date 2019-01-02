@@ -1174,6 +1174,7 @@ namespace geo {
              *
              * @param filename The filename of the output vector.
              * @param layerName The name of the output layer.
+             * @param idField A field name for the ID.
              * @param driver The name of the output driver. Any of the GDAL options.
              * @param projection The WKT projection for the database.
              * @param band The band to vectorize.
@@ -1182,12 +1183,37 @@ namespace geo {
              * @param mask The name of a raster file that will be used to set the bounds for vectorization.
              * @param maskBand The band from the mask raster.
              * @param threads The number of threads to use.
+             * @param d3 Set to true for 3D geometries; 2D otherwise.
              * @param status A Status object to receive progress updates.
              * @param cancel A boolean that will be set to true if the algorithm should quit.
              */
-            void polygonize(const std::string &filename, const std::string &layerName,
+            void polygonize(const std::string &filename, const std::string &layerName, const std::string& idField,
                 const std::string &driver, const std::string& projection, int band, bool removeHoles, bool removeDangles,
-				const std::string& mask, int maskBand, int threads,
+				const std::string& mask, int maskBand, int threads, bool d3,
+				bool& cancel, geo::util::Status& status);
+
+            /**
+             * Vectorize the raster.
+             *
+             * @param filename The filename of the output vector.
+             * @param layerName The name of the output layer.
+             * @param idField A field name for the ID.
+             * @param driver The name of the output driver. Any of the GDAL options.
+             * @param projection The WKT projection for the database.
+             * @param band The band to vectorize.
+             * @param removeHoles Remove holes from the polygons.
+             * @param removeDangles Remove small polygons attached to larger ones diagonally.
+             * @param mask The name of a raster file that will be used to set the bounds for vectorization.
+             * @param maskBand The band from the mask raster.
+             * @param threads The number of threads to use.
+             * @param d3 Set to true for 3D geometries; 2D otherwise.
+             * @param fields A list of pairs of names of columns to add. Will not be populated.
+             * @param status A Status object to receive progress updates.
+             * @param cancel A boolean that will be set to true if the algorithm should quit.
+             */
+            void polygonize(const std::string &filename, const std::string &layerName, const std::string& idField,
+                const std::string &driver, const std::string& projection, int band, bool removeHoles, bool removeDangles,
+				const std::string& mask, int maskBand, int threads, bool d3, const std::vector<std::pair<std::string, OGRFieldType> >& fields,
 				bool& cancel, geo::util::Status& status);
         };
 

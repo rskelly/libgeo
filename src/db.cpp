@@ -15,12 +15,13 @@ namespace geo {
 			GeomType geomType(OGRwkbGeometryType type) {
 				switch(type) {
 				case wkbPoint: return GeomType::GTPoint;
-				case wkbPoint25D: return GeomType::GTPoint3D;
+				case wkbPoint25D: return GeomType::GTPointZ;
 				case wkbLineString: return GeomType::GTLine;
 				case wkbPolygon: return GeomType::GTPolygon;
 				case wkbMultiPoint: return GeomType::GTMultiPoint;
 				case wkbMultiLineString: return GeomType::GTMultiLine;
 				case wkbMultiPolygon: return GeomType::GTMultiPolygon;
+				case wkbMultiPolygon25D: return GeomType::GTMultiPolygonZ;
 				default: return GeomType::GTUnknown;
 				}
 			}
@@ -28,12 +29,13 @@ namespace geo {
 			OGRwkbGeometryType geomType(GeomType type) {
 				switch(type) {
 				case GeomType::GTPoint: return wkbPoint;
+				case GeomType::GTPointZ: return wkbPoint25D;
 				case GeomType::GTLine: return wkbLineString;
 				case GeomType::GTPolygon: return wkbPolygon;
 				case GeomType::GTMultiPoint: return wkbMultiPoint;
 				case GeomType::GTMultiLine: return wkbMultiLineString;
 				case GeomType::GTMultiPolygon: return wkbMultiPolygon;
-				case GeomType::GTPoint3D: return wkbPoint25D;
+				case GeomType::GTMultiPolygonZ: return wkbMultiPolygon25D;
 				default: return wkbUnknown;
 				}
 			}
@@ -503,11 +505,6 @@ void DB::createGeomIndex(const std::string& table, const std::string& column) {
 	m_ds->ExecuteSQL(sql.c_str(), nullptr, nullptr);
 }
 
-void DB::dropFields(const std::vector<std::string>& names) {
-	// Not doable without dropping the entire table.
-	g_runerr("Not implemented.");
-}
-
 std::string typeStr(FieldType type) {
 	switch(type) {
 	case FieldType::FTDouble:
@@ -521,21 +518,11 @@ std::string typeStr(FieldType type) {
 	}
 }
 
-void DB::addField(const std::string& name, FieldType type, bool index) {
-	std::string sql = "ALTER TABLE \"" + m_layerName + "\" ADD COLUMN \"" + name + "\" (" + typeStr(type) + ");";
-	m_ds->ExecuteSQL(sql.c_str(), nullptr, nullptr);
-}
-
-void DB::renameField(const std::string& fromName, const std::string& toName) {
-	std::string sql = "ALTER TABLE \"" + m_layerName + "\" RENAME COLUMN \"" + fromName + "\" to \"" + toName + "\";";
-	m_ds->ExecuteSQL(sql.c_str(), nullptr, nullptr);
-}
-
 uint64_t DB::getGeomCount() const {
 	return static_cast<uint64_t>(m_layer->GetFeatureCount(1));
 }
 
-void DB::execute(std::string& sql) {
+void DB::execute(const std::string& sql) {
 	g_runerr("Not implemented.");
 }
 
