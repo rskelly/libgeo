@@ -129,8 +129,8 @@ if(${BUILD_APPS})
 	# add_executable (polygonize src/apps/polygonize.cpp)
 	# target_link_libraries (polygonize geoutil georaster ${Boost_LIBRARIES})
 
-	add_executable (pc2grid src/apps/pc2grid.cpp)
-	target_link_libraries (pc2grid geoann geoutil georaster geopc geoann ${GEOS_LIBRARY})
+	#add_executable (pc2grid src/apps/pc2grid.cpp)
+	#target_link_libraries (pc2grid geoann geoutil georaster geopc geoann ${GEOS_LIBRARY})
 
 	# add_executable (pc2tile src/apps/pc2tile.cpp)
 	# target_link_libraries (pc2tile geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY} ${GEOS_LIBRARY})
@@ -147,8 +147,8 @@ if(${BUILD_APPS})
 	# add_executable (geoinfo src/apps/geoinfo.cpp)
 	# target_link_libraries (geoinfo geoutil ${GDAL_LIBRARY} ${LIBLAS_LIBRARY} ${JSONCPP_LIBRARY})
 
-	# add_executable (voidfill src/apps/voidfill.cpp)
-	# target_link_libraries (voidfill geoutil georaster ${GDAL_LIBRARY})
+	add_executable (voidfill src/apps/voidfill.cpp)
+	target_link_libraries (voidfill geoutil georaster ${GDAL_LIBRARY})
 
 	# add_executable (datumshift src/apps/datumshift.cpp)
 	# target_link_libraries (datumshift geoutil georaster ${GDAL_LIBRARY} ${PROJ_LIBRARY})

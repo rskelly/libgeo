@@ -195,7 +195,7 @@ public:
 	 * more points than were returned.
 	 * @param item The search point.
 	 * @param radius The search radius.
-	 * @param maxCount The maximum number of items to return.
+	 * @param maxCount The number of items to return.
 	 * @param titer The output point iterator.
 	 * @param diter The distance iterator.
 	 * @param eps The error bound.
@@ -211,8 +211,6 @@ public:
 
 		if(radius < 0)
 			g_runerr("Radius too small: " << radius);
-		if(maxCount < 0)
-			g_runerr("Max count too small: " << maxCount);
 
 		// Turn the search item into an array of doubles castable to ANNpoint.
 		std::vector<ANNcoord> pt(m_dims);
@@ -220,8 +218,11 @@ public:
 			pt[i] = item[i];
 
 		// Create arrays for indices and distances.
-		std::vector<ANNidx> idx(maxCount);
-		std::vector<ANNdist> dist(maxCount);
+		static std::vector<ANNidx> idx;
+		static std::vector<ANNdist> dist;
+
+		idx.reserve((size_t) maxCount);
+		dist.reserve((size_t) maxCount);
 
 		// Perform search.
 		int count = m_tree->annkFRSearch(static_cast<ANNpoint>(pt.data()), radius * radius, maxCount,
@@ -229,13 +230,12 @@ public:
 
 		// Populate output iterators.
 		for(size_t i = 0; i < count; ++i) {
-			if(idx[i] == -1)
-				return i;
-			size_t j = idx[i] * m_dims;
-			*titer = m_items[j + 0];
-			*titer = m_items[j + 1];
-			*titer = m_items[j + 2];
-			*diter = std::sqrt(dist[i]);
+			if(idx[i] != ANN_NULL_IDX) {
+				*titer = m_items[i];
+				*diter = std::sqrt(dist[i]);
+			} else {
+				*diter = -1;
+			}
 		}
 
 		return count;

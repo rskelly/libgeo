@@ -11,6 +11,9 @@
 #include <thread>
 #include <iomanip>
 
+#include <Eigen/Core>
+#include <Eigen/Dense>
+
 #include "raster.hpp"
 #include "ds/kdtree.hpp"
 
@@ -22,7 +25,9 @@ void usage() {
 			<< " -t <target file>\n"
 			<< " -o [adjusted file]\n"
 			<< " -f [adjustment file]\n"
-			<< " -p [points file (csv)]\n\n"
+			<< " -r [search radius for interp (default 1000)]\n"
+			<< " -s [skip cells in each direction (default 0)]\n"
+			<< " -c [max number of points to use when interpolating (default 999999999)]\n"
 			<< "  This program samples the differences between one or more 'anchor'\n"
 			<< "  rasters and a 'target' raster, then calculates an adjustment to \n"
 			<< "  match them by computing a local regression surface and applying\n"
@@ -104,11 +109,72 @@ void getDiffs(std::vector<std::pair<std::unique_ptr<Raster>, int> >& anchors, Ra
 	tree.build();
 }
 
+void doInterp(Raster& target, int tband, Raster& output, Raster& adj, geo::ds::KDTree<Pt>& tree, int count) {
+
+	const GridProps& props = target.props();
+	int cols = props.cols();
+	int rows = props.rows();
+	double nd = props.nodata();
+
+	double radius = std::abs(props.resolutionX());
+	double step = 360.0 / (2 * radius * M_PI);
+
+	std::vector<Pt*> pts;
+	std::vector<double> dist;
+
+	for(int row = 0; row < rows; ++row) {
+		for(int col = 0; col < cols; ++col) {
+
+			double v = target.getFloat(col, row, tband);
+			if(v == nd) {
+				output.setFloat(col, row, nd, 1);
+				continue;
+			}
+
+			double z;
+			int ct;
+			double rad = radius;
+			double stp = step;
+			double maxRad = props.cols() * std::abs(props.resolutionX());
+			do {
+				z = 0 ;
+				ct = 0;
+				for(double a = 0.0; a < 360.0; a += stp) {
+					int r = (int) std::round(std::cos(a * M_PI / 180.0) * rad);
+					int c = (int) std::round(std::sin(a * M_PI / 180.0) * rad);
+					if(r < 0 || r >= rows || c < 0 || c > cols)
+						continue;
+					double v0 = target.getFloat(c, r, tband);
+					if(v0 != nd) {
+						z += v0;
+						++ct;
+					}
+				}
+				rad *= 2;
+				stp = 360.0 / (2 * rad * M_PI);
+				if(rad > maxRad)
+					break;
+			} while(ct < count);
+
+			if(ct) {
+				z /= nd;
+				output.setFloat(col, row, v - z, 1);
+				adj.setFloat(col, row, z, 1);
+			} else {
+				output.setFloat(col, row, nd, 1);
+				adj.setFloat(col, row, nd, 1);
+			}
+
+		}
+	}
+}
+
+
 /**
  * Use the adjustment raster to compute the best-fit plane from which to
  * interpret the pixels of the target and produce an output.
  */
-void doInterp(Raster& target, int tband, Raster& output, Raster& adj, geo::ds::KDTree<Pt>& tree, int count) {
+void doInterp3(Raster& target, int tband, Raster& output, Raster& adj, geo::ds::KDTree<Pt>& tree, int count) {
 
 	const GridProps& props = target.props();
 	int cols = props.cols();
@@ -130,22 +196,84 @@ void doInterp(Raster& target, int tband, Raster& output, Raster& adj, geo::ds::K
 			pts.clear();
 			dist.clear();
 			Pt c(props.toX(col), props.toY(row), 0);
-			tree.knn(c, count, std::back_inserter(pts), std::back_inserter(dist));
+			int found = tree.knn(c, count, std::back_inserter(pts), std::back_inserter(dist));
 
-			if(!pts.empty()) {
-				Eigen::Matrix<double, 3, Eigen::Dynamic> mtx(3, pts.size());
+			if(found) {
+				double z = 0;
+				for(int i = 0; i < found; ++i)
+					z += pts[i]->_z;
+				z /= found;
+				output.setFloat(col, row, v - z, 1);
+				adj.setFloat(col, row, z, 1);
+			} else {
+				output.setFloat(col, row, nd, 1);
+				adj.setFloat(col, row, nd, 1);
+			}
 
-				for(size_t i = 0; i < pts.size(); ++i) {
-					mtx(0, i) = pts[i]->_x;
-					mtx(1, i) = pts[i]->_y;
-					mtx(2, i) = pts[i]->_z;
+		}
+	}
+}
+
+
+void doInterp2(Raster& target, int tband, Raster& output, Raster& adj, geo::ds::KDTree<Pt>& tree, int minCount, int maxCount, double radius) {
+
+	typedef Eigen::Matrix<double, 3, Eigen::Dynamic> Mtx;
+
+	const GridProps& props = target.props();
+	int cols = props.cols();
+	int rows = props.rows();
+	double nd = props.nodata();
+
+	std::vector<Pt*> pts;
+	std::vector<double> dist;
+
+	for(int row = 0; row < rows; ++row) {
+		for(int col = 0; col < cols; ++col) {
+
+			double v = target.getFloat(col, row, tband);
+			if(v == nd) {
+				output.setFloat(col, row, nd, 1);
+				continue;
+			}
+
+			double maxRad = std::max(props.bounds().width(), props.bounds().height());
+			double rad = radius;
+			int count = 0;
+
+			do {
+				if(rad > maxRad) {
+					std::cerr << "Exceeded max radius: " << rad << ", " << count << "\n";
+					break;
+				}
+				pts.clear();
+				dist.clear();
+				Pt c(props.toX(col), props.toY(row), 0);
+				count = tree.radSearch(c, rad, maxCount, std::back_inserter(pts), std::back_inserter(dist));
+				rad *= 2;
+			} while(count < minCount);
+
+			if(count > 2) {
+				Mtx mtx(3, pts.size());
+
+				for(int i = 0; i < count; ++i) {
+					if(dist[i] > 0) {
+						mtx(0, i) = pts[i]->_x;
+						mtx(1, i) = pts[i]->_y;
+						mtx(2, i) = pts[i]->_z;
+					}
 				}
 
 				// Recenter on zero.
 				Eigen::Vector3d cent = mtx.rowwise().mean();
+				mtx.colwise() -= cent;
 
-				output.setFloat(col, row, (double) (target.getFloat(col, row, tband) - cent[2]), 1);
-				adj.setFloat(col, row, (double) cent[2], 1);
+				Eigen::JacobiSVD<Eigen::MatrixXd> svd(mtx, Eigen::ComputeThinU | Eigen::ComputeThinV);
+				Eigen::Vector3d norm = svd.matrixU().col(2);
+				double z = norm.dot(Eigen::Vector3d(0, 0, cent[2]));
+				z = cent[2] > 0 ? std::abs(z) : -std::abs(z);
+
+				output.setFloat(col, row, v - z, 1);
+				adj.setFloat(col, row, z, 1);
 			} else {
 				output.setFloat(col, row, nd, 1);
 				adj.setFloat(col, row, nd, 1);
@@ -170,7 +298,9 @@ int main(int argc, char** argv) {
 	std::string adjustment;
 	int mode = 0;
 	int count = 100;
+	int maxCount = 4096;
 	int skip = 0;
+	double radius = 1000;
 
 	for(int i = 1; i < argc; ++i) {
 		std::string arg(argv[i]);
@@ -192,6 +322,14 @@ int main(int argc, char** argv) {
 			continue;
 		} else if(arg == "-s") {
 			skip = atoi(argv[++i]);
+			mode = 0;
+			continue;
+		} else if(arg == "-r") {
+			radius = atof(argv[++i]);
+			mode = 0;
+			continue;
+		} else if(arg == "-m") {
+			maxCount = atoi(argv[++i]);
 			mode = 0;
 			continue;
 		}
@@ -225,7 +363,7 @@ int main(int argc, char** argv) {
 	GridProps aprops(traster.props());
 	aprops.setWritable(true);
 	aprops.setBands(1);
-	geo::ds::KDTree<Pt> tree;
+	geo::ds::KDTree<Pt> tree(2);
 
 	getDiffs(arasters, traster, tband, tree, skip);
 
