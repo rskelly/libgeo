@@ -14,6 +14,7 @@
 #include <unordered_map>
 #include <condition_variable>
 #include <thread>
+#include <algorithm>
 
 #include "util.hpp"
 #include "raster.hpp"
@@ -82,7 +83,8 @@ Computer* getComputer(const std::string& name) {
 
 
 Rasterizer::Rasterizer(const std::vector<std::string> filenames) :
-	m_filter(nullptr) {
+	m_filter(nullptr),
+	m_thin(0) {
 	for(const std::string& filename : filenames)
 		m_files.emplace_back(filename);
 }
@@ -161,6 +163,10 @@ void fixBounds(double* bounds, double resX, double resY, double& easting, double
 	bounds[resX > 0 ? 2 : 1] = xmax;
 	bounds[resY > 0 ? 3 : 1] = ymax;
 
+}
+
+void Rasterizer::setThin(int thin) {
+	m_thin = thin;
 }
 
 void Rasterizer::setFilter(PCPointFilter* filter) {
@@ -273,11 +279,11 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 					double cx = props.toCentroidX(c);
 					double cy = props.toCentroidY(r);
 					if(std::pow(px - cx, 2) + std::pow(py - cy, 2) <= radiusSq)
-						cells[r * cols + c].push_back(std::move(pt));
+						cells[r * cols + c].emplace_back(pt);
 				}
 			}
 		} else {
-			cells[idx].push_back(std::move(pt));
+			cells[idx].emplace_back(pt);
 		}
 
 		if(row - rad > lastR) {
@@ -310,28 +316,42 @@ void Rasterizer::finalize(int row, double radius,
 	for(int col = 0; col < cols; ++col) {
 		
 		size_t idx = row * cols + col;
-		const std::vector<geo::pc::Point>& points = cells[idx];
+		std::vector<geo::pc::Point>& points = cells[idx];
+
 		double x = props.toCentroidX(col);
 		size_t count = points.size();
 		size_t band = 0;
 
 		remove.push_back(idx);
 		
-		if(count)
+		if(count) {
 			count = m_filter->filter(points.begin(), points.end(), std::back_inserter(m_filtered));
 		
-		m_rasters[band++].setFloat(col, 0, count);
+			if(m_thin > 0) {
+				// Thin the points to the desired density, if required.
+				if(m_filtered.size() < (size_t) m_thin) {
+					m_filtered.clear();
+					count = 0;
+				} else {
+					std::random_shuffle(m_filtered.begin(), m_filtered.end());
+					m_filtered.resize(m_thin);
+					count = m_thin;
+				}
+			}
+		}
+
+		m_rasters[band++].setFloat(col, 0, count, 1);
 		
 		if(count) {
 			for(size_t i = 0; i < m_computers.size(); ++i) {
 				m_computers[i]->compute(x, y, points, m_filtered, radius, m_out);
 				for(double val : m_out)
-					m_rasters[band++].setFloat(col, 0, std::isnan(val) ? NODATA : val);
+					m_rasters[band++].setFloat(col, 0, std::isnan(val) ? NODATA : val, 1);
 			}
 		} else {
 			for(size_t i = 0; i < m_computers.size(); ++i) {
 				for(int j = 0; j < m_computers[i]->bandCount(); ++j)
-					m_rasters[band++].setFloat(col, 0, NODATA);
+					m_rasters[band++].setFloat(col, 0, NODATA, 1);
 			}
 		}
 		m_filtered.clear();

@@ -11,29 +11,13 @@
 #include <thread>
 #include <iomanip>
 
-#include <geos/geom/PrecisionModel.h>
-#include <geos/geom/GeometryFactory.h>
-#include <geos/geom/CoordinateSequenceFactory.h>
-#include <geos/geom/CoordinateArraySequence.h>
-#include <geos/geom/Geometry.h>
-#include <geos/geom/Polygon.h>
-#include <geos/geom/MultiPolygon.h>
-#include <geos/geom/Point.h>
-#include <geos/geom/LinearRing.h>
-#include <geos/geom/CoordinateSequence.h>
-#include <geos/operation/union/CascadedPolygonUnion.h>
-#include <geos/linearref/LengthIndexedLine.h>
-
+#include <Eigen/Core>
+#include <Eigen/Dense>
 
 #include "raster.hpp"
-#include "interp/loess.hpp"
-
-using namespace geos::geom;
-using namespace geos::linearref;
+#include "ds/kdtree.hpp"
 
 using namespace geo::raster;
-using namespace geo::ds;
-using namespace geo::interp;
 
 void usage() {
 	std::cerr << "Usage: rastermatch <options>\n"
@@ -41,7 +25,9 @@ void usage() {
 			<< " -t <target file>\n"
 			<< " -o [adjusted file]\n"
 			<< " -f [adjustment file]\n"
-			<< " -p [points file (csv)]\n\n"
+			<< " -r [search radius for interp (default 1000)]\n"
+			<< " -s [skip cells in each direction (default 0)]\n"
+			<< " -c [max number of points to use when interpolating (default 999999999)]\n"
 			<< "  This program samples the differences between one or more 'anchor'\n"
 			<< "  rasters and a 'target' raster, then calculates an adjustment to \n"
 			<< "  match them by computing a local regression surface and applying\n"
@@ -50,216 +36,251 @@ void usage() {
 
 class Pt {
 public:
-	double x, y, z;
+	double _x, _y, _z;
 	Pt() : Pt(0, 0, 0) {}
 	Pt(double x, double y, double z) :
-		x(x), y(y), z(z) {}
+		_x(x), _y(y), _z(z) {}
+	double x() const { return _x; }
+	double y() const { return _y; }
+	double z() const { return _z; }
 	double operator[](size_t idx) const {
 		switch(idx % 3) {
-		case 1: return y;
-		case 2: return z;
-		default: return x;
+		case 1: return _y;
+		case 2: return _z;
+		default: return _x;
 		}
 	}
 	double& operator[](size_t idx) {
 		switch(idx % 3) {
-		case 1: return y;
-		case 2: return z;
-		default: return x;
+		case 1: return _y;
+		case 2: return _z;
+		default: return _x;
 		}
 	}
 };
 
-void getDiffs(std::vector<Pt>& pts, 
-		const std::vector<std::string>& anchors, const std::vector<int>& abands,
-		const std::string& target, int tband, double difflimit) {
 
-	std::cerr << "get diffs\n";
+/**
+ * Use the average of anchor pixels for each corresponding target pixel to compute a difference and
+ * write that to the adjustment raster.
+ */
+void getDiffs(std::vector<std::pair<std::unique_ptr<Raster>, int> >& anchors, Raster& target, int tband, geo::ds::KDTree<Pt>& tree, int skip) {
 
-	Raster traster(target, false);
-	GridProps tprops(traster.props());
-	tprops.setBands(1);
-	tprops.setWritable(true);
-	MemRaster trast(tprops);
-	traster.writeTo(trast, tprops.cols(), tprops.rows(), 0, 0, 0, 0, tband, 1);
 
-	std::unordered_set<size_t> pxset;
+	const GridProps& tprops = target.props();
+	int tcols = tprops.cols();
+	int trows = tprops.rows();
+	double tnd = tprops.nodata();
 
-	for(size_t i = 0; i < anchors.size(); ++i) {
-		
-		std::cerr << "anchor: " << anchors[i] << "\n";
-		Raster araster(anchors[i], false);
-		int aband = abands[i];
-		
-		GridProps aprops(araster.props());
-		aprops.setBands(1);
-		aprops.setWritable(true);
-		MemRaster arast(aprops);
-		araster.writeTo(arast, aprops.cols(), aprops.rows(), 0, 0, 0, 0, aband, 1);
+	std::vector<double> avs;	// Anchor values for a given coordinate.
 
-		for(int row = 0; row < aprops.rows(); ++row) {
-			//std::cerr << "row " << row << "\n";
-			for(int col = 0; col < aprops.cols(); ++col) {
-				double x = aprops.toCentroidX(col);
-				double y = aprops.toCentroidY(row);
-				if(tprops.hasCell(x, y) && aprops.hasCell(x, y)) {
-					int tc = tprops.toCol(x);
-					int tr = tprops.toRow(y);
-					double a = arast.getFloat(col, row);
-					if(a == aprops.nodata()) {// || ar.getInt(col, row, 1) < 100)
-						size_t idx = ((size_t) row<< 32) | col;
-						if(pxset.find(idx) == pxset.end()) {
-							pts.emplace_back(x, y, 0);
-							pxset.insert(idx);
-						}
-						continue;
-					}
-					double b = trast.getFloat(tc, tr);
-					if(b == tprops.nodata()) {// || trast.getInt(tc, tr, 1) < 100)
-						size_t idx = ((size_t) row<< 32) | col;
-						if(pxset.find(idx) == pxset.end()) {
-							pts.emplace_back(x, y, 0);
-							pxset.insert(idx);
-						}
-						continue;
-					}
-					double diff = a - b;
-					//if(std::abs(diff) > difflimit)
-					//	continue;
-					pts.emplace_back(x, y, diff);
-				} else {
-					size_t idx = ((size_t) row<< 32) | col;
-					if(pxset.find(idx) == pxset.end()) {
-						pts.emplace_back(x, y, 0);
-						pxset.insert(idx);
-					}
+	for(int trow = 0; trow < trows; trow += (1 + skip)) {
+		for(int tcol = 0; tcol < tcols; tcol += (1 + skip)) {
+
+			// Get the target pixel value. If it's nodata, write nodata to the adj raster and skip.
+			double tv = target.getFloat(tcol, trow, tband);
+			if(tv == tnd)
+				continue;
+
+			// Collect the average of values from the anchor rasters if they're valid.
+			avs.clear();
+			for(auto& a : anchors) {
+				const GridProps& aprops = a.first->props();
+				int acol = aprops.toCol(tprops.toX(tcol));
+				int arow = aprops.toRow(tprops.toY(trow));
+				if(aprops.hasCell(acol, arow)) {
+					double av = a.first->getFloat(acol, arow, (int) a.second);
+					if(av != aprops.nodata())
+						avs.push_back(av);
 				}
 			}
-		}
-	}
-}
 
-void buffer(std::vector<Pt>& pts, double buf, double seg) {
-	//GEOSContextHandle_t gctx = OGRGeometry::createGEOSContext();
-	GeometryFactory::unique_ptr geomFactory = GeometryFactory::create(new PrecisionModel());
-	std::vector<Coordinate> coords;
-	for(const Pt& p : pts)
-		coords.emplace_back(p.x, p.y, p.z);
-	MultiPoint* mp = geomFactory->createMultiPoint(coords);
-	Geometry* hull = mp->convexHull();
-	Geometry* buffered = hull->buffer(buf);
-	for(size_t i = 0; i < buffered->getNumGeometries(); ++i) {
-		const Polygon* poly = dynamic_cast<const Polygon*>(buffered->getGeometryN(i));
-		const LineString* ring = dynamic_cast<const LinearRing*>(poly->getExteriorRing());
-		LengthIndexedLine lil(ring);
-		double len = ring->getLength();
-		for(double p = 0; p < len; p += seg) {
-			Coordinate c = lil.extractPoint(p);
-			pts.emplace_back(c.x, c.y, 0);
-		}
-	}
-	delete mp;
-	delete hull;
-	delete buffered;
-}
-
-void doInterp(int tileSize, std::list<std::pair<int, int> >* tiles, const std::vector<Pt>* pts,
-	const GridProps* adjprops, MemRaster* adjmem, std::mutex* qmtx, std::mutex* rmtx) {
-
-	double range = 1000;
-	Loess<Pt> loess(*pts, range);
-
-	// As long as there are tiles, keep working.
-	while(true) {
-		int scol, srow;
-		{
-			// Get a tile from the list.
-			std::lock_guard<std::mutex> lk(*qmtx);
-			if(tiles->empty())
-				return;
-			srow = std::get<0>(tiles->front());
-			scol = std::get<1>(tiles->front());
-			tiles->pop_front();
-		}
-
-		std::cerr << "scol " << scol << ", " << srow << "\n";
-
-		// A list to collect interpolated adjustment values.
-		std::list<std::tuple<double, double, double> > out;
-
-		// Iterate over the cells in the adj raster and compute the interp value
-		// for that cell.
-		for(int row = srow; row < std::min(srow + tileSize, adjprops->rows()); ++row) {
-			std::cerr << "row: " << row << "\n";
-			for(int col = scol; col < std::min(scol + tileSize, adjprops->cols()); ++col) {
-				double x = adjprops->toCentroidX(col);
-				double y = adjprops->toCentroidY(row);
-				double z = loess.estimate(Pt(x, y, 0));
-				out.push_back(std::make_tuple(x, y, z));
+			// If there were valid anchor pixels, set the average on the adj raster.
+			// Otherwise set nodata.
+			if(!avs.empty()) {
+				double avg = 0;
+				for(double av : avs)
+					avg += av;
+				avg /= avs.size();
+				tree.add(new Pt(tprops.toX(tcol), tprops.toY(trow), tv - avg));
 			}
 		}
-		{
-			// Write all adjustments to the raster in one go.
-			std::lock_guard<std::mutex> lk(*rmtx);
-			for(auto& p : out)
-				adjmem->setFloat(adjprops->toCol(std::get<0>(p)), adjprops->toRow(std::get<1>(p)), std::get<2>(p));
-			out.clear();
-		}
 	}
-
+	tree.build();
 }
 
-void interpolate(const std::vector<Pt>& pts,
-		const std::vector<std::string>& anchors, const std::vector<int>& abands,
-		const std::string& target, int tband, const std::string& adjustment) {
+void doInterp(Raster& target, int tband, Raster& output, Raster& adj, geo::ds::KDTree<Pt>& tree, int count) {
 
-	// Get the props and bounds for the target.
-	Raster traster(target, false);
-	GridProps tprops(traster.props());
+	const GridProps& props = target.props();
+	int cols = props.cols();
+	int rows = props.rows();
+	double nd = props.nodata();
 
-	// Create props and bounds for the adjustment raster.
-	GridProps adjprops(tprops);
-	Bounds adjbounds = adjprops.bounds();
+	double radius = std::abs(props.resolutionX());
+	double step = 360.0 / (2 * radius * M_PI);
 
-	// Build the list of props for anchors and extent
-	// the adjustment bounds.
-	std::vector<GridProps> apropss;
-	for(const std::string& a : anchors) {
-		Raster arast(a, false);
-		const GridProps& props = arast.props();
-		adjbounds.extend(props.bounds());
-		apropss.push_back(props);
+	std::vector<Pt*> pts;
+	std::vector<double> dist;
+
+	for(int row = 0; row < rows; ++row) {
+		for(int col = 0; col < cols; ++col) {
+
+			double v = target.getFloat(col, row, tband);
+			if(v == nd) {
+				output.setFloat(col, row, nd, 1);
+				continue;
+			}
+
+			double z;
+			int ct;
+			double rad = radius;
+			double stp = step;
+			double maxRad = props.cols() * std::abs(props.resolutionX());
+			do {
+				z = 0 ;
+				ct = 0;
+				for(double a = 0.0; a < 360.0; a += stp) {
+					int r = (int) std::round(std::cos(a * M_PI / 180.0) * rad);
+					int c = (int) std::round(std::sin(a * M_PI / 180.0) * rad);
+					if(r < 0 || r >= rows || c < 0 || c > cols)
+						continue;
+					double v0 = target.getFloat(c, r, tband);
+					if(v0 != nd) {
+						z += v0;
+						++ct;
+					}
+				}
+				rad *= 2;
+				stp = 360.0 / (2 * rad * M_PI);
+				if(rad > maxRad)
+					break;
+			} while(ct < count);
+
+			if(ct) {
+				z /= nd;
+				output.setFloat(col, row, v - z, 1);
+				adj.setFloat(col, row, z, 1);
+			} else {
+				output.setFloat(col, row, nd, 1);
+				adj.setFloat(col, row, nd, 1);
+			}
+
+		}
 	}
+}
 
-	// Create the adjustment raster.
-	adjprops.setBounds(adjbounds);
-	adjprops.setWritable(true);
-	adjprops.setBands(1);
-	MemRaster adjmem(adjprops, false);
 
-	// Each thread will work on a tile, which is a square region of the adjustment region.
-	int tileSize = 256;
-	std::list<std::pair<int, int> > tiles;
-	for(int r = 0; r < adjprops.rows(); r += tileSize) {
-		for(int c = 1024; c < 1280 /*adjprops.cols()*/; c += tileSize)
-			tiles.push_back(std::make_pair(r, c));
+/**
+ * Use the adjustment raster to compute the best-fit plane from which to
+ * interpret the pixels of the target and produce an output.
+ */
+void doInterp3(Raster& target, int tband, Raster& output, Raster& adj, geo::ds::KDTree<Pt>& tree, int count) {
+
+	const GridProps& props = target.props();
+	int cols = props.cols();
+	int rows = props.rows();
+	double nd = props.nodata();
+
+	std::vector<Pt*> pts;
+	std::vector<double> dist;
+
+	for(int row = 0; row < rows; ++row) {
+		for(int col = 0; col < cols; ++col) {
+
+			double v = target.getFloat(col, row, tband);
+			if(v == nd) {
+				output.setFloat(col, row, nd, 1);
+				continue;
+			}
+
+			pts.clear();
+			dist.clear();
+			Pt c(props.toX(col), props.toY(row), 0);
+			int found = tree.knn(c, count, std::back_inserter(pts), std::back_inserter(dist));
+
+			if(found) {
+				double z = 0;
+				for(int i = 0; i < found; ++i)
+					z += pts[i]->_z;
+				z /= found;
+				output.setFloat(col, row, v - z, 1);
+				adj.setFloat(col, row, z, 1);
+			} else {
+				output.setFloat(col, row, nd, 1);
+				adj.setFloat(col, row, nd, 1);
+			}
+
+		}
 	}
+}
 
-	// Start the threads.
-	g_debug("starting")
-	int threadCount = 1;
-	std::mutex qmtx, rmtx;
-	std::vector<std::thread> threads;
-	for(int i = 0; i < threadCount; ++i)
-		threads.emplace_back(doInterp, tileSize, &tiles, &pts, &adjprops, &adjmem, &qmtx, &rmtx);
 
-	// Wait for completion.
-	for(std::thread& t : threads)
-		t.join();
+void doInterp2(Raster& target, int tband, Raster& output, Raster& adj, geo::ds::KDTree<Pt>& tree, int minCount, int maxCount, double radius) {
 
-	// Write the adjustment raster to the output.
-	Raster adjraster(adjustment, adjprops);
-	adjmem.writeTo(adjraster);
+	typedef Eigen::Matrix<double, 3, Eigen::Dynamic> Mtx;
+
+	const GridProps& props = target.props();
+	int cols = props.cols();
+	int rows = props.rows();
+	double nd = props.nodata();
+
+	std::vector<Pt*> pts;
+	std::vector<double> dist;
+
+	for(int row = 0; row < rows; ++row) {
+		for(int col = 0; col < cols; ++col) {
+
+			double v = target.getFloat(col, row, tband);
+			if(v == nd) {
+				output.setFloat(col, row, nd, 1);
+				continue;
+			}
+
+			double maxRad = std::max(props.bounds().width(), props.bounds().height());
+			double rad = radius;
+			int count = 0;
+
+			do {
+				if(rad > maxRad) {
+					std::cerr << "Exceeded max radius: " << rad << ", " << count << "\n";
+					break;
+				}
+				pts.clear();
+				dist.clear();
+				Pt c(props.toX(col), props.toY(row), 0);
+				count = tree.radSearch(c, rad, maxCount, std::back_inserter(pts), std::back_inserter(dist));
+				rad *= 2;
+			} while(count < minCount);
+
+			if(count > 2) {
+				Mtx mtx(3, pts.size());
+
+				for(int i = 0; i < count; ++i) {
+					if(dist[i] > 0) {
+						mtx(0, i) = pts[i]->_x;
+						mtx(1, i) = pts[i]->_y;
+						mtx(2, i) = pts[i]->_z;
+					}
+				}
+
+				// Recenter on zero.
+				Eigen::Vector3d cent = mtx.rowwise().mean();
+				mtx.colwise() -= cent;
+
+				Eigen::JacobiSVD<Eigen::MatrixXd> svd(mtx, Eigen::ComputeThinU | Eigen::ComputeThinV);
+				Eigen::Vector3d norm = svd.matrixU().col(2);
+				double z = norm.dot(Eigen::Vector3d(0, 0, cent[2]));
+				z = cent[2] > 0 ? std::abs(z) : -std::abs(z);
+
+				output.setFloat(col, row, v - z, 1);
+				adj.setFloat(col, row, z, 1);
+			} else {
+				output.setFloat(col, row, nd, 1);
+				adj.setFloat(col, row, nd, 1);
+			}
+
+		}
+	}
 }
 
 int main(int argc, char** argv) {
@@ -272,12 +293,14 @@ int main(int argc, char** argv) {
 	std::vector<std::string> anchors;
 	std::vector<int> abands;
 	std::string target;
-	std::string ptsFile = "pts.csv";
-	int tband;
+	int tband = 1;
 	std::string adjusted;
 	std::string adjustment;
 	int mode = 0;
-	double difflimit = 1;
+	int count = 100;
+	int maxCount = 4096;
+	int skip = 0;
+	double radius = 1000;
 
 	for(int i = 1; i < argc; ++i) {
 		std::string arg(argv[i]);
@@ -293,8 +316,21 @@ int main(int argc, char** argv) {
 		} else if(arg == "-f") {
 			mode = 4;
 			continue;
-		} else if(arg == "-p") {
-			ptsFile = argv[++i];
+		} else if(arg == "-c") {
+			count = atoi(argv[++i]);
+			mode = 0;
+			continue;
+		} else if(arg == "-s") {
+			skip = atoi(argv[++i]);
+			mode = 0;
+			continue;
+		} else if(arg == "-r") {
+			radius = atof(argv[++i]);
+			mode = 0;
+			continue;
+		} else if(arg == "-m") {
+			maxCount = atoi(argv[++i]);
+			mode = 0;
 			continue;
 		}
 		switch(mode) {
@@ -319,30 +355,23 @@ int main(int argc, char** argv) {
 		}
 	}
 
-	bool test = false;
-	if(!test) {
+	std::vector<std::pair<std::unique_ptr<Raster>, int> > arasters;
+	for(size_t i = 0; i < anchors.size(); ++i)
+		arasters.emplace_back(new Raster(anchors[i]), abands[i]);
 
-		std::vector<Pt> pts;
-		{
-			getDiffs(pts, anchors, abands, target, tband, difflimit);
-			//buffer(pts, 500, 100);
-			std::cerr << pts.size() << " points\n";
-			std::ofstream of(ptsFile);
-			of << std::setprecision(12);
-			of << "x,y,diff\n";
-			for(const Pt& pt : pts)
-				of << pt.x << "," << pt.y << "," << pt.z << "\n";
-		}
+	Raster traster(target);
+	GridProps aprops(traster.props());
+	aprops.setWritable(true);
+	aprops.setBands(1);
+	geo::ds::KDTree<Pt> tree(2);
 
-		interpolate(pts, anchors, abands, target, tband, adjustment);
+	getDiffs(arasters, traster, tband, tree, skip);
 
-	} else {
+	Raster output(adjusted, aprops);
+	Raster adj(adjustment, aprops);
 
-		Loess<Pt> loess({Pt(453090.43146641052, 6496285.181080793, 0), Pt(453286.44630423211, 6496305.0442587472, 0), Pt(453090.43146641052, 6496265.3179028388, 0)}, 100);
-		double z = loess.estimate(Pt(453088, 6496285, 0));
-		std::cerr << "z: " << z << "\n";
+	doInterp(traster, tband, output, adj, tree, count);
 
-	}
 
  	return 0;
 }
