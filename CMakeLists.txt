@@ -162,8 +162,8 @@ if(${BUILD_APPS})
 	add_executable (sbet2csv src/apps/sbet2csv.cpp)
 	target_link_libraries (sbet2csv geoutil ${PROJ_LIBRARY})
 
-	add_executable (groundassign src/apps/groundassign.cpp)
-	target_link_libraries (groundassign ${LIBLAS_LIBRARY})
+	#add_executable (groundassign src/apps/groundassign.cpp)
+	#target_link_libraries (groundassign ${LIBLAS_LIBRARY})
 
 	add_executable (rastermatch src/apps/rastermatch.cpp)
 	target_link_libraries (rastermatch geoutil geoann georaster ${GEOS_LIBRARY} ${GDAL_LIBRARY})
