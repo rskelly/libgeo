@@ -518,6 +518,7 @@ Tile* TileIterator::next() {
 	GridProps p(props);
 	p.setSize(m_cols + m_buffer * 2, m_rows + m_buffer * 2);
 	std::unique_ptr<MemRaster> tile(new MemRaster(p));
+	tile->fillFloat(p.nodata(), 1);
 
 	{
 		std::lock_guard<std::mutex> lk(m_source.mutex());
