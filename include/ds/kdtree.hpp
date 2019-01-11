@@ -201,7 +201,7 @@ public:
 	 * @param eps The error bound.
 	 */
 	template <class TIter, class DIter>
-	int radSearch(const T& item, double radius, int maxCount, TIter titer, DIter diter, double eps = EPS) const {
+	int radSearch(const T& item, double radius, TIter titer, DIter diter, double eps = EPS) const {
 		std::lock_guard<std::mutex> lk(m_mtx);
 
 		if(!m_tree) {
@@ -217,21 +217,20 @@ public:
 		for(size_t i = 0; i < m_dims; ++i)
 			pt[i] = item[i];
 
-		// Create arrays for indices and distances.
-		static std::vector<ANNidx> idx;
-		static std::vector<ANNdist> dist;
+		int count = m_tree->annkFRSearch(static_cast<ANNpoint>(pt.data()), radius * radius, 0);
 
-		idx.reserve((size_t) maxCount);
-		dist.reserve((size_t) maxCount);
+		// Create arrays for indices and distances.
+		std::vector<ANNidx> idx(count);
+		std::vector<ANNdist> dist(count);
 
 		// Perform search.
-		int count = m_tree->annkFRSearch(static_cast<ANNpoint>(pt.data()), radius * radius, maxCount,
+		count = m_tree->annkFRSearch(static_cast<ANNpoint>(pt.data()), radius * radius, count,
 				static_cast<ANNidxArray>(idx.data()), static_cast<ANNdistArray>(dist.data()), eps);
 
 		// Populate output iterators.
 		for(size_t i = 0; i < count; ++i) {
 			if(idx[i] != ANN_NULL_IDX) {
-				*titer = m_items[i];
+				*titer = m_items[idx[i]];
 				*diter = std::sqrt(dist[i]);
 			} else {
 				*diter = -1;
