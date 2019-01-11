@@ -401,6 +401,10 @@ std::string nameJoin(std::unordered_set<std::string>& names) {
 	return ss.str();
 }
 
+void DB::convert(const std::string& filename, const std::string& driver) {
+	std::vector<std::string> dropFields;
+	convert(filename, driver, dropFields);
+}
 void DB::convert(const std::string& filename, const std::string& driver, const std::vector<std::string>& dropFields) {
 
 	// If replace and file exists, delete the existing file.

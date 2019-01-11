@@ -167,6 +167,8 @@ namespace geo {
              */
             virtual void convert(const std::string& filename, const std::string& driver, const std::vector<std::string>& dropFields);
 
+            virtual void convert(const std::string& filename, const std::string& driver);
+
             virtual void setCacheSize(size_t size);
 
             void dropGeomIndex(const std::string& table = "", const std::string& column = "GEOMETRY");
