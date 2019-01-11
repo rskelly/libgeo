@@ -71,13 +71,17 @@ namespace geo {
 					Bounds bounds;
 					if(idx & 1) {
 						bounds.minx(m_bounds.midx());
+						bounds.maxx(m_bounds.maxx());
 					} else {
 						bounds.maxx(m_bounds.midx());
+						bounds.minx(m_bounds.minx());
 					}
 					if(idx & 2) {
 						bounds.miny(m_bounds.midy());
+						bounds.maxy(m_bounds.maxy());
 					} else {
 						bounds.maxy(m_bounds.midy());
+						bounds.miny(m_bounds.miny());
 					}
 					m_nodes[idx] = new QTree(bounds, m_maxDepth, m_maxCount, m_depth + 1);
 				}
