@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.1)
 
+project (libgeo)
+
 enable_language(C)
 enable_language(CXX)
 set (CMAKE_CXX_STANDARD 11)
@@ -46,6 +48,7 @@ elseif(${WIN32})
 	set (SQLITE_LIBRARY sqlite3_i)
 	set (SPATIALITE_LIBRARY spatialite_i)
 	set (GDAL_LIBRARY gdal_i)
+	set (CGAL_DIR "C:\\dev\\CGAL-4.13")
 else()
 	set (CMAKE_CXX_COMPILER_LAUNCHER ccache)
 	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-pragmas -fopenmp")
@@ -70,8 +73,6 @@ find_library (CRYPTO_LIBRARY crypto libeay32 PATHS ${GIS_LIBRARYDIR})
 find_library (GEOS_LIBRARY geos PATHS ${GEOS_LIBRARYDIR})
 find_library (PROJ_LIBRARY proj)
 
-project (libgeo)
-
 # Configure directories###################################################################################
 
 include_directories(BEFORE SYSTEM ./include ./ann/include /opt/include
@@ -87,7 +88,7 @@ set (geoutilsrc src/geo.cpp src/util.cpp src/md5.cpp)
 add_library (geoutilobj OBJECT ${geoutilsrc})
 set_target_properties (geoutilobj PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_library(geoutil SHARED $<TARGET_OBJECTS:geoutilobj>)
-target_link_libraries (geoutil ${Boost_LIBRARIES} ${GDAL_LIBRARY} ${CRYPTO_LIBRARY})
+target_link_libraries (geoutil ${Boost_LIBRARIES} ${GDAL_LIBRARY} ${CRYPTO_LIBRARY} ${SQLITE_LIBRARY} ${SPATIALITE_LIBRARY})
 # is rt needed here doesn't work on windows.
 
 set (geodbsrc src/geo.cpp src/db.cpp)
