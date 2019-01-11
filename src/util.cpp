@@ -110,11 +110,13 @@ Point::Point() :
 }
 
 Bounds::Bounds() :
-	Bounds(G_DBL_MAX_POS, G_DBL_MAX_POS, G_DBL_MAX_NEG, G_DBL_MAX_NEG, G_DBL_MAX_POS, G_DBL_MAX_NEG) {
+	m_minx(G_DBL_MAX_POS), m_miny(G_DBL_MAX_POS), m_maxx(G_DBL_MAX_NEG), m_maxy(G_DBL_MAX_NEG), m_minz(G_DBL_MAX_POS), m_maxz(G_DBL_MAX_NEG) {
 }
 
 Bounds::Bounds(double minx, double miny, double maxx, double maxy) :
-	Bounds(minx, miny, maxx, maxy, G_DBL_MAX_POS, G_DBL_MAX_NEG) {
+		m_minx(std::min(minx, maxx)), m_miny(std::min(miny, maxy)),
+		m_maxx(std::max(minx, maxx)), m_maxy(std::max(miny, maxy)),
+		m_minz(G_DBL_MAX_POS), m_maxz(G_DBL_MAX_NEG) {
 }
 
 Bounds::Bounds(double minx, double miny, double maxx, double maxy, double minz, double maxz) :

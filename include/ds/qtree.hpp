@@ -30,8 +30,8 @@ namespace geo {
 				y(y) {
 			}
 
-			bool operator()(const T& a, const T& b) {
-				return  (g_sq(x - a.x()) + g_sq(y - a.y())) < (g_sq(x - b.x()) + g_sq(y - b.y()));
+			bool operator()(const T* a, const T* b) {
+				return  (g_sq(x - a->x()) + g_sq(y - a->y())) < (g_sq(x - b->x()) + g_sq(y - b->y()));
 			}
 		};
 
@@ -300,7 +300,7 @@ namespace geo {
 				// Search within the bounding box first.
 				Bounds bounds(x - outside, y - outside, x + outside, y + outside);
 				if(m_bounds.intersects(bounds)) {
-					std::list<T> result;
+					std::list<T*> result;
 					// Find all nodes that intersect the bounds and return their contents.
 					findIntersecting(bounds, result);
 					// Find all items inside the outside radius, and outside the inside radius.

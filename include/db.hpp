@@ -77,9 +77,9 @@ namespace geo {
              * @param srid The horizontal spatial reference ID.
              * @param replace If true, removes and replaces an existing database.
              */
-            DB(const std::string &file, const std::string &layer, const std::string &driver,
-            		const std::unordered_map<std::string, FieldType> &fields,
-            		GeomType type, int srid = 0, bool replace = false);
+            DB(const std::string& file, const std::string& layer, const std::string& driver,
+            		const std::unordered_map<std::string, FieldType>& fields,
+            		GeomType type,	int srid = 0, bool replace = false);
 
             /**
              * Construct a database object.
@@ -92,8 +92,8 @@ namespace geo {
              * @param srid The horizontal spatial reference ID.
              * @param replace If true, removes and replaces an existing database.
              */
-            DB(const std::string &file, const std::string &layer, const std::string &driver,
-            		const std::unordered_map<std::string, FieldType> &fields,
+            DB(const std::string& file, const std::string& layer, const std::string& driver,
+            		const std::unordered_map<std::string, FieldType>& fields,
             		GeomType type, const std::string& projection, bool replace = false);
 
             /**
@@ -102,7 +102,7 @@ namespace geo {
              * @param file The filename for the database. Presumably a connection string could be used here.
              * @param layer The layer or table name.
              */
-            DB(const std::string &file, const std::string &layer);
+            DB(const std::string& file, const std::string& layer);
 
             virtual ~DB();
 
@@ -161,10 +161,11 @@ namespace geo {
             /**
              * Re-save the database to the new filename using the given driver.
              *
-             * @param filename 	The filename for the new database. Will be overwritten if it exists.
-             * @param driver	The database driver.
+             * @param filename 		The filename for the new database. Will be overwritten if it exists.
+             * @param driver		The database driver.
+             * @param dropFields	A list of fields to drop.
              */
-            virtual void convert(const std::string& filename, const std::string& driver);
+            virtual void convert(const std::string& filename, const std::string& driver, const std::vector<std::string>& dropFields);
 
             virtual void setCacheSize(size_t size);
 
