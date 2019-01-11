@@ -41,7 +41,7 @@ std::condition_variable __cv;	// For waiting on the queue.
 // Write to the file from the map of geometry lists.
 // On each loop, extracts a single finalized poly ID and loads those polys for unioning.
 void _writeToFile(std::unordered_map<int, std::vector<Polygon*> >* geoms, std::set<int>* finalIds,
-		const std::string* idField, OGRLayer* layer, GeometryFactory::unique_ptr* fact, GEOSContextHandle_t* gctx,
+		const std::string* idField, OGRLayer* layer, const GeometryFactory* fact, GEOSContextHandle_t* gctx,
 		bool removeHoles, bool removeDangles, bool* running, bool* cancel) {
 
 	std::vector<Polygon*> polys;
@@ -106,10 +106,10 @@ void _writeToFile(std::unordered_map<int, std::vector<Polygon*> >* geoms, std::s
 			for(size_t i = 0; i < geom->getNumGeometries(); ++i) {
 				const Polygon* p = dynamic_cast<const Polygon*>(geom->getGeometryN(i));
 				const LineString* l = p->getExteriorRing();
-				LinearRing* r = (*fact)->createLinearRing(l->getCoordinates());
-				geoms0->push_back((*fact)->createPolygon(r, nullptr));
+				LinearRing* r = fact->createLinearRing(l->getCoordinates());
+				geoms0->push_back(fact->createPolygon(r, nullptr));
 			}
-			Geometry* g = (*fact)->createMultiPolygon(geoms0); // Do not copy -- take ownership.
+			Geometry* g = fact->createMultiPolygon(geoms0); // Do not copy -- take ownership.
 			delete geom;
 			geom = g;
 		}
@@ -118,7 +118,7 @@ void _writeToFile(std::unordered_map<int, std::vector<Polygon*> >* geoms, std::s
 		if(geom->getGeometryTypeId() != GEOS_MULTIPOLYGON) {
 			std::vector<Geometry*>* gs = new std::vector<Geometry*>();
 			gs->push_back(geom);
-			geom = (*fact)->createMultiPolygon(gs);
+			geom = fact->createMultiPolygon(gs);
 		}
 
 		if(!geom)
@@ -150,17 +150,17 @@ void _writeToFile(std::unordered_map<int, std::vector<Polygon*> >* geoms, std::s
 }
 
 // Produce a rectangular polygon from the four corners.
-Polygon* _makeGeom(double x0, double y0, double x1, double y1, GeometryFactory::unique_ptr* fact, int dims) {
+Polygon* _makeGeom(double x0, double y0, double x1, double y1, const GeometryFactory* fact, int dims) {
 
 	// Build the geometry.
-	CoordinateSequence* seq = (*fact)->getCoordinateSequenceFactory()->create(5, dims);
+	CoordinateSequence* seq = fact->getCoordinateSequenceFactory()->create(5, dims);
 	seq->setAt(Coordinate(x0, y0, 0), 0);
 	seq->setAt(Coordinate(x0, y1, 0), 1);
 	seq->setAt(Coordinate(x1, y1, 0), 2);
 	seq->setAt(Coordinate(x1, y0, 0), 3);
 	seq->setAt(Coordinate(x0, y0, 0), 4);
-	LinearRing* ring = (*fact)->createLinearRing(seq);
-	return (*fact)->createPolygon(ring, NULL);
+	LinearRing* ring = fact->createLinearRing(seq);
+	return fact->createPolygon(ring, NULL);
 }
 
 // Make or open an OGR database to write the polygons to.
@@ -270,7 +270,7 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 
 	// Create the output dataset
 	GEOSContextHandle_t gctx = OGRGeometry::createGEOSContext();
-	GeometryFactory::unique_ptr fact = GeometryFactory::create(new PrecisionModel());
+	const GeometryFactory* fact = GeometryFactory::getDefaultInstance();//:create(new PrecisionModel());
 	OGRSpatialReference* sr = nullptr;
 	if(!projection.empty())
 		sr = new OGRSpatialReference(projection.c_str());
@@ -301,7 +301,7 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 
 	// Start output threads.
 	for(int i = 0; i < threads; ++i)
-		ths.emplace_back(&_writeToFile, &geoms, &finalIds, &idField, layer, &fact, &gctx, removeHoles, removeDangles, &running, &cancel);
+		ths.emplace_back(&_writeToFile, &geoms, &finalIds, &idField, layer, fact, &gctx, removeHoles, removeDangles, &running, &cancel);
 
 	// Process raster.
 	for(int r = 0; r < rows; ++r) {
@@ -332,7 +332,7 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 				x1 = startX + c * resX + epsX;
 				// If the value is a valid ID, create and the geometry and save it for writing.
 				if(v0 > 0) {
-					geoms[v0].push_back(_makeGeom(x0, y0, x1, y1, &fact, d3 ? 3 : 2));
+					geoms[v0].push_back(_makeGeom(x0, y0, x1, y1, fact, d3 ? 3 : 2));
 					activeIds.insert(v0);
 				}
 				// Update values for next loop.
