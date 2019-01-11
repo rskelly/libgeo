@@ -173,10 +173,7 @@ namespace geo {
 			 * @param maxCount The maximum number of items in a leaf.
 			 */
 			void init(const Bounds& bounds, int maxDepth, int maxCount) {
-				for(int i = 0; i < 4; ++i) {
-					if(m_nodes[i]) delete m_nodes[i];
-					m_nodes[i] = nullptr;
-				}
+				clear();
 				m_bounds = bounds;
 				m_maxDepth = maxDepth;
 				m_maxCount = maxCount;
@@ -462,17 +459,21 @@ namespace geo {
 
 			void clear() {
 				if(m_split) {
-					for(int i = 0; i < 4; ++i)
-						if(m_nodes[i]) m_nodes[i]->clear();
+					for (int i = 0; i < 4; ++i) {
+						if (m_nodes[i]) {
+							delete m_nodes[i];
+							m_nodes[i] = nullptr;
+						}
+					}
 				} else {
-					for(T* item : m_items)
+					for (T* item : m_items)
 						delete item;
+					m_items.clear();
 				}
 			}
 
 			~QTree() {
-				for(int i = 0; i < 4; ++i)
-					if(m_nodes[i]) delete m_nodes[i];
+				clear();
 			}
 
 		};
