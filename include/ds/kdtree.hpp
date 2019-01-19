@@ -40,7 +40,7 @@ private:
 	std::vector<ANNcoord> m_coords;
 	ANNkd_tree* m_tree;
 	size_t m_dims;
-	mutable std::mutex m_mtx;
+	//mutable std::mutex m_mtx;
 
 public:
 
@@ -56,7 +56,7 @@ public:
 	 * Destroy the tree.
 	 */
 	void destroy() {
-		std::lock_guard<std::mutex> lk(m_mtx);
+		//std::lock_guard<std::mutex> lk(m_mtx);
 		if(m_tree) {
 			delete m_tree;
 			m_tree = nullptr;
@@ -72,7 +72,7 @@ public:
 	 * @param item An item.
 	 */
 	void add(T* item) {
-		std::lock_guard<std::mutex> lk(m_mtx);
+		//std::lock_guard<std::mutex> lk(m_mtx);
 		m_items.push_back(item);
 	}
 
@@ -83,7 +83,7 @@ public:
 	 */
 	template <class Iter>
 	void add(Iter begin, Iter end) {
-		std::lock_guard<std::mutex> lk(m_mtx);
+		//std::lock_guard<std::mutex> lk(m_mtx);
 		while(begin != end) {
 			m_items.push_back(*begin);
 			++begin;
@@ -97,7 +97,7 @@ public:
 	 * and does nothing.
 	 */
 	void build() {
-		std::lock_guard<std::mutex> lk(m_mtx);
+		//std::lock_guard<std::mutex> lk(m_mtx);
 		// Clean up existing tree, etc.
 		if(m_tree)
 			destroy();
@@ -150,7 +150,7 @@ public:
 	 */
 	template <class TIter, class DIter>
 	int knn(const T& item, size_t count, TIter titer, DIter diter, double eps = EPS) const {
-		std::lock_guard<std::mutex> lk(m_mtx);
+		//std::lock_guard<std::mutex> lk(m_mtx);
 
 		if(!m_tree) {
 			g_warn("Tree not built. Forget to call build?");
@@ -201,8 +201,8 @@ public:
 	 * @param eps The error bound.
 	 */
 	template <class TIter, class DIter>
-	int radSearch(const T& item, double radius, int maxCount, TIter titer, DIter diter, double eps = EPS) const {
-		std::lock_guard<std::mutex> lk(m_mtx);
+	int radSearch(const T& item, double radius, TIter titer = nullptr, DIter diter = nullptr, double eps = EPS) const {
+		//std::lock_guard<std::mutex> lk(m_mtx);
 
 		if(!m_tree) {
 			g_warn("Tree not built. Forget to call build?");
@@ -217,21 +217,20 @@ public:
 		for(size_t i = 0; i < m_dims; ++i)
 			pt[i] = item[i];
 
-		// Create arrays for indices and distances.
-		static std::vector<ANNidx> idx;
-		static std::vector<ANNdist> dist;
+		int count = m_tree->annkFRSearch(static_cast<ANNpoint>(pt.data()), radius * radius, 0);
 
-		idx.reserve((size_t) maxCount);
-		dist.reserve((size_t) maxCount);
+		// Create arrays for indices and distances.
+		std::vector<ANNidx> idx(count);
+		std::vector<ANNdist> dist(count);
 
 		// Perform search.
-		int count = m_tree->annkFRSearch(static_cast<ANNpoint>(pt.data()), radius * radius, maxCount,
+		count = m_tree->annkFRSearch(static_cast<ANNpoint>(pt.data()), radius * radius, count,
 				static_cast<ANNidxArray>(idx.data()), static_cast<ANNdistArray>(dist.data()), eps);
 
 		// Populate output iterators.
 		for(size_t i = 0; i < count; ++i) {
 			if(idx[i] != ANN_NULL_IDX) {
-				*titer = m_items[i];
+				*titer = m_items[idx[i]];
 				*diter = std::sqrt(dist[i]);
 			} else {
 				*diter = -1;

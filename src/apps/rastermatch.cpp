@@ -101,6 +101,7 @@ void doInterp(MemRaster& target, KDTree<Pt>& tree, MemRaster& adjusted, MemRaste
 	const GridProps& tprops = target.props();
 	int tcols = tprops.cols();
 	int trows = tprops.rows();
+	double tres = std::abs(target.props().resolutionX());
 	double tn = tprops.nodata();
 	double tv;
 
@@ -114,43 +115,42 @@ void doInterp(MemRaster& target, KDTree<Pt>& tree, MemRaster& adjusted, MemRaste
 			if((tv = target.getFloat(tcol, trow, 1)) == tn)
 				continue;
 
-			double x = tprops.toX(tcol);
-			double y = tprops.toY(trow);
-
-			Pt q(x, y, 0);
+			double x = tprops.toCentroidX(tcol);
+			double y = tprops.toCentroidY(trow);
 
 			int res = 0;
-			double rad = std::abs(target.props().resolutionX());
-			do {
-				pts.clear();
-				dist.clear();
-				res = tree.radSearch(q, rad, 9999, std::back_inserter(pts), std::back_inserter(dist));
-				rad *= 2;
-			} while(res < count && rad <= radius);
+			double rad = tres;
+			double cnt = count;
+			{
+				Pt q(x, y, 0);
 
-			//int res = tree.knn(q, count, std::back_inserter(pts), std::back_inserter(dist));
-
-			double adj = 0;
-			double w = 0;
-			int cnt = 0;
-			for(int i = 0; i < res; ++i) {
-				const Pt& pt = *pts[i];
-				double d = dist[i];
-				++cnt;
-				if(d == 0) {
-					adj = pt.z;
-					w = 1;
-					break;
-				} else {
-					double w0 = 1.0 - std::max(0.0, std::min(1.0, d / rad));
-					adj += pt.z * w0;
-					w += 1.0;
-				}
+				do {
+					pts.clear();
+					dist.clear();
+					res = tree.radSearch(q, rad, std::back_inserter(pts), std::back_inserter(dist));
+					rad += tres;
+					cnt = (std::log2(rad / tres) + 1) * count;
+				} while(res < cnt && rad <= radius);
 			}
-			if(cnt) {
-				adj /= w;
-				adjusted.setFloat(tcol, trow, tv + adj, 1);
-				diffs.setFloat(tcol, trow, adj, 1);
+
+			{
+				double d, w0, w = 0, adj = 0;
+				for(int i = 0; i < res; ++i) {
+					if((d = dist[i]) >= 0){
+						const Pt& pt = *pts[i];
+						w0 = 1.0 - std::max(0.0, std::min(1.0, d / radius));
+						adj += pt.z * w0;
+						w += 1;
+					}
+				}
+				if(res) {
+					adj /= w;
+					adjusted.setFloat(tcol, trow, tv + adj, 1);
+					diffs.setFloat(tcol, trow, adj, 1);
+				} else {
+					adjusted.setFloat(tcol, trow, tv, 1);
+					diffs.setFloat(tcol, trow, 0, 1);
+				}
 			}
 		}
 	}
@@ -170,7 +170,6 @@ int main(int argc, char** argv) {
 	std::string adjusted;				// The adjusted raster.
 	std::string adjustment;				// The adjustment (differencce).
 	int count = 1;
-	int lag = 20;
 	double radius = 100;
 
 	int mode = 0;
@@ -191,10 +190,6 @@ int main(int argc, char** argv) {
 			continue;
 		} else if(arg == "-c") {
 			count = atoi(argv[++i]);
-			mode = 0;
-			continue;
-		} else if(arg == "-l") {
-			lag = atoi(argv[++i]);
 			mode = 0;
 			continue;
 		} else if(arg == "-r") {
@@ -262,13 +257,11 @@ int main(int argc, char** argv) {
 			anchor.writeTo(agrids[i], props.cols(), props.rows(), 0, 0, 0, 0, abands[i], 1);
 		}
 
-		std::ofstream tmp("tmp.csv");
-		tmp << std::setprecision(9);
+		//std::ofstream tmp("tmp.csv");
+		//tmp << std::setprecision(9);
 		double tn = tprops.nodata();
-		int lagc = (int) std::ceil(lag / std::abs(tprops.resolutionX()));
-		int lagr = (int) std::ceil(lag / std::abs(tprops.resolutionY()));
-		for(int tr = 0; tr < tprops.rows(); tr += lagr) {
-			for(int tc = 0; tc < tprops.cols(); tc += lagc) {
+		for(int tr = 0; tr < tprops.rows(); ++tr) {
+			for(int tc = 0; tc < tprops.cols(); ++tc) {
 				double tv;
 				if((tv = tgrid.getFloat(tc, tr, 1)) == tn)
 					continue;
@@ -289,7 +282,8 @@ int main(int argc, char** argv) {
 				}
 				if(cnt) {
 					tree.add(new Pt(x, y, sum / cnt - tv));
-					tmp << x << "," << y << "," << (sum / cnt - tv) << "\n";
+					//tmp << x << "," << y << "," << (sum / cnt - tv) << "\n";
+					//std::cerr << x << ", " << y << ", " << sum << ", " << cnt << ", " << tv << ", " << (sum / cnt - tv) << "\n";
 				}
 			}
 		}
