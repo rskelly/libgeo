@@ -64,7 +64,7 @@ set (THREADS_PREFER_PTHREAD_FLAG ON)
 
 find_package (Threads REQUIRED)
 find_package (Boost 1.58 COMPONENTS system filesystem date_time REQUIRED)
-find_package (GDAL 2.2 REQUIRED)
+find_package (GDAL 2 REQUIRED)
 find_package (CGAL REQUIRED)
 
 find_library (LIBLAS_LIBRARY las)
