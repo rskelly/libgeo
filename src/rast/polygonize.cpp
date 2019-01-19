@@ -236,19 +236,19 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 	if(threads < 1)
 		threads = 1;
 
-	std::unique_ptr<MemRaster> src;
-	std::unique_ptr<MemRaster> msk;
+	MemRaster src;
+	MemRaster msk;
 
 	// Create a memory-mapped version of the input raster.
 	{
 		GridProps mprops(props());
 		mprops.setBands(1);
-		src.reset(new MemRaster(mprops, true));
-		writeTo(*src, mprops.cols(), mprops.rows(), 0, 0, 0, 0, band, 1);
+		src.init(mprops, true);
+		writeTo(src, mprops.cols(), mprops.rows(), 0, 0, 0, 0, band, 1);
 	}
 
 	// Extract some grid properties.
-	const GridProps& props = src->props();
+	const GridProps& props = src.props();
 	int cols = props.cols();
 	int rows = props.rows();
 	double resX = props.resolutionX();
@@ -265,12 +265,12 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 	double startY = resY > 0 ? bounds.miny() : bounds.maxy();
 
 	// Perturbation values for unioning geometries.
-	double epsX = resX > 0 ? std::numeric_limits<double>::min() : -std::numeric_limits<double>::min();
-	double epsY = resY > 0 ? std::numeric_limits<double>::min() : -std::numeric_limits<double>::min();
+	//double epsX = resX > 0 ? std::numeric_limits<double>::min() : -std::numeric_limits<double>::min();
+	//double epsY = resY > 0 ? std::numeric_limits<double>::min() : -std::numeric_limits<double>::min();
 
 	// Create the output dataset
 	GEOSContextHandle_t gctx = OGRGeometry::createGEOSContext();
-	const GeometryFactory* fact = GeometryFactory::getDefaultInstance();//:create(new PrecisionModel());
+	const GeometryFactory* fact = GeometryFactory::getDefaultInstance();
 	OGRSpatialReference* sr = nullptr;
 	if(!projection.empty())
 		sr = new OGRSpatialReference(projection.c_str());
@@ -309,13 +309,13 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 		status.update((float) r / rows, _rowStatus(r, rows));
 
 		// Load the row buffer.
-		src->writeTo(buf, cols, 1, 0, r, 0, 0, 1, 1);
+		src.writeTo(buf, cols, 1, 0, r, 0, 0, 1, 1);
 
 		// Initialize the corner coordinates.
 		double x0 = startX;
 		double y0 = startY + r * resY;
 		double x1 = x0;
-		double y1 = y0 + resY + epsY; // Perturbation for intersection to work.
+		double y1 = y0 + resY;// +epsY; // Perturbation for intersection to work.
 
 		// For tracking cell values.
 		int v0 = buf.getInt(0, 0, 1);
@@ -329,7 +329,7 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 			// If the current cell value differs from the previous one...
 			if((v1 = buf.getInt(c, 0, 1)) != v0) {
 				// Update the right x coordinate.
-				x1 = startX + c * resX + epsX;
+				x1 = startX + c * resX;// +epsX;
 				// If the value is a valid ID, create and the geometry and save it for writing.
 				if(v0 > 0) {
 					geoms[v0].push_back(_makeGeom(x0, y0, x1, y1, fact, d3 ? 3 : 2));
