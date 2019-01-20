@@ -126,8 +126,11 @@ void _writeToFile(std::unordered_map<int, std::vector<Polygon*> >* geoms, std::s
 
 		// Create and write the OGR geometry.
 		OGRGeometry* ogeom = OGRGeometryFactory::createFromGEOS(*gctx, (GEOSGeom) geom);
+		delete geom;
+
+		// Create and configure the feature. Feature owns the OGRGeometry.
 		OGRFeature* feat = OGRFeature::CreateFeature(layer->GetLayerDefn()); // Creates on the OGR heap.
-		feat->SetGeometry(ogeom);
+		feat->SetGeometryDirectly(ogeom);
 		feat->SetField(idField->c_str(), (GIntBig) id);
 		feat->SetFID(++__fid);
 
@@ -139,10 +142,6 @@ void _writeToFile(std::unordered_map<int, std::vector<Polygon*> >* geoms, std::s
 		}
 
 		OGRFeature::DestroyFeature(feat);
-
-		// Delete the polys.
-		delete ogeom;
-		delete geom;
 
 		if(OGRERR_NONE != err)
 			g_runerr("Failed to add geometry.");
@@ -237,7 +236,6 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 		threads = 1;
 
 	MemRaster src;
-	MemRaster msk;
 
 	// Create a memory-mapped version of the input raster.
 	{
@@ -263,10 +261,6 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 	// The starting corner coordinates.
 	double startX = resX > 0 ? bounds.minx() : bounds.maxx();
 	double startY = resY > 0 ? bounds.miny() : bounds.maxy();
-
-	// Perturbation values for unioning geometries.
-	//double epsX = resX > 0 ? std::numeric_limits<double>::min() : -std::numeric_limits<double>::min();
-	//double epsY = resY > 0 ? std::numeric_limits<double>::min() : -std::numeric_limits<double>::min();
 
 	// Create the output dataset
 	GEOSContextHandle_t gctx = OGRGeometry::createGEOSContext();
@@ -315,7 +309,7 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 		double x0 = startX;
 		double y0 = startY + r * resY;
 		double x1 = x0;
-		double y1 = y0 + resY;// +epsY; // Perturbation for intersection to work.
+		double y1 = y0 + resY;
 
 		// For tracking cell values.
 		int v0 = buf.getInt(0, 0, 1);
@@ -329,7 +323,7 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 			// If the current cell value differs from the previous one...
 			if((v1 = buf.getInt(c, 0, 1)) != v0) {
 				// Update the right x coordinate.
-				x1 = startX + c * resX;// +epsX;
+				x1 = startX + c * resX;
 				// If the value is a valid ID, create and the geometry and save it for writing.
 				if(v0 > 0) {
 					geoms[v0].push_back(_makeGeom(x0, y0, x1, y1, fact, d3 ? 3 : 2));

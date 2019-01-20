@@ -163,10 +163,7 @@ namespace geo {
              *
              * @param filename 		The filename for the new database. Will be overwritten if it exists.
              * @param driver		The database driver.
-             * @param dropFields	A list of fields to drop.
              */
-            virtual void convert(const std::string& filename, const std::string& driver, const std::vector<std::string>& dropFields);
-
             virtual void convert(const std::string& filename, const std::string& driver);
 
             virtual void setCacheSize(size_t size);
