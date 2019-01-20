@@ -73,8 +73,14 @@ void _writeToFile(std::unordered_map<int, std::vector<Polygon*> >* geoms, std::s
 			geoms->erase(id);
 		}
 
-		if(polys.empty() || *cancel)
+		if(polys.empty())
 			continue;
+
+		if(*cancel) {
+			for(Polygon* p : polys)
+				delete p;
+			continue;
+		}
 
 		// Union the polys.
 		geom = geos::operation::geounion::CascadedPolygonUnion::CascadedPolygonUnion::Union(&polys);
@@ -82,9 +88,14 @@ void _writeToFile(std::unordered_map<int, std::vector<Polygon*> >* geoms, std::s
 			delete p;
 		polys.clear();
 
+		if(*cancel) {
+			delete geom;
+			continue;
+		}
+
 		// If we're removing dangles, throw away all but the
 		// largest single polygon. If it was originally a polygon, there are no dangles.
-		if(removeDangles && geom->getNumGeometries() > 1) {
+		if(!*cancel && removeDangles && geom->getNumGeometries() > 1) {
 			size_t idx = 0;
 			double area = 0;
 			for(size_t i = 0; i < geom->getNumGeometries(); ++i) {
@@ -101,7 +112,7 @@ void _writeToFile(std::unordered_map<int, std::vector<Polygon*> >* geoms, std::s
 		}
 
 		// If we're removing holes, extract the exterior rings of all constituent polygons.
-		if(removeHoles) {
+		if(!*cancel && removeHoles) {
 			std::vector<Geometry*>* geoms0 = new std::vector<Geometry*>();
 			for(size_t i = 0; i < geom->getNumGeometries(); ++i) {
 				const Polygon* p = dynamic_cast<const Polygon*>(geom->getGeometryN(i));
@@ -115,7 +126,7 @@ void _writeToFile(std::unordered_map<int, std::vector<Polygon*> >* geoms, std::s
 		}
 
 		// If the result is not a multi, make it one.
-		if(geom->getGeometryTypeId() != GEOS_MULTIPOLYGON) {
+		if(!*cancel && geom->getGeometryTypeId() != GEOS_MULTIPOLYGON) {
 			std::vector<Geometry*>* gs = new std::vector<Geometry*>();
 			gs->push_back(geom);
 			geom = fact->createMultiPolygon(gs);
@@ -123,6 +134,11 @@ void _writeToFile(std::unordered_map<int, std::vector<Polygon*> >* geoms, std::s
 
 		if(!geom)
 			g_runerr("Null geometry.");
+
+		if(*cancel) {
+			delete geom;
+			continue;
+		}
 
 		// Create and write the OGR geometry.
 		OGRGeometry* ogeom = OGRGeometryFactory::createFromGEOS(*gctx, (GEOSGeom) geom);
@@ -300,6 +316,8 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 	// Process raster.
 	for(int r = 0; r < rows; ++r) {
 
+		if(cancel) break;
+
 		status.update((float) r / rows, _rowStatus(r, rows));
 
 		// Load the row buffer.
@@ -320,6 +338,8 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 
 		for(int c = 1; c < cols; ++c) {
 
+			if(cancel) break;
+
 			// If the current cell value differs from the previous one...
 			if((v1 = buf.getInt(c, 0, 1)) != v0) {
 				// Update the right x coordinate.
@@ -336,7 +356,7 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 		}
 
 		// IDs that are in the geoms array and not in the current row are ready to be finalized.
-		{
+		if(!cancel) {
 			std::lock_guard<std::mutex> lk0(__gmtx);
 			std::lock_guard<std::mutex> lk1(__fmtx);
 			for(const auto& it : geoms) {
@@ -346,12 +366,12 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 		}
 		__cv.notify_all();
 
-		while(!finalIds.empty())
+		while(!cancel && !finalIds.empty())
 			std::this_thread::yield();
 	}
 
 	// Finalize all remaining geometries.
-	{
+	if(!cancel) {
 		std::lock_guard<std::mutex> lk0(__gmtx);
 		std::lock_guard<std::mutex> lk1(__fmtx);
 		for(auto& it : geoms)
