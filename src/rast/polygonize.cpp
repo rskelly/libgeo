@@ -281,6 +281,7 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 	// Create the output dataset
 	GEOSContextHandle_t gctx = OGRGeometry::createGEOSContext();
 	const GeometryFactory* fact = GeometryFactory::getDefaultInstance();
+
 	OGRSpatialReference* sr = nullptr;
 	if(!projection.empty())
 		sr = new OGRSpatialReference(projection.c_str());
@@ -288,6 +289,9 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 	GDALDataset* ds;
 	OGRLayer* layer;
 	_makeDataset(filename, driver, layerName, idField, sr, d3 ? wkbMultiPolygon25D : wkbMultiPolygon, &ds, &layer);
+
+	if(sr)
+		sr->Release();
 
 	if(!fields.empty()) {
 		for(const std::pair<std::string, OGRFieldType>& field : fields) {
@@ -386,6 +390,8 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 		if(th.joinable())
 			th.join();
 	}
+
+	OGRGeometry::freeGEOSContext(gctx);
 
 	// Release the layer -- GDAL will take care of it. But close the dataset so that can happen.
 	layer->Dereference();

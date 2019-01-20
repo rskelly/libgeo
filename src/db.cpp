@@ -144,6 +144,9 @@ DB::DB(const std::string& file, const std::string& layer, const std::string& dri
 
 	m_layer = m_ds->CreateLayer(m_layerName.c_str(), sr, geomType(m_type), dopts);
 
+	if(sr)
+		sr->Release();
+
 	if(dopts)
 		CPLFree(dopts);
 
@@ -157,6 +160,7 @@ DB::DB(const std::string& file, const std::string& layer, const std::string& dri
 		OGRFieldDefn def(it.first.c_str(), fieldType(it.second));
 		m_layer->CreateField(&def);
 	}
+
 	m_fdef = m_layer->GetLayerDefn();
 
 	if (!m_fdef) {
@@ -166,6 +170,7 @@ DB::DB(const std::string& file, const std::string& layer, const std::string& dri
 	}
 
     OGRGeomFieldDefn* gdef = m_fdef->GetGeomFieldDefn(0);
+
 	if (!gdef) {
 		GDALClose(m_ds);
 		m_ds = nullptr;
@@ -247,6 +252,9 @@ DB::DB(const std::string& file, const std::string& layer, const std::string& dri
 
 	m_layer = m_ds->CreateLayer(m_layerName.c_str(), sr, geomType(m_type), dopts);
 
+	if(sr)
+		sr->Release();
+
 	if(dopts)
 		CPLFree(dopts);
 
@@ -260,7 +268,9 @@ DB::DB(const std::string& file, const std::string& layer, const std::string& dri
 		OGRFieldDefn def(it.first.c_str(), fieldType(it.second));
 		m_layer->CreateField(&def);
 	}
+
 	m_fdef = m_layer->GetLayerDefn();
+
 	if (!m_fdef) {
 		GDALClose(m_ds);
 		m_ds = nullptr;
@@ -268,7 +278,8 @@ DB::DB(const std::string& file, const std::string& layer, const std::string& dri
 	}
 
     OGRGeomFieldDefn* gdef = m_layer->GetLayerDefn()->GetGeomFieldDefn(0);
-	if (!gdef) {
+
+    if (!gdef) {
 		GDALClose(m_ds);
 		m_ds = nullptr;
 		g_runerr("Failed to retrieve geometry field definition.");
