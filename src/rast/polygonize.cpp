@@ -175,7 +175,8 @@ Polygon* _makeGeom(double x0, double y0, double x1, double y1, const GeometryFac
 	seq->setAt(Coordinate(x1, y0, 0), 3);
 	seq->setAt(Coordinate(x0, y0, 0), 4);
 	LinearRing* ring = fact->createLinearRing(seq);
-	return fact->createPolygon(ring, NULL);
+	Polygon* poly = fact->createPolygon(ring, NULL);
+	return poly;
 }
 
 // Make or open an OGR database to write the polygons to.
