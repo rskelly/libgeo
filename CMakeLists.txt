@@ -14,7 +14,7 @@ set (CMAKE_INCLUDE_DIRECTORIES_BEFORE ON)
 set (CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set (CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set (CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
-set (CMAKE_INSTALL_RPATH "/opt/lib;/usr/local/lib")
+set (CMAKE_INSTALL_RPATH ";/usr/local/lib")
 set (CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
 set (Boost_DEBUG OFF)
@@ -48,8 +48,6 @@ elseif(${WIN32})
 else()
 	set (CMAKE_CXX_COMPILER_LAUNCHER ccache)
 	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-pragmas -fopenmp")
-	set (GEOS_INCLUDEDIR /opt/include)
-	set (GEOS_LIBRARYDIR /opt/lib)
 	set (EIGEN_INCLUDEDIR "/usr/include/eigen3")
 	set (BOOST_INCLUDEDIR "/usr/include")
 	set (BOOST_LIBRARYDIR "/usr/lib/x86_64-linux-gnu")
@@ -71,11 +69,11 @@ find_library (PROJ_LIBRARY proj)
 
 # Configure directories###################################################################################
 
-include_directories(BEFORE SYSTEM ./include ./ann/include /opt/include
+include_directories(BEFORE SYSTEM ./include ./ann/include 
 	${GEOS_INCLUDEDIR} ${GIS_INCLUDEDIR} ${EIGEN_INCLUDEDIR} ${JSON_INCLUDEDIR}
 	${GDAL_INCLUDE_DIR} ${Boost_INCLUDE_DIRS})
 	 
-link_directories(./build/lib ./build/bin /opt/lib ${GDAL_LIBRARYDIR} 
+link_directories(./build/lib ./build/bin ${GDAL_LIBRARYDIR} 
 	${GIS_LIBRARYDIR} ${Boost_LIBRARY_DIRS})
 
 # Build support libraries ################################################################################
@@ -144,8 +142,8 @@ if(${BUILD_APPS})
 	# add_executable (geoinfo src/apps/geoinfo.cpp)
 	# target_link_libraries (geoinfo geoutil ${GDAL_LIBRARY} ${LIBLAS_LIBRARY} ${JSONCPP_LIBRARY})
 
-	add_executable (voidfill src/apps/voidfill.cpp)
-	target_link_libraries (voidfill geoutil georaster ${GDAL_LIBRARY})
+	# add_executable (voidfill src/apps/voidfill.cpp)
+	# target_link_libraries (voidfill geoutil georaster ${GDAL_LIBRARY})
 
 	# add_executable (datumshift src/apps/datumshift.cpp)
 	# target_link_libraries (datumshift geoutil georaster ${GDAL_LIBRARY} ${PROJ_LIBRARY})
@@ -159,8 +157,8 @@ if(${BUILD_APPS})
 	# add_executable (groundassign src/apps/groundassign.cpp)
 	# target_link_libraries (groundassign ${LIBLAS_LIBRARY})
 
-	add_executable (rastermatch src/apps/rastermatch.cpp)
-	target_link_libraries (rastermatch geoutil geoann georaster ${GEOS_LIBRARY} ${GDAL_LIBRARY})
+	# add_executable (rastermatch src/apps/rastermatch.cpp)
+	# target_link_libraries (rastermatch geoutil geoann georaster ${GEOS_LIBRARY} ${GDAL_LIBRARY})
 
 	#add_executable (rbf src/tests/rbf.cpp)
 	#target_link_libraries (rbf)

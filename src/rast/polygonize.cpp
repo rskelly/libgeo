@@ -14,6 +14,7 @@
 #include <ogr_feature.h>
 #include <ogrsf_frmts.h>
 
+#include <geos_c.h>
 #include <geos/geom/PrecisionModel.h>
 #include <geos/geom/GeometryFactory.h>
 #include <geos/geom/CoordinateSequenceFactory.h>
@@ -126,7 +127,7 @@ void _writeToFile(std::unordered_map<int, std::vector<Polygon*> >* geoms, std::s
 		}
 
 		// If the result is not a multi, make it one.
-		if(!*cancel && geom->getGeometryTypeId() != GEOS_MULTIPOLYGON) {
+		if(!*cancel && geom->getGeometryTypeId() != GeometryTypeId::GEOS_MULTIPOLYGON) {
 			std::vector<Geometry*>* gs = new std::vector<Geometry*>();
 			gs->push_back(geom);
 			geom = fact->createMultiPolygon(gs);
@@ -281,7 +282,14 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 
 	// Create the output dataset
 	GEOSContextHandle_t gctx = OGRGeometry::createGEOSContext();
-	const GeometryFactory* fact = GeometryFactory::getDefaultInstance();
+	PrecisionModel pm(10000, 0, 0);
+#if GEOS_VERSION_MINOR > 4
+	GeometryFactory::unique_ptr factp = GeometryFactory::create(&pm);
+#else
+	std::unique_ptr<GeometryFactory> factp(new GeometryFactory(&pm));
+#endif
+
+	const GeometryFactory* fact = factp.get();
 
 	OGRSpatialReference* sr = nullptr;
 	if(!projection.empty())
@@ -304,6 +312,9 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 			layer->CreateField(&dfn);
 		}
 	}
+
+	double xeps = 0.001 * (resX > 0 ? 1 : -1);
+	double yeps = 0.001 * (resY > 0 ? 1 : -1);
 
 	// Data containers.
 	std::unordered_map<int, std::vector<Polygon*> > geoms;
@@ -351,7 +362,7 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 				x1 = startX + c * resX;
 				// If the value is a valid ID, create and the geometry and save it for writing.
 				if(v0 > 0) {
-					geoms[v0].push_back(_makeGeom(x0, y0, x1, y1, fact, d3 ? 3 : 2));
+					geoms[v0].push_back(_makeGeom(x0, y0, x1 + xeps, y1 + yeps, fact, d3 ? 3 : 2));
 					activeIds.insert(v0);
 				}
 				// Update values for next loop.
