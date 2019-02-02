@@ -1340,19 +1340,28 @@ Raster::Raster(const std::string& filename, const GridProps& props) :
 	opts = CSLSetNameValue(opts, "INTERLEAVE", "BAND");
 
 	GDALAllRegister();
+
 	std::string drvName = m_props.driver();
 	if(drvName.empty())
 		drvName = getDriverForFilename(m_filename);
 	if(drvName.empty())
-		g_runerr("Couldn't find driver for: " << m_filename)
+		g_runerr("Couldn't find driver for: " << m_filename);
+
 	GDALDriver *drv = GetGDALDriverManager()->GetDriverByName(drvName.c_str());
+	if(!drv)
+		g_runerr("Failed to get driver for " << drvName);
+
 	const char *create = drv->GetMetadataItem(GDAL_DCAP_CREATE);
 	if(create == NULL || std::strncmp(create, "YES", 3) != 0)
 		g_runerr("The " << drvName << " driver does not support dataset creation. Please specify a different driver.");
+
 	Util::rm(filename);
-	m_ds = drv->Create(
-			filename.c_str(), m_props.cols(), m_props.rows(), m_props.bands(),
-			dataType2GDT(m_props.dataType()), opts);
+
+	m_ds = drv->Create(filename.c_str(), m_props.cols(), m_props.rows(), m_props.bands(), dataType2GDT(m_props.dataType()), opts);
+
+	if(opts)
+		CSLDestroy(opts);
+
 	if (!m_ds)
 		g_runerr("Failed to create file.");
 
@@ -1365,10 +1374,12 @@ Raster::Raster(const std::string& filename, const GridProps& props) :
 	std::string proj = m_props.projection();
 	if (!proj.empty())
 		m_ds->SetProjection(proj.c_str());
+
 	if(m_props.nodataSet()) {
 		for(int i = 1; i <= m_props.bands(); ++i)
 			m_ds->GetRasterBand(i)->SetNoDataValue(m_props.nodata());
 	}
+
 	m_ds->GetRasterBand(1)->GetBlockSize(&m_bcols, &m_brows);
 }
 
@@ -1385,8 +1396,9 @@ Raster::Raster(const std::string& filename, bool writable) :
 
 	m_filename = filename;
 
-	// Attempt to open the dataset.
 	GDALAllRegister();
+
+	// Attempt to open the dataset.
 	m_ds = (GDALDataset *) GDALOpen(filename.c_str(), writable ? GA_Update : GA_ReadOnly);
 	if (m_ds == NULL)
 		g_runerr("Failed to open raster.");
@@ -1394,6 +1406,7 @@ Raster::Raster(const std::string& filename, bool writable) :
 	GDALDriver *drv = m_ds->GetDriver();
 	if(drv == NULL)
 		g_runerr("Failed to retrieve driver.");
+
 	const char *drvName = drv->GetDescription();
 	if(drvName != NULL)
 		m_props.setDriver(drvName);
@@ -1409,6 +1422,7 @@ Raster::Raster(const std::string& filename, bool writable) :
 	m_props.setWritable(writable);
 	m_props.setProjection(std::string(m_ds->GetProjectionRef()));
 	m_props.setNoData(m_ds->GetRasterBand(1)->GetNoDataValue()); // TODO: This might not be a real nodata value.
+
 	m_ds->GetRasterBand(1)->GetBlockSize(&m_bcols, &m_brows);
 }
 
@@ -1493,12 +1507,15 @@ void Raster::writeToRaster(Raster& grd,
 	GDALRasterBand* srcBnd = m_ds->GetRasterBand(srcBand);
 	if(!srcBnd)
 		g_runerr("Failed to find source band " << srcBand);
+
 	GDALRasterBand* dstBnd = grd.m_ds->GetRasterBand(dstBand);
 	if(!dstBnd)
 		g_runerr("Failed to find destination band " << dstBand);
+
 	if(CPLE_None != srcBnd->RasterIO(GF_Read, srcCol, srcRow, cols, rows,
 			buf.buf, cols, rows, gtype, 0, 0, 0))
 		g_runerr("Failed to read from: " << grd.filename());
+
 	if(CPLE_None != dstBnd->RasterIO(GF_Write, dstCol, dstRow, cols, rows,
 			buf.buf, cols, rows, gtype, 0, 0, 0))
 		g_runerr("Failed to write to: " << filename());

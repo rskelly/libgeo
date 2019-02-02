@@ -88,6 +88,8 @@ DB::DB(const std::string& file, const std::string& layer, const std::string& dri
 	m_layer(nullptr),
 	m_fdef(nullptr) {
 
+	GDALAllRegister();
+
 	// If the driver was not given, try to discover it from an existing file, otherwise fail.
 	if (m_driver.empty()) {
 		GDALDataset* ds = static_cast<GDALDataset*>(GDALOpenEx(m_file.c_str(), GDAL_OF_VECTOR | GDAL_OF_READONLY, nullptr, nullptr, nullptr));
@@ -111,11 +113,9 @@ DB::DB(const std::string& file, const std::string& layer, const std::string& dri
     if(replace && Util::exists(file))
         Util::rm(file);
 
-    GDALAllRegister();
-
     GDALDriver* drv = GetGDALDriverManager()->GetDriverByName(m_driver.c_str());
     if(!drv)
-        g_runerr("Driver not found for " << m_file << " (" << driver << ")");
+        g_runerr("Driver not found for " << m_file << " (" << m_driver << ")");
 
 	// If the file is sqlite, use the spatialite driver.
 	char** dopts = nullptr;
@@ -124,7 +124,8 @@ DB::DB(const std::string& file, const std::string& layer, const std::string& dri
 
 	m_ds = drv->Create(m_file.c_str(), 0, 0, 0, GDT_Unknown, dopts);
 
-	CPLFree(dopts);
+	if(dopts)
+		CPLFree(dopts);
 
 	if(!m_ds)
         g_runerr("Failed to create data set for " << m_file);
@@ -143,18 +144,39 @@ DB::DB(const std::string& file, const std::string& layer, const std::string& dri
 
 	m_layer = m_ds->CreateLayer(m_layerName.c_str(), sr, geomType(m_type), dopts);
 
-	CPLFree(dopts);
+	if(sr)
+		sr->Release();
 
-	if(!m_layer)
+	if(dopts)
+		CPLFree(dopts);
+
+	if (!m_layer) {
+		GDALClose(m_ds);
+		m_ds = nullptr;
 		g_runerr("Failed to create layer, " << m_layerName << ".");
+	}
 
 	for(const auto& it : m_fieldTypes) {
 		OGRFieldDefn def(it.first.c_str(), fieldType(it.second));
 		m_layer->CreateField(&def);
 	}
+
 	m_fdef = m_layer->GetLayerDefn();
 
-    OGRGeomFieldDefn* gdef = m_layer->GetLayerDefn()->GetGeomFieldDefn(0);
+	if (!m_fdef) {
+		GDALClose(m_ds);
+		m_ds = nullptr;
+		g_runerr("Failed to retrieve layer definition.");
+	}
+
+    OGRGeomFieldDefn* gdef = m_fdef->GetGeomFieldDefn(0);
+
+	if (!gdef) {
+		GDALClose(m_ds);
+		m_ds = nullptr;
+		g_runerr("Failed to retrieve geometry field definition.");
+	}
+
     m_geomName = std::string(gdef->GetNameRef());
 
 }
@@ -171,6 +193,8 @@ DB::DB(const std::string& file, const std::string& layer, const std::string& dri
 	m_ds(nullptr),
 	m_layer(nullptr),
 	m_fdef(nullptr) {
+
+	GDALAllRegister();
 
 	// If the driver was not given, try to discover it from an existing file, otherwise fail.
 	if (m_driver.empty()) {
@@ -195,8 +219,6 @@ DB::DB(const std::string& file, const std::string& layer, const std::string& dri
     if(replace && Util::exists(file))
         Util::rm(file);
 
-    GDALAllRegister();
-
     GDALDriver* drv = GetGDALDriverManager()->GetDriverByName(m_driver.c_str());
     if(!drv)
         g_runerr("Driver not found for " << m_file << " (" << driver << ")");
@@ -208,7 +230,8 @@ DB::DB(const std::string& file, const std::string& layer, const std::string& dri
 
 	m_ds = drv->Create(m_file.c_str(), 0, 0, 0, GDT_Unknown, dopts);
 
-	CPLFree(dopts);
+	if(dopts)
+		CPLFree(dopts);
 
 	if(!m_ds)
         g_runerr("Failed to create data set for " << m_file);
@@ -229,18 +252,39 @@ DB::DB(const std::string& file, const std::string& layer, const std::string& dri
 
 	m_layer = m_ds->CreateLayer(m_layerName.c_str(), sr, geomType(m_type), dopts);
 
-	CPLFree(dopts);
+	if(sr)
+		sr->Release();
 
-	if(!m_layer)
+	if(dopts)
+		CPLFree(dopts);
+
+	if (!m_layer) {
+		GDALClose(m_ds);
+		m_ds = nullptr;
 		g_runerr("Failed to create layer, " << m_layerName << ".");
+	}
 
 	for(const auto& it : m_fieldTypes) {
 		OGRFieldDefn def(it.first.c_str(), fieldType(it.second));
 		m_layer->CreateField(&def);
 	}
+
 	m_fdef = m_layer->GetLayerDefn();
 
-    OGRGeomFieldDefn *gdef = m_layer->GetLayerDefn()->GetGeomFieldDefn(0);
+	if (!m_fdef) {
+		GDALClose(m_ds);
+		m_ds = nullptr;
+		g_runerr("Failed to retrieve layer definition.");
+	}
+
+    OGRGeomFieldDefn* gdef = m_layer->GetLayerDefn()->GetGeomFieldDefn(0);
+
+    if (!gdef) {
+		GDALClose(m_ds);
+		m_ds = nullptr;
+		g_runerr("Failed to retrieve geometry field definition.");
+	}
+
     m_geomName = std::string(gdef->GetNameRef());
 }
 
@@ -270,6 +314,8 @@ void DB::open() {
     if(!m_layer)
 		m_layer = m_ds->GetLayer(0);
 	if(!m_layer) {
+		GDALClose(m_ds);
+		m_ds = nullptr;
 		if(m_layerName.empty()) {
 			g_runerr("No layer, " << m_layerName << " was found on this data set, and no default was available.");
 		} else {
@@ -280,9 +326,21 @@ void DB::open() {
 	m_type = geomType(m_layer->GetGeomType());
 
 	OGRGeomFieldDefn* gdef = m_layer->GetLayerDefn()->GetGeomFieldDefn(0);
+	if (!gdef) {
+		GDALClose(m_ds);
+		m_ds = nullptr;
+		g_runerr("Failed to retreive geometry field definition.");
+	}
+
 	m_geomName = std::string(gdef->GetNameRef());
 
 	m_fdef = m_layer->GetLayerDefn();
+	if (!m_fdef) {
+		GDALClose(m_ds);
+		m_ds = nullptr;
+		g_runerr("Failed to retrieve layer definition.");
+	}
+
 	for(int i = 0; i < m_fdef->GetFieldCount(); ++i) {
 		OGRFieldDefn* def = m_fdef->GetFieldDefn(i);
 		m_fieldTypes[std::string(def->GetNameRef())] = fieldType(def->GetType());
@@ -402,50 +460,12 @@ std::string nameJoin(std::unordered_set<std::string>& names) {
 }
 
 void DB::convert(const std::string& filename, const std::string& driver) {
-	std::vector<std::string> dropFields;
-	convert(filename, driver, dropFields);
-}
-void DB::convert(const std::string& filename, const std::string& driver, const std::vector<std::string>& dropFields) {
 
 	// If replace and file exists, delete the existing file.
     if(Util::exists(filename))
         Util::rm(filename);
 
     GDALAllRegister();
-
-	// If there are drop fields, create a new table without them.
-	if(!dropFields.empty()) {
-
-		GDALDataset* ds = static_cast<GDALDataset*>(GDALOpenEx(m_file.c_str(), GDAL_OF_VECTOR | GDAL_OF_UPDATE, nullptr, nullptr, nullptr));
-		OGRLayer* layer = ds->GetLayerByName(m_layerName.c_str());
-
-		// Get a list of the field names.
-		std::unordered_set<std::string> namest;//(dropFields.begin(), dropFields.end());
-		OGRFeatureDefn* defn = layer->GetLayerDefn();
-		for(int i = 0; i < defn->GetFieldCount(); ++i) {
-			OGRFieldDefn* fd = defn->GetFieldDefn(i);
-			namest.insert(fd->GetNameRef());
-		}
-
-		// Remove the drop column names.
-		for(const std::string& n : dropFields)
-			namest.erase(n);
-
-		// Rename the existing table.
-		std::string sql = "ALTER TABLE \"" + m_layerName + "\" RENAME TO convert_tmp;";
-		ds->ExecuteSQL(sql.c_str(), nullptr, nullptr);
-
-		// Create the new table with the old name.
-		sql = "CREATE TABLE \"" + m_layerName + "\" AS SELECT " + nameJoin(namest) + " FROM convert_tmp;";
-		ds->ExecuteSQL(sql.c_str(), nullptr, nullptr);
-
-		// Drop the temp table.
-		sql = "DROP TABLE convert_tmp";
-		ds->ExecuteSQL(sql.c_str(), nullptr, nullptr);
-
-		ds->FlushCache();
-		GDALClose(ds);
-	}
 
 	{
 		GDALDriver* drv = GetGDALDriverManager()->GetDriverByName(driver.c_str());
@@ -459,12 +479,17 @@ void DB::convert(const std::string& filename, const std::string& driver, const s
 
 		GDALDataset* ds = drv->Create(filename.c_str(), 0, 0, 0, GDT_Unknown, dopts);
 
-		CPLFree(dopts);
+		if(dopts)
+			CPLFree(dopts);
 
 		if(!ds)
 			g_runerr("Failed to create data set for " << filename);
 
 		OGRLayer* layer = m_ds->GetLayerByName(m_layerName.c_str());
+		if (!layer) {
+			GDALClose(ds);
+			g_runerr("Failed to get layer " << m_layerName << ".");
+		}
 
 		dopts = nullptr;
 		if(driver == "SQLite") {
@@ -475,7 +500,9 @@ void DB::convert(const std::string& filename, const std::string& driver, const s
 		}
 
 		OGRLayer* newLayer = ds->CopyLayer(layer, m_layerName.c_str(), dopts);
-		CPLFree(dopts);
+
+		if(dopts)
+			CPLFree(dopts);
 
 		if(!newLayer) {
 			GDALClose(ds);
@@ -488,6 +515,8 @@ void DB::convert(const std::string& filename, const std::string& driver, const s
 }
 
 void DB::dropGeomIndex(const std::string& table, const std::string& column) {
+	if (!m_ds)
+		g_runerr("No database open.");
 	std::string _table;
 	if(table.empty()) {
 		_table = m_layerName;
@@ -499,6 +528,8 @@ void DB::dropGeomIndex(const std::string& table, const std::string& column) {
 }
 
 void DB::createGeomIndex(const std::string& table, const std::string& column) {
+	if (!m_ds)
+		g_runerr("No database open.");
 	std::string _table;
 	if(table.empty()) {
 		_table = m_layerName;
