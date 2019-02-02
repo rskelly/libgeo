@@ -1406,7 +1406,7 @@ namespace geo {
              * @param band The band number.
              * @param buf A pre-allocated buffer to store the data.
              */
-            int getFloatRow(int row, int band, float* buf);
+            int getFloatRow(int row, int band, double* buf);
 
             /**
              * Convert the grid to a matrix.

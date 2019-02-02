@@ -182,7 +182,7 @@ public:
 		for(size_t i = 0; i < count; ++i) {
 			if(idx[i] > 0) {
 				*titer = m_items[idx[i]];
-				*diter = std::sqrt(dist[i]);
+				*diter = dist[i];
 				++ct;
 			}
 		}
@@ -201,7 +201,7 @@ public:
 	 * @param eps The error bound.
 	 */
 	template <class TIter, class DIter>
-	int radSearch(const T& item, double radius, TIter titer = nullptr, DIter diter = nullptr, double eps = EPS) const {
+	int radSearch(const T& item, double radius, int count, TIter titer = nullptr, DIter diter = nullptr, double eps = EPS) const {
 		//std::lock_guard<std::mutex> lk(m_mtx);
 
 		if(!m_tree) {
@@ -217,21 +217,29 @@ public:
 		for(size_t i = 0; i < m_dims; ++i)
 			pt[i] = item[i];
 
-		int count = m_tree->annkFRSearch(static_cast<ANNpoint>(pt.data()), radius * radius, 0);
-
 		// Create arrays for indices and distances.
 		std::vector<ANNidx> idx(count);
 		std::vector<ANNdist> dist(count);
 
+		if(count == 0) {
+			count = m_tree->annkFRSearch(static_cast<ANNpoint>(pt.data()), radius, 0);
+
+			idx.resize(count);
+			dist.resize(count);
+		}
+
 		// Perform search.
-		count = m_tree->annkFRSearch(static_cast<ANNpoint>(pt.data()), radius * radius, count,
+		int res = m_tree->annkFRSearch(static_cast<ANNpoint>(pt.data()), radius, count,
 				static_cast<ANNidxArray>(idx.data()), static_cast<ANNdistArray>(dist.data()), eps);
+
+		if(res < count)
+			count = res;
 
 		// Populate output iterators.
 		for(size_t i = 0; i < count; ++i) {
 			if(idx[i] != ANN_NULL_IDX) {
 				*titer = m_items[idx[i]];
-				*diter = std::sqrt(dist[i]);
+				*diter = dist[i];
 			} else {
 				*diter = -1;
 			}

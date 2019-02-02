@@ -20,12 +20,13 @@ int fillVoid(Grid& mask, Grid& rast, int col, int row) {
 	if(mask.getInt(col, row, 1) != 1)
 		return 0;
 	const GridProps& props = mask.props();
-	double s = 0;
+	double nd = rast.props().nodata();
+	double v, s = 0;
 	int ct = 0;
 	for(int r = std::max(0, row - 1); r < std::min(props.rows(), row + 2); ++r) {
 		for(int c = std::max(0, col - 1); c < std::min(props.cols(), col + 2); ++c) {
-			if(mask.getInt(c, r, 1) == 0) {
-				s += rast.getFloat(c, r, 1);
+			if((v = rast.getFloat(c, r, 1)) != nd) {
+				s += v;
 				++ct;
 			}
 		}
@@ -33,8 +34,9 @@ int fillVoid(Grid& mask, Grid& rast, int col, int row) {
 	if(ct) {
 		rast.setFloat(col, row, s / ct - std::numeric_limits<double>::min(), 1);
 		mask.setInt(col, row, 2, 1);
+		return 1;
 	}
-	return ct;
+	return 0;
 }
 
 int main(int argc, char** argv) {
@@ -47,7 +49,7 @@ int main(int argc, char** argv) {
 	std::string infile;
 	std::string outfile;
 	int band = 1;
-	double maxarea = 2500;
+	double maxarea = 0;
 	bool edges = false;
 	int mode = 0;
 
@@ -90,7 +92,7 @@ int main(int argc, char** argv) {
 		props.setWritable(true);
 		props.setBands(1);
 		rast.init(props, true);
-		props.setDataType(DataType::Int32);
+		props.setDataType(DataType::Byte);
 		mask.init(props, true);
 		input.writeTo(rast, props.cols(), props.rows(), 0, 0, 0, 0, band, 1);
 		mask.fillInt(0, 1);
@@ -107,6 +109,8 @@ int main(int argc, char** argv) {
 	int v;
 
 	for(int row = 0; row < rows; ++row) {
+		if(row % 100 == 0)
+			std::cerr << "Row " << row << " of " << rows << "\n";
 		for(int col = 0; col < cols; ++col) {
 
 			if(mask.getInt(col, row, 1) != 0 || (v = rast.getFloat(col, row, 1)) != nd)
@@ -116,7 +120,7 @@ int main(int argc, char** argv) {
 
 			// Skip if the area is too large, or if it's on the edge and
 			// edges are not desired.
-			if(area == 0 || area > pxarea || (!edges && (cmin == 0 || rmin == 0 || cmax >= cols - 1 || rmax >= rows - 1))) {
+			if(area == 0 || (pxarea > 0 && area > pxarea) || (!edges && (cmin == 0 || rmin == 0 || cmax >= cols - 1 || rmax >= rows - 1))) {
 				Grid::floodFill(col, row, op2, false);
 				continue;
 			}
@@ -125,8 +129,9 @@ int main(int argc, char** argv) {
 			do {
 				count = 0;
 				for(int r = rmin; r <= rmax; ++r) {
-					for(int c = cmin; c <= cmax; ++c)
+					for(int c = cmin; c <= cmax; ++c) {
 						count += fillVoid(mask, rast, c, r);
+					}
 				}
 			} while(count > 0);
 

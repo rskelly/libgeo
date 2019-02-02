@@ -130,8 +130,8 @@ if(${BUILD_APPS})
 	# add_executable (polygonize src/apps/polygonize.cpp)
 	# target_link_libraries (polygonize geoutil georaster ${Boost_LIBRARIES})
 
-	#add_executable (pc2grid src/apps/pc2grid.cpp)
-	#target_link_libraries (pc2grid geoann geoutil georaster geopc geoann ${GEOS_LIBRARY})
+	# add_executable (pc2grid src/apps/pc2grid.cpp)
+	# target_link_libraries (pc2grid geoann geoutil georaster geopc geoann ${GEOS_LIBRARY})
 
 	# add_executable (pc2tile src/apps/pc2tile.cpp)
 	# target_link_libraries (pc2tile geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY} ${GEOS_LIBRARY})
@@ -166,10 +166,10 @@ if(${BUILD_APPS})
 	add_executable (rastermatch src/apps/rastermatch.cpp)
 	target_link_libraries (rastermatch geoutil geoann georaster ${GEOS_LIBRARY} ${GDAL_LIBRARY})
 
-	#add_executable (rbf src/tests/rbf.cpp)
-	#target_link_libraries (rbf)
+	# add_executable (rbf src/tests/rbf.cpp)
+	# target_link_libraries (rbf)
 
-	#install(TARGETS pc2grid pc2tile rastermatch geopc georaster geoinfo geoutil geoann RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
+	# install(TARGETS pc2grid pc2tile rastermatch geopc georaster geoinfo geoutil geoann RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
 
 else()
 
