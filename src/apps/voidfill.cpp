@@ -5,6 +5,15 @@
  *      Author: rob
  */
 
+#include <geos/geom/LinearRing.h>
+#include <geos/geom/GeometryFactory.h>
+#include <geos/geom/Point.h>
+#include <geos/geom/Polygon.h>
+#include <geos/geom/Coordinate.h>
+#include <geos/geom/CoordinateArraySequence.h>
+#include <geos/geom/PrecisionModel.h>
+#include <geos/simplify/TopologyPreservingSimplifier.h>
+
 #include "raster.hpp"
 
 using namespace geo::raster;
@@ -39,6 +48,7 @@ int fillVoid(Grid& mask, Grid& rast, int col, int row) {
 	return 0;
 }
 
+
 int main(int argc, char** argv) {
 
 	if(argc < 3) {
@@ -52,6 +62,7 @@ int main(int argc, char** argv) {
 	double maxarea = 0;
 	bool edges = false;
 	int mode = 0;
+	bool useGeomMask = true;
 
 	for(int i = 1; i < argc; ++i) {
 		std::string v = argv[i];
@@ -98,15 +109,69 @@ int main(int argc, char** argv) {
 		mask.fillInt(0, 1);
 	}
 
-	const GridProps& props = mask.props();
-	int cols = props.cols();
-	int rows = props.rows();
-	double nd = rast.props().nodata();
+
+	const GridProps& mprops = mask.props();
+	int cols = mprops.cols();
+	int rows = mprops.rows();
+	const GridProps& rprops = rast.props();
+	double nd = rprops.nodata();
 
 	geo::raster::TargetFillOperator<double, int> op1(&rast, 1, &mask, 1, nd, 1); // Mark for filling (nd --> 1)
 	geo::raster::TargetFillOperator<int, int> op2(&mask, 1, &mask, 1, 1, 2); // Mark for filling (1 --> 2)
 	int cmin = 0, cmax = 0, rmin = 0, rmax = 0, area = 0;
 	int v;
+
+	// Temp nodata for mask.
+	double tnd = nd - 1;
+
+	if(useGeomMask){
+		// Build concave hull to produce mask.
+		std::cerr << "Building concave hull mask.\n";
+		std::vector<geos::geom::Coordinate> chull;
+		double v;
+		for(int row = 0; row < rows; ++row) {
+			if(row % 100 == 0)
+				std::cerr << "Row " << row << " of " << rows << "\n";
+			for(int col = 0; col < cols; ++col) {
+
+				if((v = rast.getFloat(col, row, 1)) == nd)
+					continue;
+
+				bool isEdge = false;
+				for(int rr = row - 1; !isEdge && rr < row + 2; ++rr) {
+					for(int cc = col - 1; !isEdge && cc < col + 2; ++cc) {
+						if(rprops.hasCell(cc, rr))
+							isEdge = (rast.getFloat(cc, rr, 1) == nd);
+					}
+				}
+
+				if(isEdge)
+					chull.emplace_back(col, row);
+			}
+		}
+
+		geos::geom::CoordinateArraySequence seq(&chull, 2);
+		geos::geom::GeometryFactory::unique_ptr gf = geos::geom::GeometryFactory::getDefaultInstance()->create(new geos::geom::PrecisionModel(0.001));
+		geos::geom::Geometry* mp = gf->createMultiPoint(seq);
+		geos::geom::Geometry* hull = mp->convexHull();
+		std::auto_ptr<geos::geom::Geometry> shull = geos::simplify::TopologyPreservingSimplifier::simplify(hull, 500.0);
+		gf->destroyGeometry(hull);
+		gf->destroyGeometry(mp);
+
+		for(int row = 0; row < rows; ++row) {
+			if(row % 100 == 0)
+				std::cerr << "Row " << row << " of " << rows << "\n";
+			for(int col = 0; col < cols; ++col) {
+				geos::geom::Coordinate coord(col, row, 0);
+				geos::geom::Point* pt = gf->createPoint(coord);
+				if(!shull->contains(pt) && rast.getFloat(col, row, 1) == nd)
+					rast.setFloat(col, row, tnd, 1);
+				gf->destroyGeometry(pt);
+			}
+		}
+
+		gf->destroy();
+	}
 
 	for(int row = 0; row < rows; ++row) {
 		if(row % 100 == 0)
@@ -134,9 +199,15 @@ int main(int argc, char** argv) {
 					}
 				}
 			} while(count > 0);
+		}
+	}
 
-			//Grid::floodFill(col, row, op2, false);
-
+	for(int row = 0; row < rows; ++row) {
+		if(row % 100 == 0)
+			std::cerr << "Row " << row << " of " << rows << "\n";
+		for(int col = 0; col < cols; ++col) {
+			if(rast.getFloat(col, row, 1) == tnd)
+				rast.setFloat(col, row, nd, 1);
 		}
 	}
 

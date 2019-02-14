@@ -110,6 +110,12 @@ namespace geo {
 			 * @param end The end value for the status counter at 100.
 			 */
 			Status(geo::util::Callbacks *callbacks, float start, float end);
+
+			/**
+			 * Create a status object that does nothing.
+			 */
+			Status();
+
 			void update(float s, const std::string& msg = "");
 			float start() const;
 			float end() const;

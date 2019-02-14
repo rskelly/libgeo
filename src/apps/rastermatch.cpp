@@ -38,79 +38,6 @@ public:
 	}
 };
 
-/**
- * Produces a 2D Gaussian kernel given the mean, std. deviation and number of std. devs to extend.
- */
-class Gaussian {
-private:
-
-public:
-	double sigma;
-	double extent;
-
-	Gaussian(double sigma, double extent = 3) :
-		sigma(sigma), extent(extent) {}
-
-	/**
-	 * Get the value.
-	 */
-	double operator()(double x, double y) {
-		return (1.0 / (2 * M_PI * sigma * sigma)) * std::exp(-((x * x + y * y) / (2 * sigma * sigma)));
-	}
-
-	/**
-	 * Populates a square kernel by modifying the given vector.
-	 * The resolution determines how many cells are used (i.e. cell-per-resolution).
-	 * Returns the length of one side of the kernel.
-	 */
-	int kernel(std::vector<double>& data, double resolution) {
-
-		if(resolution <= 0)
-			std::runtime_error("Invalid resolution.");
-
-		int size = (sigma * extent * 2.0) / resolution;
-		if(size % 2 == 0) ++size;
-		data.resize(size * size);
-
-		double xspread = 1.0 / (sigma * sigma * 2.0);
-		double yspread = 1.0 / (sigma * sigma * 2.0);
-		double xmid = size / 2;
-		double ymid = size / 2;
-		double denom = 8.0 * std::atan(1) * sigma * sigma;
-
-		std::vector<double> gx, gy;
-		gx.reserve(size);
-		gy.reserve(size);
-
-		for(int i = 0; i < size; ++i)
-			gx[i] = std::exp(-std::pow(i - xmid, 2) * xspread);
-
-		for(int i = 0; i < size; ++i)
-			gy[i] = std::exp(-std::pow(i - ymid, 2) * yspread);
-
-		double sum = 0;
-		for(int r = 0; r < size; ++r) {
-			for(int c = 0; c < size; ++c)
-				sum += (data[r * size + c] = (gx[c] * gy[r]) / denom);
-		}
-		/*
-		if(false && std::abs(sum - 1.0) > 0.01) {
-			double sum0 = 0;
-			for(size_t i = 0; i < data.size(); ++i)
-				sum0 += (data[i] /= sum);
-			sum = sum0;
-		}
-		*/
-		if(true) {
-			for(int i = 0; i < size; ++i)
-				std::cout << data[(size / 2) * size + i] << ",";
-			std::cout << "\n";
-		}
-		std::cerr << "Kernel sum " << sum << "\n";
-		return size;
-	}
-};
-
 void usage() {
 	std::cerr << "Usage: rastermatch <options>\n"
 			<< " -a <<anchor file> <band> [<anchor file> <band> [...]]>\n"
@@ -118,111 +45,59 @@ void usage() {
 			<< " -k <<mask file> <band>>"
 			<< " -o [adjusted file]\n"
 			<< " -f [adjustment (difference) file]\n"
-			<< " -s [Standard deviation in map units. The function is gaussian.]\n"
-			<< " -e [The number of standard deviations to extend. Defaults to 3, or SD*3 for the kernel radius.]"
+			<< " -n Number of nearest neighbours. Default 32.\n"
 			<< "  This program samples the differences between one or more 'anchor'\n"
 			<< "  rasters and a 'target' raster, then calculates an adjustment to \n"
 			<< "  match them\n";
 }
 
-bool getDiff(MemRaster& target, std::vector<MemRaster*>& anchors,
-		std::vector<bool>& mkernel, std::vector<double>& wkernel,
-		double x, double y, double& z) {
-
-	const GridProps& tprops = target.props();
-	double tn = tprops.nodata();
-
-	double ds = 0;
-	int dc = 0;
-	int side = (int) std::sqrt(mkernel.size());
-
-	for(int r = 0; r < side; ++r) {
-		for(int c = 0; c < side; ++c) {
-			if(mkernel[r * side + c]) {
-				for(MemRaster* a : anchors) {
-
-					const GridProps& aprops = a->props();
-					double an = aprops.nodata();
-
-					int ac = aprops.toCol(x) - side / 2 + c;
-					int ar = aprops.toRow(y) - side / 2 + r;
-					int tc = tprops.toCol(x) - side / 2 + c;
-					int tr = tprops.toRow(y) - side / 2 + r;
-
-					double av, tv;
-
-					if(aprops.hasCell(ac, ar) && tprops.hasCell(tc, tr)
-							&& (av = a->getFloat(ac, ar, 1)) != an
-							&& (tv = target.getFloat(tc, tr, 1)) != tn) {
-
-						ds += (av - tv) * wkernel[r * side + c];
-						++dc;
-					}
-				}
-			}
-		}
-	}
-
-	if(dc) {
-		z = ds;
-		return true;
-	}
-
-	return false;
-}
-
-
-void doInterp(MemRaster& errors, MemRaster& target, MemRaster& adjusted, MemRaster& diffs, double sigma, double extent) {
-
-	const GridProps& eprops = errors.props();
-	double en = eprops.nodata();
+void doInterp(KDTree<Pt>& tree, MemRaster& target, MemRaster& adjusted, MemRaster& diffs, int nn) {
 
 	const GridProps& tprops = target.props();
 	int tcols = tprops.cols();
 	int trows = tprops.rows();
 	double tn = tprops.nodata();
 
-	double tv, ev;
-	int size;
-
-	std::vector<double> kernel;
-	{
-		Gaussian ga(sigma, extent);
-		size = ga.kernel(kernel, std::abs(tprops.resolutionX()));
-	}
+	double tv;
+	std::vector<Pt*> pts;
+	std::vector<double> dist;
 
 	diffs.fillFloat(0, 1);
 
 	for(int trow = 0; trow < trows; ++trow) {
-		std::cerr << "Row: " << trow << "\n";
+		if(trow % 100 == 0)
+			std::cerr << "Row: " << trow << "\n";
 		for(int tcol = 0; tcol < tcols; ++tcol) {
+
+			if((tv = target.getFloat(tcol, trow, 1)) == tn)
+				continue;
 
 			double x = tprops.toCentroidX(tcol);
 			double y = tprops.toCentroidY(trow);
-			int ecol = eprops.toCol(x);
-			int erow = eprops.toRow(y);
 
-			if((tv = target.getFloat(tcol, trow, 1)) == tn || !eprops.hasCell(ecol, erow) || (ev = errors.getFloat(ecol, erow, 1)) == en || ev == 0)
-				continue;
+			pts.clear();
+			dist.clear();
+			int count = tree.knn(Pt(x, y, 0), nn, std::back_inserter(pts), std::back_inserter(dist));
 
-			double w;
-			for(int kr = 0; kr < size; ++kr) {
-				for(int kc = 0; kc < size; ++kc) {
-					if((w = kernel[kr * size + kc]) != 0) {
-						int cc = tcol - size / 2 + kc;
-						int rr = trow - size / 2 + kr;
-						if(w > 0 && tprops.hasCell(cc, rr) && target.getFloat(cc, rr, 1) != tn)
-							diffs.setFloat(cc, rr, w * ev + diffs.getFloat(cc, rr, 1), 1);
-					}
+			if(count) {
+				double sum = 0;
+				double w = 0;
+				double maxDist = std::sqrt(dist[dist.size() - 1]);
+				for(int i = 0; i < count; ++i) {
+					double d = 1.0 - std::sqrt(dist[i]) / maxDist;
+					sum += pts[i]->z * d;
+					w += d;
 				}
+				sum /= w;
+				diffs.setFloat(tcol, trow, sum, 1);
+				adjusted.setFloat(tcol, trow, tv + sum, 1);
+			} else {
+				diffs.setFloat(tcol, trow, 0, 1);
+				adjusted.setFloat(tcol, trow, tv, 1);
 			}
 		}
 	}
 
-	for(int trow = 0; trow < trows; ++trow) {
-		for(int tcol = 0; tcol < tcols; ++tcol)
-			adjusted.setFloat(tcol, trow, target.getFloat(tcol, trow, 1) + diffs.getFloat(tcol, trow, 1), 1);
-	}
 }
 
 int match(int argc, char** argv) {
@@ -241,9 +116,8 @@ int match(int argc, char** argv) {
 	int maskband = 1;
 	std::string adjusted;				// The adjusted raster.
 	std::string adjustment;				// The adjustment (differencce).
-	double sigma = 100;
-	double extent = 3;
 	bool mapped = false;
+	int nn = 32;
 
 	for(int i = 2; i < argc; ++i) {
 		std::string arg(argv[i]);
@@ -269,11 +143,8 @@ int match(int argc, char** argv) {
 			maskfile = argv[++i];
 			maskband = atoi(argv[++i]);
 			continue;
-		} else if(arg == "-s") {
-			sigma = atof(argv[++i]);
-			continue;
-		} else if(arg == "-e") {
-			extent = atof(argv[++i]);
+		} else if(arg == "-n") {
+			nn = atoi(argv[++i]);
 			continue;
 		}
 	}
@@ -285,8 +156,6 @@ int match(int argc, char** argv) {
 	MemRaster agrid;
 	// Make an adjustment (diff) raster.
 	MemRaster dgrid;
-	// A reaster for difference
-	MemRaster egrid;
 
 	{
 		Raster traster(target);
@@ -297,19 +166,17 @@ int match(int argc, char** argv) {
 		traster.writeTo(tgrid, tprops.cols(), tprops.rows(), 0, 0, 0, 0, tband, 1);
 	}
 
+	double tn = tprops.nodata();
+	KDTree<Pt> tree(2);
 
-	//std::vector<KDTree<Pt> >trees;
-	//for(int i = 0; i < tcount; ++i)
-	//	trees.emplace_back(2);
-
-	//std::vector<Pt> pts;
-	// One large raster. Each valid pixel is the average of anchor pixels
-	// minus the corresponding target pixel.
-	double avgDif;
 	{
+		// A reaster for difference
+		MemRaster egrid;
+		// Bounds for the error raster.
 		Bounds ebounds;
 		// Make a mask raster.
 		MemRaster mgrid;
+		// Properties for the mask raster.
 		GridProps mprops;
 		if(hasMask) {
 			std::cerr << "Loading mask\n";
@@ -320,6 +187,7 @@ int match(int argc, char** argv) {
 			mgrid.init(mprops, true);
 			mask.writeTo(mgrid, mprops.cols(), mprops.rows(), 0, 0, 0, 0, maskband, 1);
 		}
+
 		// Get mem rasters of each anchor and an extended bounds object.
 		std::vector<MemRaster> agrids(anchors.size());
 		for(size_t i = 0; i < anchors.size(); ++i) {
@@ -333,54 +201,18 @@ int match(int argc, char** argv) {
 			ebounds.extend(props.bounds());
 		}
 
+		// Configure the error raster.
 		GridProps eprops(tprops);
 		eprops.setBounds(ebounds);
-		egrid.init(eprops);
+		eprops.setNoData(0);
+		egrid.init(eprops, false);
 		egrid.fillFloat(0, 1);
 
-		//std::ofstream tmp("tmp.csv");
-		//tmp << std::setprecision(9);
-		double tn = tprops.nodata();
-
-		double sum = 0;
-		int ct = 0;
 		double tv;
 
-		for(int tr = 0; tr < tprops.rows(); ++tr) {
-			for(int tc = 0; tc < tprops.cols(); ++tc) {
-				if((tv = tgrid.getFloat(tc, tr, 1)) == tn)
-					continue;
-				double x = tprops.toCentroidX(tc);
-				double y = tprops.toCentroidY(tr);
-				for(size_t i = 0; i < agrids.size(); ++i) {
-					const GridProps& aprops = agrids[i].props();
-					int ac = aprops.toCol(x);
-					int ar = aprops.toRow(y);
-					int mc = mprops.toCol(x);
-					int mr = mprops.toRow(y);
-					double an = aprops.nodata();
-					double v;
-					if(aprops.hasCell(ac, ar)
-							&& (!hasMask || !(mprops.hasCell(mc, mr) && mgrid.getInt(mc, mr, 1) == 1))
-							&& (v = agrids[i].getFloat(ac, ar, 1)) != an) {
-						sum += v - tv;
-						++ct;
-					}
-				}
-			}
-		}
-
-		avgDif = ct > 0 ? sum / ct : 0;
-
-		for(int tr = 0; tr < tprops.rows(); ++tr) {
-			for(int tc = 0; tc < tprops.cols(); ++tc) {
-				if((tv = tgrid.getFloat(tc, tr, 1)) != tn)
-					tgrid.setFloat(tc, tr, tgrid.getFloat(tc, tr, 1) + avgDif, 1);
-			}
-		}
-
-		for(int tr = 0; tr < tprops.rows(); ++tr) {
-			for(int tc = 0; tc < tprops.cols(); ++tc) {
+		// Fill the error grid with differences between anchors and (shifted) target.
+		for(int tr = 0; tr < tprops.rows(); tr += 4) {
+			for(int tc = 0; tc < tprops.cols(); tc += 4) {
 				if((tv = tgrid.getFloat(tc, tr, 1)) == tn)
 					continue;
 				double x = tprops.toCentroidX(tc);
@@ -396,15 +228,23 @@ int match(int argc, char** argv) {
 					double an = aprops.nodata();
 					double v;
 					if(aprops.hasCell(ac, ar)
-							&& (!hasMask || !(mprops.hasCell(mc, mr) && mgrid.getInt(mc, mr, 1) == 1))
-							&& (v = agrids[i].getFloat(ac, ar, 1)) != an
-							&& egrid.getFloat(ec, er, 1) == 0) {
+							&& (!hasMask || (mprops.hasCell(mc, mr) && mgrid.getInt(mc, mr, 1) == 1))
+							&& ((v = agrids[i].getFloat(ac, ar, 1)) != an)
+							&& (egrid.getFloat(ec, er, 1) == 0)) {
 						egrid.setFloat(ec, er, v - tv, 1);
 					}
 				}
 			}
 		}
-
+		double ev;
+		for(int er = 0; er < eprops.rows(); ++er) {
+			for(int ec = 0; ec < eprops.cols(); ++ec) {
+				double x = eprops.toCentroidX(ec);
+				double y = eprops.toCentroidY(er);
+				if((ev = egrid.getFloat(ec, er, 1)) != 0)
+					tree.add(new Pt(x, y, ev));
+			}
+		}
 	}
 
 
@@ -414,7 +254,11 @@ int match(int argc, char** argv) {
 	dgrid.init(tprops, mapped);
 	dgrid.fillFloat(tprops.nodata(), 1);
 
-	doInterp(egrid, tgrid, agrid, dgrid, sigma, extent);
+	tree.build();
+
+	std::cout << "Matching with " << nn << " nearest neighbours.\n";
+
+	doInterp(tree, tgrid, agrid, dgrid, nn);
 
 	GridProps oprops(agrid.props());
 	oprops.setDataType(DataType::Float32);
