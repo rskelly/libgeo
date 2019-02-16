@@ -306,6 +306,7 @@ private:
 	size_t m_count;
 	size_t m_position;
 	size_t m_index;
+	size_t m_numPoints;
 
 	SortType m_sortType;
 
@@ -394,6 +395,7 @@ private:
 				std::vector<geo::pc::Point> pts;
 				pts.reserve(m_numChunks * m_chunkSize);
 				if((size = m_loader->getPoints(pts, m_numChunks * m_chunkSize))) {
+					m_numPoints += size;
 					for(int i = 0; i < (int) std::ceil((double) size / m_chunkSize); ++i) {
 						size_t begin = i * m_chunkSize;
 						size_t end = std::min(size, (i + 1) * m_chunkSize);
@@ -509,7 +511,12 @@ public:
 		m_count(0),
 		m_position(0),
 		m_index(0),
+		m_numPoints(0),
 		m_sortType(SortType::Row) {
+	}
+
+	size_t numPoints() const {
+		return m_numPoints;
 	}
 
 	/**

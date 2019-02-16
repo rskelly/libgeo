@@ -66,7 +66,7 @@ void doInterp(KDTree<Pt>& tree, MemRaster& target, MemRaster& adjusted, MemRaste
 
 	for(int trow = 0; trow < trows; ++trow) {
 		if(trow % 100 == 0)
-			std::cerr << "Row: " << trow << "\n";
+			std::cerr << "Row: " << trow << " of " << trows << "\n";
 		for(int tcol = 0; tcol < tcols; ++tcol) {
 
 			if((tv = target.getFloat(tcol, trow, 1)) == tn)
@@ -299,21 +299,26 @@ int merge(int argc, char** argv) {
 	std::vector<char*> args;
 	std::string target1;					// Target filename.
 	std::string target2;					// Target filename.
-	int tband1 = 1;						// Target band.
-	int tband2 = 1;						// Target band.
-	std::string merged;
-	double radius = 50;
+	int tband1 = 1;							// Target band.
+	int tband2 = 1;							// Target band.
+	std::string merged;						// Merged filename
+	double radius = 50;						// Kernel radius (map units)
+	bool mapped = false;					// Use mapped memory.
 
 	for(int i = 2; i < argc; ++i) {
 		std::string arg(argv[i]);
 		if(arg == "-r") {
 			radius = atof(argv[++i]);
 			continue;
+		} else if(arg == "-m") {
+			mapped = true;
+			continue;
 		} else {
 			args.push_back(argv[i]);
 		}
 	}
 
+	// Get files and bands.
 	target1 = args[0];
 	tband1 = atoi(args[1]);
 	target2 = args[2];
@@ -328,7 +333,7 @@ int merge(int argc, char** argv) {
 		tprops1 = GridProps(traster.props());
 		tprops1.setWritable(true);
 		tprops1.setBands(1);
-		tgrid1.init(tprops1, true);
+		tgrid1.init(tprops1, mapped);
 		traster.writeTo(tgrid1, tprops1.cols(), tprops1.rows(), 0, 0, 0, 0, tband1, 1);
 	}
 	{
@@ -336,18 +341,22 @@ int merge(int argc, char** argv) {
 		tprops2 = GridProps(traster.props());
 		tprops2.setWritable(true);
 		tprops2.setBands(1);
-		tgrid2.init(tprops2, true);
+		tgrid2.init(tprops2, mapped);
 		traster.writeTo(tgrid2, tprops2.cols(), tprops2.rows(), 0, 0, 0, 0, tband2, 1);
 	}
 
+	// Get the bounds of the merger and create props.
 	GridProps mprops(tprops1);
 	{
 		Bounds mbounds = mprops.bounds();
 		mbounds.extend(tprops2.bounds());
 		mprops.setBounds(mbounds);
 	}
-	MemRaster mgrid(mprops, true);
+	// Create and prepare the output raster.
+	MemRaster mgrid(mprops, mapped);
 	mgrid.fillFloat(mprops.nodata(), 1);
+
+	Raster mraster(merged, mprops);
 
 	double nd1 = tprops1.nodata();
 	double nd2 = tprops2.nodata();
@@ -361,6 +370,7 @@ int merge(int argc, char** argv) {
 	int tcol2, trow2;	// Col, row in grid2.
 	int size = (int) std::ceil(radius / std::abs(tprops1.resolutionX()));
 
+	// Iterate over the cells of the merged raster.
 	for(int mrow = 0; mrow < mrows; ++mrow) {
 		if(mrow % 100 == 0)
 			std::cerr << "Row " << mrow << " of " << mrows << "\n";
@@ -372,36 +382,47 @@ int merge(int argc, char** argv) {
 			v1 = nd1;
 			v2 = nd2;
 
+			// Get the col/row and value of the first target.
 			tcol1 = tprops1.toCol(x);
 			trow1 = tprops1.toRow(y);
-
 			if(tprops1.hasCell(x, y))
 				v1 = tgrid1.getFloat(tcol1, trow1, 1);
 
+			// Get the col/row and value of the second target.
 			tcol2 = tprops2.toCol(x);
 			trow2 = tprops2.toRow(y);
-
 			if(tprops2.hasCell(x, y))
 				v2 = tgrid2.getFloat(tcol2, trow2, 1);
 
 			if(v1 != nd1 && v2 != nd2) {
-				mcol = mprops.toCol(x);
-				mrow = mprops.toRow(y);
+				// If both are valid, get the weights and compute a value.
 				w1 = pixelWeights(tgrid1, tcol1, trow1, size);
 				w2 = pixelWeights(tgrid2, tcol2, trow2, size);
-				v = (w1 / (w1 + w2)) * v1 + (w2 / (w1 + w2)) * v2;
-				mgrid.setFloat(mcol, mrow, v, 1);
+				if(w1 == 0 && w2 == 0) {
+					v = nd1;
+				} else if(w1 == 0) {
+					v = v2;
+				} else if(w1 == 0) {
+					v = v1;
+				} else {
+					v = (w1 / (w1 + w2)) * v1 + (w2 / (w1 + w2)) * v2;
+				}
 			} else if(v1 != nd1) {
-				mgrid.setFloat(mcol, mrow, v1, 1);
+				// If v1 is valid, use it.
+				v = v1;
 			} else if(v2 != nd2) {
-				mgrid.setFloat(mcol, mrow, v2, 1);
+				// If v2 is valid use it.
+				v = v2;
 			} else {
-				mgrid.setFloat(mcol, mrow, nd1, 1);
+				// If none are valid, use ND.
+				v = nd1;
 			}
+
+			// Set the output value.
+			mgrid.setFloat(mcol, mrow, v, 1);
 		}
 	}
 
-	Raster mraster(merged, mprops);
 	mgrid.writeTo(mraster, mprops.cols(), mprops.rows(), 0, 0, 0, 0, 1, 1);
 
  	return 0;

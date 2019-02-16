@@ -248,6 +248,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	for(int i = 0; i < bandCount; ++i)
 		m_rasters[i].init(rowProps, false);
 
+	g_trace("Sorting...")
 	ExternalMergeSort es(filename, filenames, "/tmp");
 	CountComputer countComp;
 
@@ -255,6 +256,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	es.setLoader(new LASPointLoader());
 	es.sort(true);
 
+	g_trace("Running...")
 	// The last finalized row.
 	int lastR = 0;
 	// The squared radius for distance comparisons without sqrt.
@@ -264,8 +266,14 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	// Dictionary of cells/points.
 	std::unordered_map<size_t, std::vector<geo::pc::Point> > cells;
 
+	size_t count = 0;
+	size_t numPoints = es.numPoints();
+
 	geo::pc::Point pt;
 	while(es.next(pt)) {
+
+		if(++count % 1000000 == 0)
+			std::cerr << count << " of " << numPoints << "\n";
 
 		double px = pt.x();
 		double py = pt.y();
