@@ -17,7 +17,9 @@
 using namespace geo::raster;
 using namespace geo::ds;
 
-
+/**
+ * A simple point class for storing raster diffs.
+ */
 class Pt {
 public:
 	double x, y, z;
@@ -36,209 +38,66 @@ public:
 	}
 };
 
-class Gaussian {
-private:
-	static constexpr double s2p = std::sqrt(2 * M_PI);
-
-public:
-	double sigma;
-	double mean;
-	Gaussian(double sigma, double mean = 0) :
-		sigma(sigma), mean(mean) {}
-	double operator()(double x) {
-		return (1.0 / (sigma * s2p)) * std::pow(M_E, -0.5 * std::pow((x - mean) / sigma, 2.0));
-	}
-	void kernel(double* data, int size, double scale) {
-		double maxd = std::pow(size / 2.0, 2.0);
-		double sum = 0;
-		for(int r = 0; r < size; ++r) {
-			for(int c = 0; c < size; ++c) {
-				double d = std::pow(r - size / 2.0, 2.0) + std::pow(c - size / 2.0, 2.0);
-				if(d <= maxd) {
-					sum += (data[r * size + c] = (*this)(std::sqrt(d)));
-				} else {
-					data[r * size + c] = 0;
-				}
-			}
-		}
-		double t = 0;
-		for(int i = 0; i < size * size; ++i) {
-			data[i] /= sum;
-			t += data[i];
-		}
-		std::cerr << "Kernel sum " << t << "\n";
-	}
-};
-
 void usage() {
 	std::cerr << "Usage: rastermatch <options>\n"
-			<< " -a <anchor files [anchor files [...]]>\n"
-			<< " -t <target file>\n"
+			<< " -a <<anchor file> <band> [<anchor file> <band> [...]]>\n"
+			<< " -t <<target file> <band>>\n"
+			<< " -k <<mask file> <band>>"
 			<< " -o [adjusted file]\n"
 			<< " -f [adjustment (difference) file]\n"
-			<< " -r [kernel radius in map units. the function is gaussian. Sigma 1 is 1/4 of the radius.]\n"
+			<< " -n Number of nearest neighbours. Default 32.\n"
 			<< "  This program samples the differences between one or more 'anchor'\n"
 			<< "  rasters and a 'target' raster, then calculates an adjustment to \n"
 			<< "  match them\n";
 }
 
-bool getDiff(MemRaster& target, std::vector<MemRaster*>& anchors,
-		std::vector<bool>& mkernel, std::vector<double>& wkernel,
-		double x, double y, double& z) {
-
-	const GridProps& tprops = target.props();
-	double tn = tprops.nodata();
-
-	double ds = 0;
-	int dc = 0;
-	int side = (int) std::sqrt(mkernel.size());
-
-	for(int r = 0; r < side; ++r) {
-		for(int c = 0; c < side; ++c) {
-			if(mkernel[r * side + c]) {
-				for(MemRaster* a : anchors) {
-
-					const GridProps& aprops = a->props();
-					double an = aprops.nodata();
-
-					int ac = aprops.toCol(x) - side / 2 + c;
-					int ar = aprops.toRow(y) - side / 2 + r;
-					int tc = tprops.toCol(x) - side / 2 + c;
-					int tr = tprops.toRow(y) - side / 2 + r;
-
-					double av, tv;
-
-					if(aprops.hasCell(ac, ar) && tprops.hasCell(tc, tr)
-							&& (av = a->getFloat(ac, ar, 1)) != an
-							&& (tv = target.getFloat(tc, tr, 1)) != tn) {
-
-						ds += (av - tv) * wkernel[r * side + c];
-						++dc;
-					}
-				}
-			}
-		}
-	}
-
-	if(dc) {
-		z = ds;
-		return true;
-	}
-
-	return false;
-}
-
-void doInterp_(MemRaster& target, KDTree<Pt>& tree, MemRaster& adjusted, MemRaster& diffs, int count) {
+void doInterp(KDTree<Pt>& tree, MemRaster& target, MemRaster& adjusted, MemRaster& diffs, int nn) {
 
 	const GridProps& tprops = target.props();
 	int tcols = tprops.cols();
 	int trows = tprops.rows();
 	double tn = tprops.nodata();
-	double tv;
 
+	double tv;
 	std::vector<Pt*> pts;
 	std::vector<double> dist;
+
+	diffs.fillFloat(0, 1);
 
 	for(int trow = 0; trow < trows; ++trow) {
 		if(trow % 100 == 0)
 			std::cerr << "Row: " << trow << " of " << trows << "\n";
 		for(int tcol = 0; tcol < tcols; ++tcol) {
+
 			if((tv = target.getFloat(tcol, trow, 1)) == tn)
 				continue;
 
 			double x = tprops.toCentroidX(tcol);
 			double y = tprops.toCentroidY(trow);
-			Pt pt(x, y, 0);
 
 			pts.clear();
 			dist.clear();
-			int ct = tree.knn(pt, count, std::back_inserter(pts), std::back_inserter(dist));
+			int count = tree.knn(Pt(x, y, 0), nn, std::back_inserter(pts), std::back_inserter(dist));
 
-			const double dmax = dist[count - 1];
-			double sum = 0, w = 0, w0;
-			for(int i = 0; i < ct; ++i) {
-				const Pt* pt = pts[i];
-				w0 = 1.0 - dist[i] / dmax;
-				sum += pt->z * w0;
-				w += w0;
-			}
-			sum = ct > 0 ? sum / w : 0;
-			adjusted.setFloat(tcol, trow, tv + sum, 1);
-			diffs.setFloat(tcol, trow, sum, 1);
-		}
-	}
-}
-
-std::mutex _blkmtx;
-std::mutex _tmtx;
-std::mutex _dmtx;
-int blockSize = 2048;
-
-void doInterp(std::list<std::pair<int, int> >* blocks, MemRaster* target, std::vector<Pt>* pts, MemRaster* adjusted, MemRaster* diffs, double radius) {
-
-	const GridProps& tprops = target->props();
-	int tcols = tprops.cols();
-	int trows = tprops.rows();
-	double tn = tprops.nodata();
-	double tv;
-
-	int btrow, btcol;
-
-	GridProps bufProps(tprops);
-	bufProps.setSize(blockSize, blockSize);
-	MemRaster buf(bufProps, false);
-	MemRaster dif(bufProps, false);
-	MemRaster adj(bufProps, false);
-
-	while(!blocks->empty()) {
-		{
-			std::lock_guard<std::mutex> lk(_blkmtx);
-			if(blocks->empty())
-				break;
-			auto pr = blocks->front();
-			btrow = pr.second;
-			btcol = pr.first;
-			blocks->pop_front();
-		}
-		std::cerr << "Block " << (btcol / blockSize) << ", " << (btrow / blockSize) << "\n";
-
-		adj.fillFloat(bufProps.nodata(), 1);
-		dif.fillFloat(bufProps.nodata(), 1);
-		buf.fillFloat(bufProps.nodata(), 1);
-		{
-			std::lock_guard<std::mutex> lk(_tmtx);
-			target->writeTo(buf, blockSize, blockSize, btcol, btrow, 0, 0, 1, 1);
-		}
-
-		for(int trow = btrow; trow < std::min(btrow + blockSize, trows); ++trow) {
-			for(int tcol = btcol; tcol < std::min(btcol + blockSize, tcols); ++tcol) {
-
-				if((tv = buf.getFloat(tcol - btcol, trow - btrow, 1)) == tn)
-					continue;
-
-				double x = tprops.toCentroidX(tcol);
-				double y = tprops.toCentroidY(trow);
-
-				double sum = 0, w;
-				int ct = 0;
-				for(const Pt& pt : *pts) {
-					w = std::sqrt(std::pow(pt.x - x, 2.0) + std::pow(pt.y - y, 2.0));
-					if(w <= radius) {
-						sum += pt.z * (1.0 - w / radius);
-						++ct;
-					}
+			if(count) {
+				double sum = 0;
+				double w = 0;
+				double maxDist = std::sqrt(dist[dist.size() - 1]);
+				for(int i = 0; i < count; ++i) {
+					double d = 1.0 - std::sqrt(dist[i]) / maxDist;
+					sum += pts[i]->z * d;
+					w += d;
 				}
-
-				sum = ct ? sum / ct : 0;
-				adj.setFloat(tcol - btcol, trow - btrow, tv + sum, 1);
-				dif.setFloat(tcol - btcol, trow - btrow, sum, 1);
+				sum /= w;
+				diffs.setFloat(tcol, trow, sum, 1);
+				adjusted.setFloat(tcol, trow, tv + sum, 1);
+			} else {
+				diffs.setFloat(tcol, trow, 0, 1);
+				adjusted.setFloat(tcol, trow, tv, 1);
 			}
 		}
-
-		std::lock_guard<std::mutex> lk(_dmtx);
-		adj.writeTo(*adjusted, blockSize, blockSize, 0, 0, btcol, btrow, 1, 1);
-		dif.writeTo(*diffs, blockSize, blockSize, 0, 0, btcol, btrow, 1, 1);
 	}
+
 }
 
 int match(int argc, char** argv) {
@@ -257,9 +116,8 @@ int match(int argc, char** argv) {
 	int maskband = 1;
 	std::string adjusted;				// The adjusted raster.
 	std::string adjustment;				// The adjustment (differencce).
-	int skip = 10;
-	double radius = 1000;
 	bool mapped = false;
+	int nn = 32;
 
 	for(int i = 2; i < argc; ++i) {
 		std::string arg(argv[i]);
@@ -277,9 +135,6 @@ int match(int argc, char** argv) {
 		} else if(arg == "-f") {
 			adjustment = argv[++i];
 			continue;
-		} else if(arg == "-s") {
-			skip = atoi(argv[++i]);
-			continue;
 		} else if(arg == "-m") {
 			mapped = true;
 			continue;
@@ -288,8 +143,8 @@ int match(int argc, char** argv) {
 			maskfile = argv[++i];
 			maskband = atoi(argv[++i]);
 			continue;
-		} else if(arg == "-r") {
-			radius = atof(argv[++i]);
+		} else if(arg == "-n") {
+			nn = atoi(argv[++i]);
 			continue;
 		}
 	}
@@ -301,6 +156,7 @@ int match(int argc, char** argv) {
 	MemRaster agrid;
 	// Make an adjustment (diff) raster.
 	MemRaster dgrid;
+
 	{
 		Raster traster(target);
 		tprops = GridProps(traster.props());
@@ -310,14 +166,17 @@ int match(int argc, char** argv) {
 		traster.writeTo(tgrid, tprops.cols(), tprops.rows(), 0, 0, 0, 0, tband, 1);
 	}
 
+	double tn = tprops.nodata();
+	KDTree<Pt> tree(2);
 
-	//KDTree<Pt> tree(2);
-	std::vector<Pt> pts;
-	// One large raster. Each valid pixel is the average of anchor pixels
-	// minus the corresponding target pixel.
 	{
+		// A reaster for difference
+		MemRaster egrid;
+		// Bounds for the error raster.
+		Bounds ebounds;
 		// Make a mask raster.
 		MemRaster mgrid;
+		// Properties for the mask raster.
 		GridProps mprops;
 		if(hasMask) {
 			std::cerr << "Loading mask\n";
@@ -328,6 +187,7 @@ int match(int argc, char** argv) {
 			mgrid.init(mprops, true);
 			mask.writeTo(mgrid, mprops.cols(), mprops.rows(), 0, 0, 0, 0, maskband, 1);
 		}
+
 		// Get mem rasters of each anchor and an extended bounds object.
 		std::vector<MemRaster> agrids(anchors.size());
 		for(size_t i = 0; i < anchors.size(); ++i) {
@@ -338,15 +198,21 @@ int match(int argc, char** argv) {
 			props.setWritable(true);
 			agrids[i].init(props, true);
 			anchor.writeTo(agrids[i], props.cols(), props.rows(), 0, 0, 0, 0, abands[i], 1);
+			ebounds.extend(props.bounds());
 		}
 
-		//std::ofstream tmp("tmp.csv");
-		//tmp << std::setprecision(9);
-		double tn = tprops.nodata();
-		int step = std::max(1, skip);
-		for(int tr = 0; tr < tprops.rows(); tr += step) {
-			for(int tc = 0; tc < tprops.cols(); tc += step) {
-				double tv;
+		// Configure the error raster.
+		GridProps eprops(tprops);
+		eprops.setBounds(ebounds);
+		eprops.setNoData(0);
+		egrid.init(eprops, false);
+		egrid.fillFloat(0, 1);
+
+		double tv;
+
+		// Fill the error grid with differences between anchors and (shifted) target.
+		for(int tr = 0; tr < tprops.rows(); tr += 4) {
+			for(int tc = 0; tc < tprops.cols(); tc += 4) {
 				if((tv = tgrid.getFloat(tc, tr, 1)) == tn)
 					continue;
 				double x = tprops.toCentroidX(tc);
@@ -357,20 +223,30 @@ int match(int argc, char** argv) {
 					int ar = aprops.toRow(y);
 					int mc = mprops.toCol(x);
 					int mr = mprops.toRow(y);
+					int ec = eprops.toCol(x);
+					int er = eprops.toRow(y);
 					double an = aprops.nodata();
 					double v;
 					if(aprops.hasCell(ac, ar)
-							&& (!hasMask || !(mprops.hasCell(mc, mr) && mgrid.getInt(mc, mr, 1) == 1))
-							&& (v = agrids[i].getFloat(ac, ar, 1)) != an) {
-						//tree.add(new Pt(x, y, v - tv));
-						pts.emplace_back(x, y, v - tv);
+							&& (!hasMask || (mprops.hasCell(mc, mr) && mgrid.getInt(mc, mr, 1) == 1))
+							&& ((v = agrids[i].getFloat(ac, ar, 1)) != an)
+							&& (egrid.getFloat(ec, er, 1) == 0)) {
+						egrid.setFloat(ec, er, v - tv, 1);
 					}
 				}
 			}
 		}
+		double ev;
+		for(int er = 0; er < eprops.rows(); ++er) {
+			for(int ec = 0; ec < eprops.cols(); ++ec) {
+				double x = eprops.toCentroidX(ec);
+				double y = eprops.toCentroidY(er);
+				if((ev = egrid.getFloat(ec, er, 1)) != 0)
+					tree.add(new Pt(x, y, ev));
+			}
+		}
 	}
 
-	//tree.build();
 
 	agrid.init(tprops, mapped);
 	agrid.fillFloat(tprops.nodata(), 1);
@@ -378,22 +254,11 @@ int match(int argc, char** argv) {
 	dgrid.init(tprops, mapped);
 	dgrid.fillFloat(tprops.nodata(), 1);
 
-	std::list<std::pair<int, int> > blocks;
-	for(int r = 0; r < tprops.rows(); r += blockSize) {
-		for(int c = 0; c < tprops.cols(); c += blockSize)
-			blocks.emplace_back(c, r);
-	}
+	tree.build();
 
-	std::cerr << pts.size() << " points\n";
+	std::cout << "Matching with " << nn << " nearest neighbours.\n";
 
-	std::vector<std::thread> threads;
-	for(int t = 0; t < 4; ++t)
-		threads.emplace_back(doInterp, &blocks, &tgrid, &pts, &agrid, &dgrid, radius);
-
-	for(int t = 0; t < 4; ++t) {
-		if(threads[t].joinable())
-			threads[t].join();
-	}
+	doInterp(tree, tgrid, agrid, dgrid, nn);
 
 	GridProps oprops(agrid.props());
 	oprops.setDataType(DataType::Float32);
@@ -434,21 +299,26 @@ int merge(int argc, char** argv) {
 	std::vector<char*> args;
 	std::string target1;					// Target filename.
 	std::string target2;					// Target filename.
-	int tband1 = 1;						// Target band.
-	int tband2 = 1;						// Target band.
-	std::string merged;
-	double radius = 50;
+	int tband1 = 1;							// Target band.
+	int tband2 = 1;							// Target band.
+	std::string merged;						// Merged filename
+	double radius = 50;						// Kernel radius (map units)
+	bool mapped = false;					// Use mapped memory.
 
 	for(int i = 2; i < argc; ++i) {
 		std::string arg(argv[i]);
 		if(arg == "-r") {
 			radius = atof(argv[++i]);
 			continue;
+		} else if(arg == "-m") {
+			mapped = true;
+			continue;
 		} else {
 			args.push_back(argv[i]);
 		}
 	}
 
+	// Get files and bands.
 	target1 = args[0];
 	tband1 = atoi(args[1]);
 	target2 = args[2];
@@ -463,7 +333,7 @@ int merge(int argc, char** argv) {
 		tprops1 = GridProps(traster.props());
 		tprops1.setWritable(true);
 		tprops1.setBands(1);
-		tgrid1.init(tprops1, true);
+		tgrid1.init(tprops1, mapped);
 		traster.writeTo(tgrid1, tprops1.cols(), tprops1.rows(), 0, 0, 0, 0, tband1, 1);
 	}
 	{
@@ -471,18 +341,22 @@ int merge(int argc, char** argv) {
 		tprops2 = GridProps(traster.props());
 		tprops2.setWritable(true);
 		tprops2.setBands(1);
-		tgrid2.init(tprops2, true);
+		tgrid2.init(tprops2, mapped);
 		traster.writeTo(tgrid2, tprops2.cols(), tprops2.rows(), 0, 0, 0, 0, tband2, 1);
 	}
 
+	// Get the bounds of the merger and create props.
 	GridProps mprops(tprops1);
 	{
 		Bounds mbounds = mprops.bounds();
 		mbounds.extend(tprops2.bounds());
 		mprops.setBounds(mbounds);
 	}
-	MemRaster mgrid(mprops, true);
+	// Create and prepare the output raster.
+	MemRaster mgrid(mprops, mapped);
 	mgrid.fillFloat(mprops.nodata(), 1);
+
+	Raster mraster(merged, mprops);
 
 	double nd1 = tprops1.nodata();
 	double nd2 = tprops2.nodata();
@@ -496,6 +370,7 @@ int merge(int argc, char** argv) {
 	int tcol2, trow2;	// Col, row in grid2.
 	int size = (int) std::ceil(radius / std::abs(tprops1.resolutionX()));
 
+	// Iterate over the cells of the merged raster.
 	for(int mrow = 0; mrow < mrows; ++mrow) {
 		if(mrow % 100 == 0)
 			std::cerr << "Row " << mrow << " of " << mrows << "\n";
@@ -507,36 +382,47 @@ int merge(int argc, char** argv) {
 			v1 = nd1;
 			v2 = nd2;
 
+			// Get the col/row and value of the first target.
 			tcol1 = tprops1.toCol(x);
 			trow1 = tprops1.toRow(y);
-
 			if(tprops1.hasCell(x, y))
 				v1 = tgrid1.getFloat(tcol1, trow1, 1);
 
+			// Get the col/row and value of the second target.
 			tcol2 = tprops2.toCol(x);
 			trow2 = tprops2.toRow(y);
-
 			if(tprops2.hasCell(x, y))
 				v2 = tgrid2.getFloat(tcol2, trow2, 1);
 
 			if(v1 != nd1 && v2 != nd2) {
-				mcol = mprops.toCol(x);
-				mrow = mprops.toRow(y);
+				// If both are valid, get the weights and compute a value.
 				w1 = pixelWeights(tgrid1, tcol1, trow1, size);
 				w2 = pixelWeights(tgrid2, tcol2, trow2, size);
-				v = (w1 / (w1 + w2)) * v1 + (w2 / (w1 + w2)) * v2;
-				mgrid.setFloat(mcol, mrow, v, 1);
+				if(w1 == 0 && w2 == 0) {
+					v = nd1;
+				} else if(w1 == 0) {
+					v = v2;
+				} else if(w1 == 0) {
+					v = v1;
+				} else {
+					v = (w1 / (w1 + w2)) * v1 + (w2 / (w1 + w2)) * v2;
+				}
 			} else if(v1 != nd1) {
-				mgrid.setFloat(mcol, mrow, v1, 1);
+				// If v1 is valid, use it.
+				v = v1;
 			} else if(v2 != nd2) {
-				mgrid.setFloat(mcol, mrow, v2, 1);
+				// If v2 is valid use it.
+				v = v2;
 			} else {
-				mgrid.setFloat(mcol, mrow, nd1, 1);
+				// If none are valid, use ND.
+				v = nd1;
 			}
+
+			// Set the output value.
+			mgrid.setFloat(mcol, mrow, v, 1);
 		}
 	}
 
-	Raster mraster(merged, mprops);
 	mgrid.writeTo(mraster, mprops.cols(), mprops.rows(), 0, 0, 0, 0, 1, 1);
 
  	return 0;

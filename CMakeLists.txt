@@ -135,8 +135,8 @@ target_link_libraries (geoann geoutil)
 	# add_executable (geoinfo src/apps/geoinfo.cpp)
 	# target_link_libraries (geoinfo geoutil ${GDAL_LIBRARY} ${LIBLAS_LIBRARY} ${JSONCPP_LIBRARY})
 
-	# add_executable (voidfill src/apps/voidfill.cpp)
-	# target_link_libraries (voidfill geoutil georaster ${GDAL_LIBRARY})
+	add_executable (voidfill src/apps/voidfill.cpp)
+	target_link_libraries (voidfill geoutil georaster ${GDAL_LIBRARY})
 
 	# add_executable (datumshift src/apps/datumshift.cpp)
 	# target_link_libraries (datumshift geoutil georaster ${GDAL_LIBRARY} ${PROJ_LIBRARY})
@@ -150,8 +150,8 @@ target_link_libraries (geoann geoutil)
 	# add_executable (groundassign src/apps/groundassign.cpp)
 	# target_link_libraries (groundassign ${LIBLAS_LIBRARY})
 
-	# add_executable (rastermatch src/apps/rastermatch.cpp)
-	# target_link_libraries (rastermatch geoutil geoann georaster ${GEOS_LIBRARY} ${GDAL_LIBRARY})
+	add_executable (rastermatch src/apps/rastermatch.cpp)
+	target_link_libraries (rastermatch geoutil geoann georaster ${GEOS_LIBRARY} ${GDAL_LIBRARY})
 
 	# add_executable (rbf src/tests/rbf.cpp)
 	# target_link_libraries (rbf)

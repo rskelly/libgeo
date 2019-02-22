@@ -861,6 +861,13 @@ void _smooth(TileIterator* iter, Grid* smoothed,
 	}
 }
 
+bool __cancel = false;
+Status __status;
+
+void Grid::smooth(Grid& smoothed, double sigma, int size, int band) {
+	smooth(smoothed, sigma, size, band, __cancel, __status);
+}
+
 void Grid::smooth(Grid& smoothed, double sigma, int size, int band,
 		bool& cancel, Status& status) {
 

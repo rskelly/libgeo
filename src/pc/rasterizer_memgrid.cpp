@@ -185,14 +185,15 @@ void rwrite(std::queue<RWrite>* writeQ, std::vector<std::unique_ptr<MemRaster> >
 		for(RWrite& w : writes) {
 			int i = 0;
 			for(double v : w.values)
-				rasters->at(i++)->setFloat(w.col, w.row, v);
+				rasters->at(i++)->setFloat(w.col, w.row, v, 1);
 		}
 		writes.clear();
 	}
 }
 
 Rasterizer::Rasterizer(const std::vector<std::string> filenames) :
-	m_filter(nullptr) {
+	m_filter(nullptr),
+	m_thin(0) {
 	for(const std::string& filename : filenames)
 		m_files.emplace_back(filename);
 }
@@ -452,9 +453,9 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	for(int band = 1; band <= bandCount; ++band)
 		rasters.emplace_back(new MemRaster(props, true));
 
-	rasters[0]->fillFloat(0);
+	rasters[0]->fillFloat(0, 1);
 	for(int i= 1; i < bandCount; ++i)
-		rasters[i]->fillFloat(NODATA);
+		rasters[i]->fillFloat(NODATA, 1);
 
 	size_t maxIndex = colRowToIndex(cols, rows, cols);
 

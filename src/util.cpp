@@ -72,6 +72,9 @@ Status::Status(Callbacks *callbacks, float start, float end) :
 	m_callbacks(callbacks), m_start(start), m_end(end) {
 }
 
+Status::Status() :
+		m_callbacks(nullptr), m_start(0), m_end(1) {}
+
 Callbacks* Status::callbacks() const {
 	return m_callbacks;
 }

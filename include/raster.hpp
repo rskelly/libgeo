@@ -1016,6 +1016,8 @@ namespace geo {
             void smooth(Grid &smoothed, double sigma, int size, int band,
             		bool& cancel, geo::util::Status& status);
 
+            void smooth(Grid &smoothed, double sigma, int size, int band);
+
             /**
              * Smooth the raster and write the smoothed version to the output raster.
              * Callback is an optional function reference with a single float
