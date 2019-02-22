@@ -95,14 +95,11 @@ set_target_properties (georasterobj PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_library (georaster SHARED $<TARGET_OBJECTS:georasterobj>)
 target_link_libraries (georaster geoutil geodb Threads::Threads ${GEOS_LIBRARY} ${GDAL_LIBRARY})
 
-if (${BUILD_APPS})
-	message(STATUS ${CGAL_LIBRARY})
-	file(GLOB PC_COMPUTERS src/pc/computers/*.cpp)
-	add_library (geopc SHARED src/geo.cpp src/pointcloud.cpp src/pc/normalizer.cpp src/pc/rasterizer_extsort.cpp 
-		src/pc/filter.cpp ${PC_COMPUTERS})
-	target_link_libraries (geopc geoutil georaster geoann ${LIBLAS_LIBRARY} CGAL CGAL_Core)
-
-endif()
+message(STATUS ${CGAL_LIBRARY})
+file(GLOB PC_COMPUTERS src/pc/computers/*.cpp)
+add_library (geopc SHARED src/geo.cpp src/pointcloud.cpp src/pc/normalizer.cpp src/pc/rasterizer_extsort.cpp 
+	src/pc/filter.cpp ${PC_COMPUTERS})
+target_link_libraries (geopc geoutil georaster geoann ${LIBLAS_LIBRARY} CGAL CGAL_Core)
 
 set (geoannsrc src/geo.cpp ann/src/ANN.cpp ann/src/brute.cpp 
 	ann/src/kd_tree.cpp ann/src/kd_util.cpp 
@@ -117,13 +114,11 @@ target_link_libraries (geoann geoutil)
 
 # Applications ##################################################################################################
 
-if(${BUILD_APPS})
-
 	# add_executable (polygonize src/apps/polygonize.cpp)
 	# target_link_libraries (polygonize geoutil georaster ${Boost_LIBRARIES})
 
-	# add_executable (pc2grid src/apps/pc2grid.cpp)
-	# target_link_libraries (pc2grid geoann geoutil georaster geopc geoann ${GEOS_LIBRARY})
+	add_executable (pc2grid src/apps/pc2grid.cpp)
+	target_link_libraries (pc2grid geoann geoutil georaster geopc geoann ${GEOS_LIBRARY})
 
 	# add_executable (pc2tile src/apps/pc2tile.cpp)
 	# target_link_libraries (pc2tile geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY} ${GEOS_LIBRARY})
@@ -163,8 +158,8 @@ if(${BUILD_APPS})
 
 	# install(TARGETS pc2grid pc2tile rastermatch geopc georaster geoinfo geoutil geoann RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
 
-else()
+	
+	install(TARGETS pc2grid geoann geopc georaster geoutil geodb RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
+	
 
-	install(TARGETS georaster geoutil geodb RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
 
-endif()
