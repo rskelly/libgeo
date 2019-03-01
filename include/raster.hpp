@@ -1468,6 +1468,9 @@ namespace geo {
 					int dstCol = 0, int dstRow = 0,
 					int srcBand = 1, int dstBand = 1);
 
+            bool writeToVector(std::vector<double>& grd, int col, int row, int cols, int rows, int band = 1, double invalid = nan(""));
+
+            bool writeFromVector(std::vector<double>& grd, int col, int row, int cols, int rows, int band = 1);
         };
 
         /**

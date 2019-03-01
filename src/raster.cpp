@@ -1082,6 +1082,110 @@ int MemRaster::getFloatRow(int row, int band, double* buf) {
 	return 0;
 }
 
+bool MemRaster::writeToVector(std::vector<double>& data, int col, int row, int cols, int rows, int band, double invalid) {
+
+	if(!m_props.isFloat())
+		g_runerr("Not a float raster.")
+
+	checkInit();
+
+	int gcols = m_props.cols();
+	int grows = m_props.rows();
+
+	if(col >= gcols || row >= grows) {
+		g_warn("Col or row out of bounds.")
+		return false;
+	}
+
+	int ccols = cols;
+	int ccol = 0;
+	int crow = 0;
+
+	if(col < 0) {
+		ccol -= col;
+		cols += col;
+		col = 0;
+
+	}
+
+	if(row < 0) {
+		crow -= row;
+		rows += row;
+		row = 0;
+	}
+
+	if(col + cols >= gcols)
+		cols = gcols - col - 1;
+
+	if(row + rows >= grows)
+		rows = grows - row - 1;
+
+	if(gcols <= 0 || grows <= 0) {
+		g_warn("Zero width or height.")
+		return false;
+	}
+
+	std::fill(data.begin(), data.end(), invalid);
+	double* buf = (double*) data.data();
+	double* grid = (double*) m_grid;
+	for(int r = 0; r < rows; ++r)
+		std::memcpy(buf + ((crow + r) * ccols + ccol), grid + ((row + r) * gcols + col), cols * sizeof(double));
+
+	return true;
+}
+
+bool MemRaster::writeFromVector(std::vector<double>& data, int col, int row, int cols, int rows, int band) {
+	if(!m_props.isFloat())
+			g_runerr("Not a float raster.")
+
+		checkInit();
+
+		int gcols = m_props.cols();
+		int grows = m_props.rows();
+
+		if(col >= gcols || row >= grows) {
+			g_warn("Col or row out of bounds.")
+			return false;
+		}
+
+		int ccols = cols;
+		int ccol = 0;
+		int crow = 0;
+
+		if(col < 0) {
+			ccol -= col;
+			cols += col;
+			col = 0;
+
+		}
+
+		if(row < 0) {
+			crow -= row;
+			rows += row;
+			row = 0;
+		}
+
+		if(col + cols >= gcols)
+			cols = gcols - col - 1;
+
+		if(row + rows >= grows)
+			rows = grows - row - 1;
+
+		if(gcols <= 0 || grows <= 0) {
+			g_warn("Zero width or height.")
+			return false;
+		}
+
+		double* buf = (double*) data.data();
+		double* grid = (double*) m_grid;
+		for(int r = 0; r < rows; ++r)
+			std::memcpy(grid + ((row + r) * gcols + col), buf + ((crow + r) * ccols + ccol), cols * sizeof(double));
+
+		return true;
+
+}
+
+
 int MemRaster::getInt(int col, int row, int band) {
 	checkInit();
 	if(m_props.isInt()) {
@@ -1546,46 +1650,92 @@ void Raster::writeToMemRaster(MemRaster& grd,
 	if(srcBand < 1 || srcBand > m_props.bands())
 		g_argerr("Invalid source band: " << srcBand);
 
-	cols = g_abs(cols);
-	rows = g_abs(rows);
-	if(cols == 0) cols = grd.props().cols();
-	if(rows == 0) rows = grd.props().rows();
-	cols = g_min(m_props.cols() - srcCol, cols);
-	rows = g_min(m_props.rows() - srcRow, rows);
-	cols = g_min(grd.props().cols() - dstCol, cols);
-	rows = g_min(grd.props().rows() - dstRow, rows);
+	// If the destination cols/rows are too small, use the total cols/rows.
+	if(cols <= 0) cols = grd.props().cols();
+	if(rows <= 0) rows = grd.props().rows();
 
-	const GridProps& gp = grd.props();
-	size_t typeSize = getTypeSize(gp.dataType());
-	size_t gcols = gp.cols();
-	size_t grows = gp.rows();
+	// Cols/rows for the grid object.
+	int dstCols = cols;
+	int dstRows = rows;
+
+	// Cols/rows for the current object.
+	int srcCols = cols;
+	int srcRows = rows;
+
+	// If src col or row is negative, change to zero and shrink cols/rows.
+	if(dstCol < 0) {
+		dstCols += dstCol;
+		dstCol = 0;
+	}
+	if(dstRow < 0) {
+		dstRows += dstRow;
+		dstRow = 0;
+	}
+
+	if(dstRows <= 0 || dstCols <= 0)
+		g_runerr("Destination area is zero.")
+
+	// If dst col or row is negative, change to zero and shrink cols/rows.
+	if(srcCol < 0) {
+		srcCols += srcCol;
+		srcCol = 0;
+	}
+	if(srcRow < 0) {
+		srcRows += srcRow;
+		srcRow = 0;
+	}
+
+	if(srcRows <= 0 || srcCols <= 0)
+		g_runerr("Source area is zero.")
+
+	// If cols/rows too large, reset.
+	if(srcCols + srcCol >= props().cols())
+		srcCols = props().cols() - srcCol - 1;
+	if(srcRows + srcRow >= props().rows())
+		srcRows = props().rows() - srcRow - 1;
 
 	GDALRasterBand *band = m_ds->GetRasterBand(srcBand);
 	if(!band)
 		g_runerr("Failed to find band " << srcBand);
-	int bcols, brows;	// Actua block size for a particular block.
-	int abcols, abrows; // Block size.
+
+	const GridProps& gp = grd.props();
+	size_t typeSize = getTypeSize(gp.dataType());
+	int lineSize = gp.cols() * typeSize;
+	char* grid = (char*) grd.grid();
+	grid += dstRow * lineSize + dstCol * typeSize;
+	if(CPLE_None != band->RasterIO(GF_Read, srcCol, srcRow, srcCols, srcRows, grid, dstCols, dstRows, dataType2GDT(gp.dataType()), 0, lineSize, nullptr))
+		g_runerr("Failed to write data.")
+	/*
+	int bcols, brows;	// Actual block size for a particular block.
+	int abcols, abrows; // Declared block size.
 	band->GetBlockSize(&abcols, &abrows);
 
 	// Transfer buffer. Same size as block.
 	Buffer buf(abcols * abrows * typeSize);
-	double* cbuf = (double *) buf.buf;
-	for(size_t brow = 0; brow < grows / abrows; ++brow) {
-		for(size_t bcol = 0; bcol < gcols / abcols; ++bcol) {
+	char* cbuf = (char*) buf.buf;
+	char* grid = (char*) grd.grid();
+	for(size_t brow = (srcRow / abrows) * abrows; brow < srcRows; brow += abrows) {
+		for(size_t bcol = (srcCol / abcols) * abcols; bcol < srcCols; bcol += abcols) {
 			// Get the size of the current block.
-			if(CPLE_None != band->GetActualBlockSize(bcol, brow, &bcols, &brows))
-				g_runerr("Failed to read actual block size at " << bcol << ", " << brow);
+			int cc = bcol / abcols;
+			int rr = brow / abrows;
+			if(CPLE_None != band->GetActualBlockSize(cc, rr, &bcols, &brows))
+				g_runerr("Failed to read actual block size at " << cc << ", " << rr);
+
 			// Read the current block. Not using readblock because need conversion.
-			if(CPLE_None != band->RasterIO(GF_Read, bcol * abcols, brow * abrows, bcols, brows, cbuf, abcols, abrows, dataType2GDT(gp.dataType()), 0, 0, nullptr))
-				g_runerr("Failed to read block at " << bcol << ", " << brow);
+			if(CPLE_None != band->ReadBlock(cc, rr, cbuf))
+			//if(CPLE_None != band->RasterIO(GF_Read, bcol, brow, bcols, brows, cbuf, abcols, abrows, dataType2GDT(gp.dataType()), 0, 0, nullptr))
+				g_runerr("Failed to read block at " << cc << ", " << rr);
 			// Write the block row-by-row to the output grid.
-			for(int r = 0; r < brows; ++r) {
-				size_t doff = ((brow * abrows + r) * gcols + (bcol * abcols)) * typeSize;
-				size_t soff = r * abcols * typeSize;
-				std::memcpy(((char*) grd.grid()) + doff , ((char* ) buf.buf) + soff, bcols * typeSize);
-			}
+			int ccc = srcCol - bcol;
+			int rrr = srcRow - brow;
+			int ccols = std::min(abcols - ccc, srcCols);
+			int crows = std::min(abrows - rrr, srcRows);
+			for(int r = 0; r < crows; ++r)
+				std::memcpy(grid + ((brow + r) * gcols + bcol) * typeSize , cbuf + (r * abcols) * typeSize, bcols * typeSize);
 		}
 	}
+	*/
 
 }
 

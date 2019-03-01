@@ -6,6 +6,7 @@
  */
 #include <vector>
 #include <sstream>
+#include <thread>
 
 #include "raster.hpp"
 
@@ -113,40 +114,38 @@ void doInterp(MemRaster& tmem, MemRaster& amem, MemRaster& difmem, int size) {
 	}
 }
 
-double meanDif(MemRaster& tmem, MemRaster& amem, int tcol, int trow, int acol, int arow, int size) {
-	const GridProps& tprops = tmem.props();
-	const GridProps& aprops = amem.props();
-	double av, an = aprops.nodata();
-	double tv, tn = tprops.nodata();
-	double sum = 0;
+double meanDif(std::vector<double>& tvec, double tn, std::vector<double>& avec, double an, int size) {
+	double av, tv, sum = 0;
 	int count = 0;
 	for(int r = 0; r < size; ++r) {
 		for(int c = 0; c < size; ++c) {
-			int tc = tcol - size / 2 + c;
-			int tr = trow - size / 2 + r;
-			int ac = acol - size / 2 + c;
-			int ar = arow - size / 2 + r;
-			if(tprops.hasCell(tc, tr) && aprops.hasCell(ac, ar) // TODO: Needs to continue into non-overlapping parts, with gradient to zero.
-				&& (av = amem.getFloat(ac, ar, 1)) != 0
-				&& (tv = tmem.getFloat(tc, tr, 1)) != 0) {
-					++count;
-					if(av != an && tv != tn)
-						sum += (av - tv);
-			}
+			tv = tvec[r * size + c];
+			av = avec[r * size + c];
+			if(isnan(tv) || isnan(av))
+				continue;
+			++count;
+			if(tv == tn || av == an)
+				continue;
+			sum += (av - tv);
 		}
 	}
 	return count > 0 ? sum / count : 0;
 }
 
-void doInterp2(MemRaster& tmem, MemRaster& amem, MemRaster& difmem, int size) {
+void doInterp2(MemRaster* tmem, MemRaster* amem, MemRaster* dmem, int size) {
 
-	const GridProps& tprops = tmem.props();
-	const GridProps& aprops = amem.props();
+	const GridProps& tprops = tmem->props();
+	const GridProps& aprops = amem->props();
 
-	double nd = tprops.nodata();
+	double tn = tprops.nodata();
+	double an = aprops.nodata();
+
 	if(size % 2 == 0) ++size;
 
-	difmem.fillFloat(nd, 1);
+	dmem->fillFloat(tn, 1);
+
+	std::vector<double> avec(size * size);
+	std::vector<double> tvec(size * size);
 
 	double tv;
 	for(int trow = 0; trow < tprops.rows(); ++trow) {
@@ -154,25 +153,23 @@ void doInterp2(MemRaster& tmem, MemRaster& amem, MemRaster& difmem, int size) {
 			std::cout << "Row: " << trow << " of " << tprops.rows() << "\n";
 		for(int tcol = 0; tcol < tprops.cols(); ++tcol) {
 
-			if((tv = tmem.getFloat(tcol, trow, 1)) == nd || tv == 0)
-				continue;
+			if(trow == 321 && tcol == 100)
+				std::cerr << "c\n";
 
-			double x = tprops.toCentroidX(tcol);
-			double y = tprops.toCentroidY(trow);
+			tmem->writeToVector(tvec, tcol - size / 2, trow - size / 2, size, size, 1);
+			amem->writeToVector(avec, tcol - size / 2, trow - size / 2, size, size, 1);
 
-			int acol = aprops.toCol(x);
-			int arow = aprops.toRow(y);
+			double dif = meanDif(tvec, tn, avec, an, size);
 
-			double dif = meanDif(tmem, amem, tcol, trow, acol, arow, size);
-
-			difmem.setFloat(tcol, trow, tv + dif, 1);
+			if((tv = tmem->getFloat(tcol, trow, 1)) != tn) {
+				dmem->setFloat(tcol, trow, tv + dif, 1);
+			} else {
+				dmem->setFloat(tcol, trow, tn, 1);
+			}
 		}
 	}
 
-	for(int trow = 0; trow < tprops.rows(); ++trow) {
-		for(int tcol = 0; tcol < tprops.cols(); ++tcol)
-			tmem.setFloat(tcol, trow, difmem.getFloat(tcol, trow, 1), 1);
-	}
+	dmem->writeTo(*tmem);
 }
 
 int main(int argc, char** argv) {
@@ -185,8 +182,10 @@ int main(int argc, char** argv) {
 	std::string adjustment;
 	std::string mask;
 	int mband = 1;
-	int minSize = 8;
-	int maxSize = 256;
+	std::vector<int> sizes;
+	bool test = true;
+	bool mapped = false;
+	int threads = 4;
 
 	for(int i = 1; i < argc; ++i) {
 		std::string arg(argv[i]);
@@ -209,25 +208,50 @@ int main(int argc, char** argv) {
 			mband = atoi(argv[++i]);
 			continue;
 		} else if(arg == "-d") {
-			minSize = atoi(argv[++i]);
-			maxSize = atoi(argv[++i]);
+			std::string val = argv[++i];
+			if(val.find(',') != std::string::npos) {
+				std::stringstream ss(val);
+				std::string part;
+				while(std::getline(ss, part, ','))
+					sizes.push_back(atoi(part.c_str()));
+				std::sort(sizes.begin(), sizes.end());
+			} else {
+				sizes.push_back(atoi(val.c_str()));
+			}
+			for(int& s : sizes) {
+				if(s % 2 == 0) s++;
+			}
 			continue;
 		}
 	}
 
-	bool mapped = true;
-
 	Bounds bounds;
 	GridProps tprops;
-	MemRaster tmem;
+	int maxSize = sizes[sizes.size() - 1];
+	int bufSize = (int) std::ceil((float) maxSize / 2.0);
+	int rowHeight = 0;
+	int bufHeight = 0;
+	std::vector<MemRaster> tmems;
 	{
 		Raster trast(target);
 		tprops = trast.props();
 		tprops.setWritable(true);
 		tprops.setBands(1);
-		tmem.init(tprops, mapped);
-		trast.writeTo(tmem, tprops.cols(), tprops.rows(), 0, 0, 0, 0, tband, 1);
-		bounds.extend(tprops.bounds());
+		const Bounds& bounds = tprops.bounds();
+		rowHeight = (int) std::ceil((float) tprops.rows() / threads);
+		bufHeight = rowHeight + bufSize * 2;
+		for(int i = 0; i < threads; ++i) {
+			int row = i * rowHeight - bufSize;
+			double y0 = tprops.toCentroidY(i * rowHeight) - tprops.resolutionY() * bufSize;
+			double y1 = tprops.toCentroidY((i + 1) * rowHeight) + tprops.resolutionY() * bufSize;
+			Bounds bounds0;
+			bounds0.extend(bounds.minx(), y0);
+			bounds0.extend(bounds.maxx(), y1);
+			GridProps tprops0(tprops);
+			tprops0.setBounds(bounds0);
+			tmems.emplace_back(tprops0, mapped);
+			trast.writeTo(tmems[i], tprops0.cols(), bufHeight, 0, row, 0, 0, tband, 1);
+		}
 	}
 
 	GridProps mprops;
@@ -240,10 +264,12 @@ int main(int argc, char** argv) {
 	}
 
 	GridProps aprops(tprops);
-	MemRaster amem;
+	std::vector<MemRaster> amems;
 	{
-		amem.init(aprops, mapped);
-		amem.fillFloat(aprops.nodata(), 1);
+		for(int i = 0; i < threads; ++i) {
+			amems.emplace_back(tmems[i].props(), mapped);
+			amems[i].fillFloat(amems[i].props().nodata(), 1);
+		}
 
 		for(size_t i = 0; i < anchors.size(); ++i) {
 			MemRaster cmem;
@@ -263,16 +289,19 @@ int main(int argc, char** argv) {
 				for(int ccol = 0; ccol < cprops.cols(); ++ccol) {
 					double x = cprops.toCentroidX(ccol);
 					double y = cprops.toCentroidY(crow);
-					int tcol = tprops.toCol(x);
-					int trow = tprops.toRow(y);
 					int mcol = mprops.toCol(x);
 					int mrow = mprops.toRow(y);
-					if(tprops.hasCell(tcol, trow)) {
-							if((cv = cmem.getFloat(ccol, crow, 1)) != cn
-							&& (!hasMask || mmem.getInt(mcol, mrow, 1) == 1)) {
-							amem.setFloat(tcol, trow, cv, 1);
-						} else {
-							amem.setFloat(tcol, trow, 0, 1);
+					for(int i = 0; i < threads; ++i) {
+						const GridProps& tprops0 = tmems[i].props();
+						int tcol = tprops0.toCol(x);
+						int trow = tprops0.toRow(y);
+						if(tprops0.hasCell(tcol, trow)) {
+								if((cv = cmem.getFloat(ccol, crow, 1)) != cn
+										&& (!hasMask || mmem.getInt(mcol, mrow, 1) == 1)) {
+								amems[i].setFloat(tcol, trow, cv, 1);
+							} else {
+								amems[i].setFloat(tcol, trow, 0, 1);
+							}
 						}
 					}
 				}
@@ -281,19 +310,35 @@ int main(int argc, char** argv) {
 	}
 
 	{
-		MemRaster difmem(tprops, mapped);
-		for(int d = maxSize; d >= minSize; d /= 2) {
-			doInterp2(tmem, amem, difmem, d);
-			std::stringstream tmp;
-			tmp << "/tmp/match_" <<  d << ".tif";
-			std::cerr << tmp.str() << "\n";
-			Raster rtmp(tmp.str(), tprops);
-			tmem.writeTo(rtmp);
+		std::vector<std::thread> threadv;
+		std::vector<MemRaster> dmems;
+		for(int i = 0; i < threads; ++i)
+			dmems.emplace_back(tmems[i].props(), mapped);
+		for(const int& d : sizes) {
+			for(int i = 0; i < threads; ++i)
+				threadv.emplace_back(doInterp2, &(tmems[i]), &(amems[i]), &(dmems[i]), d);
+			for(int i = 0; i < threads; ++i) {
+				if(threadv[i].joinable())
+					threadv[i].join();
+			}
+			if(test) {
+				std::stringstream tmp;
+				tmp << "/tmp/match_" <<  d << ".tif";
+				std::cerr << tmp.str() << "\n";
+				Raster rtmp(tmp.str(), tprops);
+				for(int i = 0; i < threads; ++i) {
+					const GridProps& props = tmems[i].props();
+					tmems[i].writeTo(rtmp, props.cols(), rowHeight, 0, bufSize, 0, i * rowHeight, 1, 1);
+				}
+			}
 		}
 	}
 
 	Raster adjrast(adjusted, tprops);
-	tmem.writeTo(adjrast);
+	for(int i = 0; i < threads; ++i) {
+		const GridProps& props = tmems[i].props();
+		tmems[i].writeTo(adjrast, props.cols(), rowHeight, 0, bufSize, 0, i * rowHeight, 1, 1);
+	}
 
 }
 
