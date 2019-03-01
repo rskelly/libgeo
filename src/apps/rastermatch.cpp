@@ -113,41 +113,36 @@ void doInterp(MemRaster& tmem, MemRaster& amem, MemRaster& difmem, int size) {
 	}
 }
 
-double meanDif(MemRaster& tmem, MemRaster& amem, int tcol, int trow, int acol, int arow, int size) {
-	const GridProps& tprops = tmem.props();
-	const GridProps& aprops = amem.props();
-	double av, an = aprops.nodata();
-	double tv, tn = tprops.nodata();
+double meanDif(std::vector<double>& tmem, std::vector<double>& amem, int tcol, int trow, int tcols, int trows, int size, double tn, double an) {
+	double av, tv;
 	double sum = 0;
 	int count = 0;
 	for(int r = 0; r < size; ++r) {
 		for(int c = 0; c < size; ++c) {
-			int tc = tcol - size / 2 + c;
-			int tr = trow - size / 2 + r;
-			int ac = acol - size / 2 + c;
-			int ar = arow - size / 2 + r;
-			if(tprops.hasCell(tc, tr)
-					&& (tv = tmem.getFloat(tc, tr, 1)) != tn && tv != 0) {
-				++count;
-				if(aprops.hasCell(ac, ar) // TODO: Needs to continue into non-overlapping parts, with gradient to zero.
-						&& (av = amem.getFloat(ac, ar, 1)) != an && av != 0) {
-					sum += (av - tv);
-				}
-			}
+			int cc = tcol + c - size / 2;
+			int rr = trow + r - size / 2;
+			if(cc < 0 || rr < 0 || rr >= trows || cc >= tcols)
+				continue;
+			tv = tmem[rr * tcols + cc];
+			av = amem[rr * tcols + cc];
+			if(tv != tn && av != an)
+				sum += (av - tv);
 		}
 	}
+	count = size * size;
 	return count > 0 ? sum / count : 0;
 }
 
-void doInterp2(MemRaster& tmem, MemRaster& amem, MemRaster& difmem, int size) {
+void doInterp2(std::vector<double>& tmem, const GridProps& tprops, std::vector<double>& amem, const GridProps& aprops, std::vector<double>& difmem, int size) {
 
-	const GridProps& tprops = tmem.props();
-	const GridProps& aprops = amem.props();
+	double tn = tprops.nodata();
+	double an = aprops.nodata();
+	int tcols = tprops.cols();
+	int trows = tprops.rows();
 
-	double nd = tprops.nodata();
 	if(size % 2 == 0) ++size;
 
-	difmem.fillFloat(nd, 1);
+	std::fill(difmem.begin(), difmem.end(), tn);
 
 	double tv;
 	for(int trow = 0; trow < tprops.rows(); ++trow) {
@@ -155,22 +150,16 @@ void doInterp2(MemRaster& tmem, MemRaster& amem, MemRaster& difmem, int size) {
 			std::cout << "Row: " << trow << " of " << tprops.rows() << "\n";
 		for(int tcol = 0; tcol < tprops.cols(); ++tcol) {
 
-			if((tv = tmem.getFloat(tcol, trow, 1)) == nd || tv == 0)
+			if((tv = tmem[trow * tcols + tcol]) == tn)
 				continue;
 
-			double x = tprops.toCentroidX(tcol);
-			double y = tprops.toCentroidY(trow);
+			double dif = meanDif(tmem, amem, tcol, trow, tcols, trows, size, tn, an);
 
-			int acol = aprops.toCol(x);
-			int arow = aprops.toRow(y);
-
-			double dif = meanDif(tmem, amem, tcol, trow, acol, arow, size);
-
-			difmem.setFloat(tcol, trow, tv + dif, 1);
+			difmem[trow * tcols + tcol] = tv + dif;
 		}
 	}
 
-	difmem.writeTo(tmem);
+	tmem.swap(difmem);
 }
 
 int main(int argc, char** argv) {
@@ -183,8 +172,9 @@ int main(int argc, char** argv) {
 	std::string adjustment;
 	std::string mask;
 	int mband = 1;
-	int minSize = 8;
-	int maxSize = 256;
+	std::vector<int> sizes;
+	bool mapped = false;
+
 
 	for(int i = 1; i < argc; ++i) {
 		std::string arg(argv[i]);
@@ -207,13 +197,16 @@ int main(int argc, char** argv) {
 			mband = atoi(argv[++i]);
 			continue;
 		} else if(arg == "-d") {
-			minSize = atoi(argv[++i]);
-			maxSize = atoi(argv[++i]);
+			std::stringstream ss(argv[++i]);
+			std::string part;
+			while(std::getline(ss, part, ','))
+				sizes.push_back(atoi(part.c_str()));
+			continue;
+		} else if(arg == "-p") {
+			mapped = true;
 			continue;
 		}
 	}
-
-	bool mapped = true;
 
 	Bounds bounds;
 	GridProps tprops;
@@ -242,9 +235,7 @@ int main(int argc, char** argv) {
 	GridProps aprops(tprops);
 	MemRaster amem;
 	{
-		amem.init(aprops, mapped);
-		amem.fillFloat(aprops.nodata(), 1);
-
+		bool first = true;
 		for(size_t i = 0; i < anchors.size(); ++i) {
 			MemRaster cmem;
 			GridProps cprops;
@@ -255,8 +246,15 @@ int main(int argc, char** argv) {
 				cprops.setWritable(true);
 				cmem.init(cprops, mapped);
 				cmem.fillFloat(cprops.nodata(), 1);
+				if(first) {
+					aprops.setNoData(cprops.nodata());
+					first = false;
+				}
 				crast.writeTo(cmem, cprops.cols(), cprops.rows(), 0, 0, 0, 0, abands[i], 1);
 			}
+
+			amem.init(aprops, mapped);
+			amem.fillFloat(aprops.nodata(), 1);
 
 			double cv, cn = cprops.nodata();
 			bool hasMask = !mask.empty();
@@ -270,10 +268,10 @@ int main(int argc, char** argv) {
 					int mrow = mprops.toRow(y);
 					if(tprops.hasCell(tcol, trow)) {
 							if((cv = cmem.getFloat(ccol, crow, 1)) != cn
-							&& (!hasMask || mmem.getInt(mcol, mrow, 1) == 1)) {
+									&& (!hasMask || mmem.getInt(mcol, mrow, 1) == 1)) {
 							amem.setFloat(tcol, trow, cv, 1);
 						} else {
-							amem.setFloat(tcol, trow, 0, 1);
+							amem.setFloat(tcol, trow, cn, 1);
 						}
 					}
 				}
@@ -282,15 +280,20 @@ int main(int argc, char** argv) {
 	}
 
 	{
-		MemRaster difmem(tprops, mapped);
-		for(int d = maxSize; d >= minSize; d /= 2) {
-			doInterp2(tmem, amem, difmem, d);
-			//std::stringstream tmp;
-			//tmp << "/tmp/match_" <<  d << ".tif";
-			//std::cerr << tmp.str() << "\n";
-			//Raster rtmp(tmp.str(), tprops);
-			//tmem.writeTo(rtmp);
+		std::vector<double> tvec(tprops.cols() * tprops.rows());
+		{
+			std::vector<double> dvec(tvec.size());
+			std::vector<double> avec(dvec.size());
+			tmem.readIntoVector(tvec);
+			amem.readIntoVector(avec);
+			for(int d : sizes) {
+				std::cout << "Interp at " << d << "\n";
+				doInterp2(tvec, tprops, avec, aprops, dvec, d);
+			}
 		}
+		//MemRaster difmem(tprops, mapped);
+		//difmem.writeFromVector(dvec);
+		tmem.writeFromVector(tvec);
 	}
 
 	Raster adjrast(adjusted, tprops);

@@ -62,11 +62,12 @@ void doInterp(KDTree<Pt>& tree, MemRaster& target, MemRaster& adjusted, MemRaste
 	std::vector<Pt*> pts;
 	std::vector<double> dist;
 
-	diffs.fillFloat(0, 1);
+	MemRaster dif(diffs.props(), diffs.mmapped());
+	dif.fillFloat(0, 1);
 
 	for(int trow = 0; trow < trows; ++trow) {
 		if(trow % 100 == 0)
-			std::cerr << "Row: " << trow << " of " << trows << "\n";
+			std::cerr << "Row (A): " << trow << " of " << trows << "\n";
 		for(int tcol = 0; tcol < tcols; ++tcol) {
 
 			if((tv = target.getFloat(tcol, trow, 1)) == tn)
@@ -89,15 +90,29 @@ void doInterp(KDTree<Pt>& tree, MemRaster& target, MemRaster& adjusted, MemRaste
 					w += d;
 				}
 				sum /= w;
-				diffs.setFloat(tcol, trow, sum, 1);
-				adjusted.setFloat(tcol, trow, tv + sum, 1);
+				dif.setFloat(tcol, trow, sum, 1);
+				///adjusted.setFloat(tcol, trow, tv + sum, 1);
 			} else {
-				diffs.setFloat(tcol, trow, 0, 1);
-				adjusted.setFloat(tcol, trow, tv, 1);
+				dif.setFloat(tcol, trow, 0, 1);
+				//adjusted.setFloat(tcol, trow, tv, 1);
 			}
 		}
 	}
+	//dif.smooth(diffs, 10, 30, 1);
+	dif.writeTo(diffs);
 
+	for(int trow = 0; trow < trows; ++trow) {
+		if(trow % 100 == 0)
+			std::cerr << "Row (B): " << trow << " of " << trows << "\n";
+		for(int tcol = 0; tcol < tcols; ++tcol) {
+
+			if((tv = target.getFloat(tcol, trow, 1)) == tn) {
+				adjusted.setFloat(tcol, trow, tn, 1);
+			} else {
+				adjusted.setFloat(tcol, trow, tv + diffs.getFloat(tcol, trow, 1), 1);
+			}
+		}
+	}
 }
 
 int match(int argc, char** argv) {

@@ -825,24 +825,19 @@ void _smooth(TileIterator* iter, Grid* smoothed,
 			grid.writeTo(buf);
 
 			// Process the entire block, even the buffer parts.
-			for (int r = 0; !*cancel && r < props.rows() - size; ++r) {
-				for (int c = 0; !*cancel && c < props.cols() - size; ++c) {
-					double v, t = 0.0;
-					bool foundNodata = false;
+			double v, t;
+			for (int r = 0; !*cancel && r < props.rows(); ++r) {
+				for (int c = 0; !*cancel && c < props.cols(); ++c) {
+					t = 0.0;
 					for (int gr = 0; gr < size; ++gr) {
 						for (int gc = 0; gc < size; ++gc) {
-							v = buf.getFloat(c + gc, r + gr, 1);
-							if (v == nodata) {
-								foundNodata = true;
-								break;
-							} else {
+							int cc = c - size / 2 + gc;
+							int rr = r - size / 2 + gr;
+							if(props.hasCell(cc, rr) && (v = buf.getFloat(cc, rr, 1)) != nodata)
 								t += weights[gr * size + gc] * v;
-							}
 						}
-						if(foundNodata) break;
 					}
-					if (!foundNodata)
-						grid.setFloat(c + size / 2, r + size / 2, t, 1);
+					grid.setFloat(c, r, t, 1);
 				}
 			}
 
@@ -1074,12 +1069,33 @@ int MemRaster::getFloatRow(int row, int band, double* buf) {
 		g_argerr("Row index out of bounds: " << row << "; rows: " << m_props.rows());
 	if(m_props.isFloat()) {
 		int cols = m_props.cols();
-		std::memcpy(buf, ((float*) m_grid) + (row * cols), cols * sizeof(double));
+		std::memcpy(buf, ((double*) m_grid) + (row * cols), cols * sizeof(double));
 		return cols;
 	} else {
 		g_runerr("Not a float raster.");
 	}
 	return 0;
+}
+
+GridProps MemRaster::readIntoVector(std::vector<double>& data) {
+	int cols = props().cols();
+	int rows = props().rows();
+	data.resize(cols * rows);
+	for(int row = 0; row < rows; ++row) {
+		for(int col = 0; col < cols; ++col)
+			data[row * cols + col] = getFloat(col, row, 1);
+	}
+	return props();
+}
+
+void MemRaster::writeFromVector(std::vector<double>& data) {
+	int cols = props().cols();
+	int rows = props().rows();
+	data.resize(cols * rows);
+	for(int row = 0; row < rows; ++row) {
+		for(int col = 0; col < cols; ++col)
+			setFloat(col, row, data[row * cols + col], 1);
+	}
 }
 
 int MemRaster::getInt(int col, int row, int band) {
@@ -1452,6 +1468,19 @@ DataType Raster::getFileDataType(const std::string& filename) {
 	DataType type = gdt2DataType(ds->GetRasterBand(1)->GetRasterDataType());
 	GDALClose(ds);
 	return type;
+}
+
+GridProps Raster::readIntoVector(const std::string& filename, int band, std::vector<double>& data) {
+	Raster rast(filename);
+	const GridProps& props = rast.props();
+	int cols = props.cols();
+	int rows = props.rows();
+	data.resize(cols, rows);
+	for(int row = 0; row < rows; ++rows) {
+		for(int col = 0; col < cols; ++col)
+			data[row * cols + col] = rast.getFloat(col, row, band);
+	}
+	return props;
 }
 
 std::string Raster::filename() const {

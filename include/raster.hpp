@@ -1410,6 +1410,11 @@ namespace geo {
              */
             int getFloatRow(int row, int band, double* buf);
 
+            GridProps readIntoVector(std::vector<double>& data);
+
+            void writeFromVector(std::vector<double>& data);
+
+
             /**
              * Convert the grid to a matrix.
              *
@@ -1633,6 +1638,8 @@ namespace geo {
             	std::vector<std::string> files(begin, end);
             	return createVirtualRaster(files, outfile, nodata);
             }
+
+            static GridProps readIntoVector(const std::string& filename, int band, std::vector<double>& data);
 
             /**
              * Return the filename for this raster.
