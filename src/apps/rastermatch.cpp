@@ -123,8 +123,10 @@ double meanDif(std::vector<double>& tvec, double tn, std::vector<double>& avec, 
 			av = avec[r * size + c];
 			if(isnan(tv) || isnan(av))
 				continue;
+			if(tv == tn || tv == 0) //  This shouldn't happen.
+				continue;
 			++count;
-			if(tv == tn || av == an)
+			if(av == an)
 				continue;
 			sum += (av - tv);
 		}
@@ -132,17 +134,17 @@ double meanDif(std::vector<double>& tvec, double tn, std::vector<double>& avec, 
 	return count > 0 ? sum / count : 0;
 }
 
-void doInterp2(MemRaster* tmem, MemRaster* amem, MemRaster* dmem, int size) {
+void doInterp2(MemRaster& tmem, MemRaster& amem, MemRaster& dmem, int size) {
 
-	const GridProps& tprops = tmem->props();
-	const GridProps& aprops = amem->props();
+	const GridProps& tprops = tmem.props();
+	const GridProps& aprops = amem.props();
 
 	double tn = tprops.nodata();
 	double an = aprops.nodata();
 
 	if(size % 2 == 0) ++size;
 
-	dmem->fillFloat(tn, 1);
+	dmem.fillFloat(tn, 1);
 
 	std::vector<double> avec(size * size);
 	std::vector<double> tvec(size * size);
@@ -153,23 +155,20 @@ void doInterp2(MemRaster* tmem, MemRaster* amem, MemRaster* dmem, int size) {
 			std::cout << "Row: " << trow << " of " << tprops.rows() << "\n";
 		for(int tcol = 0; tcol < tprops.cols(); ++tcol) {
 
-			if(trow == 321 && tcol == 100)
-				std::cerr << "c\n";
-
-			tmem->writeToVector(tvec, tcol - size / 2, trow - size / 2, size, size, 1);
-			amem->writeToVector(avec, tcol - size / 2, trow - size / 2, size, size, 1);
+			tmem.writeToVector(tvec, tcol - size / 2, trow - size / 2, size, size, 1);
+			amem.writeToVector(avec, tcol - size / 2, trow - size / 2, size, size, 1);
 
 			double dif = meanDif(tvec, tn, avec, an, size);
 
-			if((tv = tmem->getFloat(tcol, trow, 1)) != tn) {
-				dmem->setFloat(tcol, trow, tv + dif, 1);
+			if((tv = tmem.getFloat(tcol, trow, 1)) != tn) {
+				dmem.setFloat(tcol, trow, tv + dif, 1);
 			} else {
-				dmem->setFloat(tcol, trow, tn, 1);
+				dmem.setFloat(tcol, trow, tn, 1);
 			}
 		}
 	}
 
-	dmem->writeTo(*tmem);
+	dmem.writeTo(tmem);
 }
 
 int main(int argc, char** argv) {
@@ -185,7 +184,6 @@ int main(int argc, char** argv) {
 	std::vector<int> sizes;
 	bool test = true;
 	bool mapped = false;
-	int threads = 4;
 
 	for(int i = 1; i < argc; ++i) {
 		std::string arg(argv[i]);
@@ -225,33 +223,19 @@ int main(int argc, char** argv) {
 		}
 	}
 
+	std::sort(sizes.begin(), sizes.end());
+	std::reverse(sizes.begin(), sizes.end());
+
 	Bounds bounds;
 	GridProps tprops;
-	int maxSize = sizes[sizes.size() - 1];
-	int bufSize = (int) std::ceil((float) maxSize / 2.0);
-	int rowHeight = 0;
-	int bufHeight = 0;
-	std::vector<MemRaster> tmems;
+	MemRaster tmem;
 	{
 		Raster trast(target);
 		tprops = trast.props();
 		tprops.setWritable(true);
 		tprops.setBands(1);
-		const Bounds& bounds = tprops.bounds();
-		rowHeight = (int) std::ceil((float) tprops.rows() / threads);
-		bufHeight = rowHeight + bufSize * 2;
-		for(int i = 0; i < threads; ++i) {
-			int row = i * rowHeight - bufSize;
-			double y0 = tprops.toCentroidY(i * rowHeight) - tprops.resolutionY() * bufSize;
-			double y1 = tprops.toCentroidY((i + 1) * rowHeight) + tprops.resolutionY() * bufSize;
-			Bounds bounds0;
-			bounds0.extend(bounds.minx(), y0);
-			bounds0.extend(bounds.maxx(), y1);
-			GridProps tprops0(tprops);
-			tprops0.setBounds(bounds0);
-			tmems.emplace_back(tprops0, mapped);
-			trast.writeTo(tmems[i], tprops0.cols(), bufHeight, 0, row, 0, 0, tband, 1);
-		}
+		tmem.init(tprops, mapped);
+		trast.writeTo(tmem, tprops.cols(), tprops.rows(), 0, 0, 0, 0, tband, 1);
 	}
 
 	GridProps mprops;
@@ -264,12 +248,10 @@ int main(int argc, char** argv) {
 	}
 
 	GridProps aprops(tprops);
-	std::vector<MemRaster> amems;
+	MemRaster amem;
 	{
-		for(int i = 0; i < threads; ++i) {
-			amems.emplace_back(tmems[i].props(), mapped);
-			amems[i].fillFloat(amems[i].props().nodata(), 1);
-		}
+		amem.init(tprops, mapped);
+		amem.fillFloat(tprops.nodata(), 1);
 
 		for(size_t i = 0; i < anchors.size(); ++i) {
 			MemRaster cmem;
@@ -284,6 +266,7 @@ int main(int argc, char** argv) {
 			}
 
 			double cv, cn = cprops.nodata();
+			double tn = tprops.nodata();
 			bool hasMask = !mask.empty();
 			for(int crow = 0; crow < cprops.rows(); ++crow) {
 				for(int ccol = 0; ccol < cprops.cols(); ++ccol) {
@@ -291,17 +274,14 @@ int main(int argc, char** argv) {
 					double y = cprops.toCentroidY(crow);
 					int mcol = mprops.toCol(x);
 					int mrow = mprops.toRow(y);
-					for(int i = 0; i < threads; ++i) {
-						const GridProps& tprops0 = tmems[i].props();
-						int tcol = tprops0.toCol(x);
-						int trow = tprops0.toRow(y);
-						if(tprops0.hasCell(tcol, trow)) {
-								if((cv = cmem.getFloat(ccol, crow, 1)) != cn
-										&& (!hasMask || mmem.getInt(mcol, mrow, 1) == 1)) {
-								amems[i].setFloat(tcol, trow, cv, 1);
-							} else {
-								amems[i].setFloat(tcol, trow, 0, 1);
-							}
+					int tcol = tprops.toCol(x);
+					int trow = tprops.toRow(y);
+					if(tprops.hasCell(tcol, trow)) {
+							if((cv = cmem.getFloat(ccol, crow, 1)) != cn
+									&& (!hasMask || mmem.getInt(mcol, mrow, 1) == 1)) {
+							amem.setFloat(tcol, trow, cv, 1);
+						} else {
+							amem.setFloat(tcol, trow, tn, 1);
 						}
 					}
 				}
@@ -310,35 +290,23 @@ int main(int argc, char** argv) {
 	}
 
 	{
-		std::vector<std::thread> threadv;
-		std::vector<MemRaster> dmems;
-		for(int i = 0; i < threads; ++i)
-			dmems.emplace_back(tmems[i].props(), mapped);
+		MemRaster dmem(tprops, mapped);
 		for(const int& d : sizes) {
-			for(int i = 0; i < threads; ++i)
-				threadv.emplace_back(doInterp2, &(tmems[i]), &(amems[i]), &(dmems[i]), d);
-			for(int i = 0; i < threads; ++i) {
-				if(threadv[i].joinable())
-					threadv[i].join();
-			}
+
+			doInterp2(tmem, amem, dmem, d);
+
 			if(test) {
 				std::stringstream tmp;
 				tmp << "/tmp/match_" <<  d << ".tif";
 				std::cerr << tmp.str() << "\n";
 				Raster rtmp(tmp.str(), tprops);
-				for(int i = 0; i < threads; ++i) {
-					const GridProps& props = tmems[i].props();
-					tmems[i].writeTo(rtmp, props.cols(), rowHeight, 0, bufSize, 0, i * rowHeight, 1, 1);
-				}
+				tmem.writeTo(rtmp);
 			}
 		}
 	}
 
 	Raster adjrast(adjusted, tprops);
-	for(int i = 0; i < threads; ++i) {
-		const GridProps& props = tmems[i].props();
-		tmems[i].writeTo(adjrast, props.cols(), rowHeight, 0, bufSize, 0, i * rowHeight, 1, 1);
-	}
+	tmem.writeTo(adjrast);
 
 }
 

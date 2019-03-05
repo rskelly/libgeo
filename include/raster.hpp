@@ -1534,6 +1534,8 @@ namespace geo {
 					int dstCol = 0, int dstRow = 0,
             		int srcBand = 1, int dstBand = 1);
 
+			void flushDirtyBlock();
+
             /**
              * Write the raster into another grid instance.
              *
