@@ -117,19 +117,17 @@ void doInterp(MemRaster& tmem, MemRaster& amem, MemRaster& difmem, int size) {
 double meanDif(std::vector<double>& tvec, double tn, std::vector<double>& avec, double an, int size) {
 	double av, tv, sum = 0;
 	int count = 0;
-	for(int r = 0; r < size; ++r) {
-		for(int c = 0; c < size; ++c) {
-			tv = tvec[r * size + c];
-			av = avec[r * size + c];
-			if(isnan(tv) || isnan(av))
-				continue;
-			if(tv == tn || tv == 0) //  This shouldn't happen.
-				continue;
-			++count;
-			if(av == an)
-				continue;
-			sum += (av - tv);
-		}
+	for(int i = 0; i < size * size; ++i) {
+		tv = tvec[i];
+		av = avec[i];
+		if(isnan(tv) || isnan(av))
+			continue;
+		if(tv == tn || tv == 0) //  This shouldn't happen.
+			continue;
+		++count;
+		if(av == an)
+			continue;
+		sum += (av - tv);
 	}
 	return count > 0 ? sum / count : 0;
 }
@@ -142,23 +140,30 @@ void doInterp2(MemRaster& tmem, MemRaster& amem, MemRaster& dmem, int size) {
 	double tn = tprops.nodata();
 	double an = aprops.nodata();
 
-	if(size % 2 == 0) ++size;
+	if(size % 2 != 0) ++size;
+	int side = 2 * size + 1;
 
 	dmem.fillFloat(tn, 1);
 
-	std::vector<double> avec(size * size);
-	std::vector<double> tvec(size * size);
+	std::vector<double> avec(side * side);
+	std::vector<double> tvec(side * side);
 
+	int minp = -1;
 	double tv;
 	for(int trow = 0; trow < tprops.rows(); ++trow) {
-		if(trow % 100 == 0)
-			std::cout << "Row: " << trow << " of " << tprops.rows() << "\n";
+		int p = (int) (((float) trow / tprops.rows()) * 100.0);
+		if(p % 25 == 0 && p > minp) {
+			std::cout << " " << p << "% ";
+			minp = p;
+		}
+		if(trow % 10 == 0)
+			std::cout << ".";
 		for(int tcol = 0; tcol < tprops.cols(); ++tcol) {
 
-			tmem.writeToVector(tvec, tcol - size / 2, trow - size / 2, size, size, 1);
-			amem.writeToVector(avec, tcol - size / 2, trow - size / 2, size, size, 1);
+			tmem.writeToVector(tvec, tcol - size, trow - size, side, side, 1);
+			amem.writeToVector(avec, tcol - size, trow - size, side, side, 1);
 
-			double dif = meanDif(tvec, tn, avec, an, size);
+			double dif = meanDif(tvec, tn, avec, an, side);
 
 			if((tv = tmem.getFloat(tcol, trow, 1)) != tn) {
 				dmem.setFloat(tcol, trow, tv + dif, 1);
@@ -167,6 +172,7 @@ void doInterp2(MemRaster& tmem, MemRaster& amem, MemRaster& dmem, int size) {
 			}
 		}
 	}
+	std::cout << "100%\n";
 
 	dmem.writeTo(tmem);
 }
@@ -215,9 +221,6 @@ int main(int argc, char** argv) {
 				std::sort(sizes.begin(), sizes.end());
 			} else {
 				sizes.push_back(atoi(val.c_str()));
-			}
-			for(int& s : sizes) {
-				if(s % 2 == 0) s++;
 			}
 			continue;
 		}
