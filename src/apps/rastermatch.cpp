@@ -7,6 +7,7 @@
 #include <vector>
 #include <sstream>
 #include <thread>
+#include <iostream>
 
 #include "raster.hpp"
 
@@ -148,24 +149,57 @@ void doInterp2(MemRaster& tmem, MemRaster& amem, MemRaster& dmem, int size) {
 	std::vector<double> avec(side * side);
 	std::vector<double> tvec(side * side);
 
+	int tcols = tprops.cols();
+	int trows = tprops.rows();
+	double invalid = std::nan("");
+
 	int minp = -1;
 	double tv;
-	for(int trow = 0; trow < tprops.rows(); ++trow) {
-		int p = (int) (((float) trow / tprops.rows()) * 100.0);
-		if(p % 25 == 0 && p > minp) {
-			std::cout << " " << p << "% ";
+	for(int tcol = 0; tcol < tcols; ++tcol) {
+
+		int p = (int) (((float) tcol / tcols) * 100.0);
+		if(p > minp) {
+			if(p % 25 == 0)
+				std::cout << " " << p << "% ";
+			if(p % 10 == 0)
+				std::cout << ".";
 			minp = p;
+			std::cout << std::flush;
 		}
-		if(trow % 10 == 0)
-			std::cout << ".";
-		for(int tcol = 0; tcol < tprops.cols(); ++tcol) {
 
-			tmem.writeToVector(tvec, tcol - size, trow - size, side, side, 1);
-			amem.writeToVector(avec, tcol - size, trow - size, side, side, 1);
+		int lastRow = 0;
 
-			double dif = meanDif(tvec, tn, avec, an, side);
+		for(int trow = 0; trow < trows; ++trow) {
 
 			if((tv = tmem.getFloat(tcol, trow, 1)) != tn) {
+
+				if((trow - lastRow) != 1) {
+					tmem.writeToVector(tvec, tcol - size, trow - size, side, side, 1, invalid);
+					amem.writeToVector(avec, tcol - size, trow - size, side, side, 1, invalid);
+				} else {
+					int cols = side;
+					int rc = tcol - size, rr = trow + size; // Only interested in the new bottom row. All others stay the same.
+					int vc = 0, vr = (trow - 1) % side;
+					for(int i = 0; i < side; ++i) {
+						avec[vr * side + i] = invalid;
+						tvec[vr * side + i] = invalid;
+					}
+					if(rr < trows) {
+						if(rc < 0) {
+							cols += rc;
+							vc -= rc;
+							rc = 0;
+						}
+						if(rc + cols > tcols)
+							cols = tcols - rc;
+						std::memcpy(avec.data() + vr * side + vc, ((double*) amem.grid()) + rr * tcols + rc, cols * sizeof(double));
+						std::memcpy(tvec.data() + vr * side + vc, ((double*) tmem.grid()) + rr * tcols + rc, cols * sizeof(double));
+					}
+				}
+				lastRow = trow;
+
+				double dif = meanDif(tvec, tn, avec, an, side);
+
 				dmem.setFloat(tcol, trow, tv + dif, 1);
 			} else {
 				dmem.setFloat(tcol, trow, tn, 1);
@@ -184,7 +218,6 @@ int main(int argc, char** argv) {
 	std::string target;
 	int tband = 1;
 	std::string adjusted;
-	std::string adjustment;
 	std::string mask;
 	int mband = 1;
 	std::vector<int> sizes;
@@ -203,9 +236,6 @@ int main(int argc, char** argv) {
 			continue;
 		} else if(arg == "-o") {
 			adjusted = argv[++i];
-			continue;
-		} else if(arg == "-f") {
-			adjustment = argv[++i];
 			continue;
 		} else if(arg == "-m") {
 			mask = argv[++i];
@@ -283,8 +313,6 @@ int main(int argc, char** argv) {
 							if((cv = cmem.getFloat(ccol, crow, 1)) != cn
 									&& (!hasMask || mmem.getInt(mcol, mrow, 1) == 1)) {
 							amem.setFloat(tcol, trow, cv, 1);
-						} else {
-							amem.setFloat(tcol, trow, tn, 1);
 						}
 					}
 				}
