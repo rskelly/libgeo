@@ -114,6 +114,8 @@ target_link_libraries (geoann geoutil)
 
 # Applications ##################################################################################################
 
+if(${BUILD_APPS})
+
 	# add_executable (polygonize src/apps/polygonize.cpp)
 	# target_link_libraries (polygonize geoutil georaster ${Boost_LIBRARIES})
 
@@ -161,5 +163,5 @@ target_link_libraries (geoann geoutil)
 	
 	install(TARGETS pc2grid geoann geopc georaster geoutil geodb RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
 	
-
+endif()
 
