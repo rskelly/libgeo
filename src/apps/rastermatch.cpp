@@ -299,7 +299,7 @@ int main(int argc, char** argv) {
 			}
 
 			double cv, cn = cprops.nodata();
-			double tn = tprops.nodata();
+//			/double tn = tprops.nodata();
 			bool hasMask = !mask.empty();
 			for(int crow = 0; crow < cprops.rows(); ++crow) {
 				for(int ccol = 0; ccol < cprops.cols(); ++ccol) {
