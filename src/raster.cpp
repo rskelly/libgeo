@@ -1114,25 +1114,93 @@ int MemRaster::getFloatRow(int row, int band, double* buf) {
 	return 0;
 }
 
-GridProps MemRaster::readIntoVector(std::vector<double>& data) {
-	int cols = props().cols();
-	int rows = props().rows();
-	data.resize(cols * rows);
-	for(int row = 0; row < rows; ++row) {
-		for(int col = 0; col < cols; ++col)
-			data[row * cols + col] = getFloat(col, row, 1);
+bool _fixCoords(int& srcCol, int& srcRow, int& dstCol, int& dstRow, int& cols, int& rows, int srcCols, int srcRows, int dstCols, int dstRows) {
+
+	if(cols <= 0) cols = srcCols;
+	if(rows <= 0) rows = srcRows;
+
+	if(srcCol >= srcCols || srcRow >= srcRows || srcCol + cols < 0 || srcRow + rows < 0) {
+		//g_warn("Col/row out of range.")
+		return false;
 	}
-	return props();
+	if(srcCol < 0) {
+		cols += srcCol;
+		srcCol = 0;
+	}
+	if(srcRow < 0) {
+		rows += srcRow;
+		srcRow = 0;
+	}
+	if(srcCol + cols > srcCols) {
+		cols = srcCols - srcCol;
+	}
+	if(srcRow + rows > srcRows) {
+		rows = srcRows - srcRow;
+	}
+	if(dstCol < 0) {
+		cols += dstCol;
+		dstCol = 0;
+	}
+	if(dstRow < 0) {
+		rows += dstRow;
+		dstRow = 0;
+	}
+	if(dstCol + cols > dstCols) {
+		cols = dstCols - dstCol;
+	}
+	if(dstRow + rows > dstRows) {
+		rows = dstRows - dstRow;
+	}
+	if(cols <= 0 || rows <= 0) {
+		//g_warn("Zero copy area.")
+		return false;
+	}
+	return true;
 }
 
-void MemRaster::writeFromVector(std::vector<double>& data) {
-	int cols = props().cols();
-	int rows = props().rows();
-	data.resize(cols * rows);
-	for(int row = 0; row < rows; ++row) {
-		for(int col = 0; col < cols; ++col)
-			setFloat(col, row, data[row * cols + col], 1);
-	}
+bool MemRaster::writeToVector(std::vector<double>& data, int col, int row, int cols, int rows, int band, double invalid) {
+
+	if(!m_props.isFloat())
+		g_runerr("Not a float raster.")
+
+	checkInit();
+
+	int srcCols = m_props.cols(), srcRows = m_props.rows();
+	int dstCols = cols, dstRows = rows;
+	int dstCol = 0, dstRow = 0;
+
+	if(!_fixCoords(col, row, dstCol, dstRow, cols, rows, srcCols, srcRows, dstCols, dstRows))
+		return false;
+
+	std::fill(data.begin(), data.end(), invalid);
+	double* buf = (double*) data.data();
+	double* grid = (double*) m_grid;
+	for(int r = 0; r < rows; ++r)
+		std::memcpy(buf + ((dstRow + r) * dstCols + dstCol), grid + ((row + r) * srcCols + col), cols * sizeof(double));
+
+	return true;
+}
+
+bool MemRaster::writeFromVector(std::vector<double>& data, int col, int row, int cols, int rows, int band) {
+	if(!m_props.isFloat())
+			g_runerr("Not a float raster.")
+
+		checkInit();
+
+	int srcCols = m_props.cols(), srcRows = m_props.rows();
+	int dstCols = cols, dstRows = rows;
+	int dstCol = 0, dstRow = 0;
+
+	if(!_fixCoords(col, row, dstCol, dstRow, cols, rows, srcCols, srcRows, dstCols, dstRows))
+		return false;
+
+	double* buf = (double*) data.data();
+	double* grid = (double*) m_grid;
+	for(int r = 0; r < rows; ++r)
+		std::memcpy(grid + ((row + r) * srcCols + col), buf + ((dstRow + r) * dstCols + dstCol), cols * sizeof(double));
+
+	return true;
+
 }
 
 int MemRaster::getInt(int col, int row, int band) {
@@ -1197,40 +1265,40 @@ void MemRaster::fromMatrix(
 	}
 }
 
+
 void MemRaster::writeToRaster(Raster& grd,
 			int cols, int rows,
 			int srcCol, int srcRow,
 			int dstCol, int dstRow,
 			int srcBand, int dstBand) {
 
-	if(dstBand < 1 || dstBand > grd.m_props.bands())
+	if(dstBand < 1 || dstBand > grd.props().bands())
 		g_argerr("Invalid destination band: " << dstBand);
 
-	int rcols = props().cols();
-	int rrows = props().rows();
+	grd.flushDirtyBlock();
 
-	const GridProps& gp = grd.props();
-	int gcols = gp.cols();
-	int grows = gp.rows();
+	int srcCols = m_props.cols(), srcRows = m_props.rows();
+	int dstCols = grd.props().cols(), dstRows = grd.props().rows();
 
-	fixWriteBounds(cols, rows, srcCol, srcRow, dstCol, dstRow, rcols, rrows, gcols, grows);
+	if(!_fixCoords(srcCol, srcRow, dstCol, dstRow, cols, rows, srcCols, srcRows, dstCols, dstRows))
+		g_runerr("Failed to format coords.")
 
-	DataType type = props().dataType();
-	GDALDataType gtype = dataType2GDT(type);
-	int typeSize = getTypeSize(type);
-	GDALRasterBand* band = grd.m_ds->GetRasterBand(dstBand);
+	GDALRasterBand* band = grd.ds()->GetRasterBand(dstBand);
+	if(!band)
+		g_runerr("Failed to find band " << srcBand);
 
-	char* input  = (char*) grid();
+	int srcTypeSize = getTypeSize(props().dataType());
+	GDALDataType srcType = dataType2GDT(props().dataType());
+
+	Buffer buf(cols * srcTypeSize);
+	char* grid = (char*) this->grid();
+	char* bgrid = (char*) buf.buf;
 
 	for(int r = 0; r < rows; ++r) {
-		if(CPLE_None != band->RasterIO(GF_Write,
-				dstCol, dstRow + r, cols, 1,
-				input + ((srcRow + r) * rcols + srcCol) * typeSize,
-				rcols, 1, gtype, 0, 0, 0))
-			g_runerr("Failed to write to: " << grd.filename());
+		std::memcpy(bgrid, grid + ((srcRow + r) * srcCols + srcCol) * srcTypeSize, cols * srcTypeSize);
+		if(CE_None != band->RasterIO(GF_Write, dstCol, dstRow + r, cols, 1, bgrid, cols, 1, srcType, 0, 0, 0))
+			g_runerr("Failed to copy data to raster.");
 	}
-
-	band->FlushCache();
 }
 
 void MemRaster::writeToMemRaster(MemRaster& grd,
@@ -1239,19 +1307,21 @@ void MemRaster::writeToMemRaster(MemRaster& grd,
 		int dstCol, int dstRow,
 		int srcBand, int dstBand) {
 
-	int rcols = props().cols();
-	int rrows = props().rows();
+	int srcCols = m_props.cols(), srcRows = m_props.rows();
+	int dstCols = grd.props().cols(), dstRows = grd.props().rows();
+
+	if(cols <= 0) cols = srcCols;
+	if(rows <= 0) rows = srcRows;
+
+	if(!_fixCoords(srcCol, srcRow, dstCol, dstRow, cols, rows, srcCols, srcRows, dstCols, dstRows))
+		g_runerr("Failed to format coords.")
 
 	const GridProps& gp = grd.props();
-	int gcols = gp.cols();
-	int grows = gp.rows();
-
-	fixWriteBounds(cols, rows, srcCol, srcRow, dstCol, dstRow, rcols, rrows, gcols, grows);
 
 	if(gp.isInt()) {
 		if(props().isInt()) {
 			for(int r = 0; r < rows; ++r)
-				std::memcpy(((int*) grd.grid()) + ((dstRow + r) * gcols + dstCol), ((int*) grid()) + ((srcRow + r) * rcols + srcCol), cols * sizeof(int));
+				std::memcpy(((int*) grd.m_grid) + ((dstRow + r) * dstCols + dstCol), ((int*) m_grid) + ((srcRow + r) * srcCols + srcCol), cols * sizeof(int));
 		} else {
 			for(int r = 0; r < rows; ++r) {
 				for(int c = 0; c < cols; ++c)
@@ -1266,7 +1336,7 @@ void MemRaster::writeToMemRaster(MemRaster& grd,
 			}
 		} else {
 			for(int r = 0; r < rows; ++r)
-				std::memcpy(((double*) grd.grid()) + ((dstRow + r) * gcols + dstCol), ((double*) grid()) + ((srcRow + r) * rcols + srcCol), cols * sizeof(double));
+				std::memcpy(((double*) grd.m_grid) + ((dstRow + r) * dstCols + dstCol), ((double*) m_grid) + ((srcRow + r) * srcCols + srcCol), cols * sizeof(double));
 		}
 	}
 }
@@ -1533,62 +1603,45 @@ void Raster::writeToRaster(Raster& grd,
 			int cols, int rows,
 			int srcCol, int srcRow,
 			int dstCol, int dstRow,
-			int srcBand, int dstBand) {
+			int srcBandNum, int dstBandNum) {
 
-	if(m_dirty) {
-		GDALRasterBand* bnd = m_ds->GetRasterBand(m_bband);
-		if(!bnd)
-			g_runerr("Failed to find band " << m_bband);
-		if(CPLE_None != bnd->WriteBlock(m_bcol, m_brow, getBlock(m_bband)))
-			g_runerr("Failed to flush to: " << filename());
-		m_dirty = false;
+	if(srcBandNum < 1 || srcBandNum > props().bands())
+		g_argerr("Invalid source band: " << srcBandNum);
+
+	if(dstBandNum < 1 || dstBandNum > grd.props().bands())
+		g_argerr("Invalid source band: " << dstBandNum);
+
+	flushDirtyBlock();
+	grd.flushDirtyBlock();
+
+	int srcCols = m_props.cols(), srcRows = m_props.rows();
+	int dstCols = grd.props().cols(), dstRows = grd.props().rows();
+
+	if(!_fixCoords(srcCol, srcRow, dstCol, dstRow, cols, rows, srcCols, srcRows, dstCols, dstRows))
+		g_runerr("Failed to format coords.")
+
+	GDALRasterBand* srcBand = m_ds->GetRasterBand(srcBandNum);
+	if(!srcBand)
+		g_runerr("Failed to find band " << srcBandNum);
+
+	GDALRasterBand* dstBand = grd.ds()->GetRasterBand(dstBandNum);
+	if(!dstBand)
+		g_runerr("Failed to find band " << dstBandNum);
+
+	GDALDataType dstType = dataType2GDT(grd.props().dataType());
+	int dstTypeSize = getTypeSize(grd.props().dataType());
+
+	Buffer buf(cols * dstTypeSize);
+
+	for(int r = 0; r < rows; ++r) {
+		if(CE_None != srcBand->RasterIO(GF_Read, srcCol, r + srcRow, cols, 1, buf.buf, cols, 1, dstType, 0, 0, 0))
+			g_runerr("Failed to read from raster.");
+		if(CE_None != dstBand->RasterIO(GF_Write, dstCol, r + dstRow, cols, 1, buf.buf, cols, 1, dstType, 0, 0, 0))
+			g_runerr("Failed to write to raster.")
 	}
-
-	if (&grd == this)
-		g_runerr("Recursive call to readBlock.");
-	if(srcBand < 1 || srcBand > m_props.bands())
-		g_argerr("Invalid source band: " << srcBand);
-	if(dstBand < 1 || dstBand > grd.m_props.bands())
-		g_argerr("Invalid destination band: " << srcBand);
-
-	int rcols = props().cols();
-	int rrows = props().rows();
-
-	const GridProps& gp = grd.props();
-	DataType type = gp.dataType();
-	GDALDataType gtype = dataType2GDT(type);
-	int typeSize = getTypeSize(type);
-	int gcols = gp.cols();
-	int grows = gp.rows();
-
-	fixWriteBounds(cols, rows, srcCol, srcRow, dstCol, dstRow, rcols, rrows, gcols, grows);
-
-	// A buffer for the entire copy.
-	Buffer buf(cols * rows * typeSize);
-
-	GDALRasterBand* srcBnd = m_ds->GetRasterBand(srcBand);
-	if(!srcBnd)
-		g_runerr("Failed to find source band " << srcBand);
-
-	GDALRasterBand* dstBnd = grd.m_ds->GetRasterBand(dstBand);
-	if(!dstBnd)
-		g_runerr("Failed to find destination band " << dstBand);
-
-	if(CPLE_None != srcBnd->RasterIO(GF_Read, srcCol, srcRow, cols, rows,
-			buf.buf, cols, rows, gtype, 0, 0, 0))
-		g_runerr("Failed to read from: " << grd.filename());
-
-	if(CPLE_None != dstBnd->RasterIO(GF_Write, dstCol, dstRow, cols, rows,
-			buf.buf, cols, rows, gtype, 0, 0, 0))
-		g_runerr("Failed to write to: " << filename());
 }
 
-void Raster::writeToMemRaster(MemRaster& grd,
-		int cols, int rows,
-		int srcCol, int srcRow,
-		int dstCol, int dstRow,
-		int srcBand, int dstBand) {
-
+void Raster::flushDirtyBlock() {
 	if(m_dirty) {
 		GDALRasterBand* bnd = m_ds->GetRasterBand(m_bband);
 		if(!bnd)
@@ -1597,28 +1650,41 @@ void Raster::writeToMemRaster(MemRaster& grd,
 			g_runerr("Failed to flush to: " << filename());
 		m_dirty = false;
 	}
+}
 
-	if(srcBand < 1 || srcBand > m_props.bands())
+void Raster::writeToMemRaster(MemRaster& grd,
+		int cols, int rows,
+		int srcCol, int srcRow,
+		int dstCol, int dstRow,
+		int srcBand, int dstBand) {
+
+	flushDirtyBlock();
+
+	if(srcBand < 1 || srcBand > props().bands())
 		g_argerr("Invalid source band: " << srcBand);
 
-	int rcols = props().cols();
-	int rrows = props().rows();
+	int srcCols = m_props.cols(), srcRows = m_props.rows();
+	int dstCols = grd.props().cols(), dstRows = grd.props().rows();
 
-	const GridProps& gp = grd.props();
-	int typeSize = getTypeSize(gp.dataType());
-	int gcols = gp.cols();
-	int grows = gp.rows();
+	if(!_fixCoords(srcCol, srcRow, dstCol, dstRow, cols, rows, srcCols, srcRows, dstCols, dstRows))
+		g_runerr("Failed to format coords.")
 
-	fixWriteBounds(cols, rows, srcCol, srcRow, dstCol, dstRow, rcols, rrows, gcols, grows);
-
-	GDALRasterBand *band = m_ds->GetRasterBand(srcBand);
+	GDALRasterBand* band = m_ds->GetRasterBand(srcBand);
 	if(!band)
 		g_runerr("Failed to find band " << srcBand);
 
-	// Read the current block. Not using readblock because need conversion.
-	char* data = ((char*) grd.grid()) + (dstRow * gp.rows() + dstCol) * typeSize;
-	if(CPLE_None != band->RasterIO(GF_Read, srcCol, srcRow, cols, rows, data, gp.cols(), gp.rows(), dataType2GDT(gp.dataType()), 0, 0, nullptr))
-		g_runerr("Failed to write to MemRaster " << srcCol << ", " << srcRow);
+	int dstTypeSize = getTypeSize(grd.props().dataType());
+	GDALDataType dstType = dataType2GDT(grd.props().dataType());
+
+	Buffer buf(cols * dstTypeSize);
+	char* grid = (char*) grd.grid();
+	char* bgrid = (char*) buf.buf;
+
+	for(int r = 0; r < rows; ++r) {
+		if(CE_None != band->RasterIO(GF_Read, srcCol, srcRow + r, cols, 1, bgrid, cols, 1, dstType, 0, 0, 0))
+			g_runerr("Failed to read from raster.")
+		std::memcpy(grid + ((dstRow + r) * dstCols + dstCol) * dstTypeSize, bgrid, cols * dstTypeSize);
+	}
 }
 
 void Raster::writeTo(Grid& grd,
@@ -1759,4 +1825,77 @@ Raster::~Raster() {
 		free(item.second);
 	if(m_ds)
 		GDALClose(m_ds);
+}
+
+
+int main(int argc, char** argv) {
+
+	if(argc < 2) {
+		std::cerr << "Provide a file name.\n";
+		return 1;
+	}
+
+	std::cout << "Loading raster.\n";
+	Raster rast(argv[1]);
+
+	{
+		std::cout << "Writing to new raster /tmp/test_1.tif\n";
+		GridProps props = rast.props();
+		props.setWritable(true);
+		Raster tmp("/tmp/test_1.tif", props);
+		rast.writeTo(tmp);
+	}
+
+	{
+		std::cout << "Writing to mem raster.\n";
+		GridProps props = rast.props();
+		props.setWritable(true);
+		MemRaster tmp(props, false);
+		rast.writeTo(tmp);
+		std::cout << "Writing mem raster to new raster /tmp/test_2.tif\n";
+		Raster tmp1("/tmp/test_2.tif", props);
+		tmp.writeTo(tmp1);
+	}
+
+	{
+		std::cout << "Writing to mem raster, another mem raster, back to raster\n";
+		GridProps props = rast.props();
+		props.setWritable(true);
+		MemRaster tmp(props, false);
+		rast.writeTo(tmp);
+		MemRaster tmp0(props, false);
+		tmp.writeTo(tmp0);
+		std::cout << "Writing mem raster to new raster /tmp/test_3.tif\n";
+		Raster tmp1("/tmp/test_3.tif", props);
+		tmp0.writeTo(tmp1);
+	}
+
+	{
+		std::cout << "Writing to mem raster, another mem raster from -10, 100 to 10 10, size 20, 30, back to raster\n";
+		GridProps props = rast.props();
+		props.setWritable(true);
+		MemRaster tmp(props, false);
+		rast.writeTo(tmp);
+		MemRaster tmp0(props, false);
+		tmp0.fillFloat(tmp0.props().nodata(), 1);
+		tmp.writeTo(tmp0, 20, 30, -10, 100, 10, 10, 1, 1);
+		std::cout << "Writing mem raster to new raster /tmp/test_4.tif\n";
+		Raster tmp1("/tmp/test_4.tif", props);
+		tmp0.writeTo(tmp1);
+	}
+
+	{
+		std::cout << "Writing to mem raster, another mem raster from 100, 100 to 101 101, size 20, 30, back to raster\n";
+		GridProps props = rast.props();
+		props.setWritable(true);
+		MemRaster tmp(props, false);
+		rast.writeTo(tmp);
+		MemRaster tmp0(props, false);
+		tmp0.fillFloat(tmp0.props().nodata(), 1);
+		tmp.writeTo(tmp0, 20, 30, 100, 100, 101, 101, 1, 1);
+		std::cout << "Writing mem raster to new raster /tmp/test_5.tif\n";
+		Raster tmp1("/tmp/test_5.tif", props);
+		tmp0.writeTo(tmp1);
+	}
+
 }

@@ -155,6 +155,9 @@ if(${BUILD_APPS})
 	add_executable (rastermatch src/apps/rastermatch.cpp)
 	target_link_libraries (rastermatch geoutil geoann georaster ${GEOS_LIBRARY} ${GDAL_LIBRARY})
 
+	add_executable (raster_test src/raster.cpp)
+	target_link_libraries (raster_test geoutil geoann georaster ${GEOS_LIBRARY} ${GDAL_LIBRARY})
+
 	# add_executable (rbf src/tests/rbf.cpp)
 	# target_link_libraries (rbf)
 

@@ -6,6 +6,8 @@
  */
 #include <vector>
 #include <sstream>
+#include <thread>
+#include <iostream>
 
 #include "raster.hpp"
 
@@ -113,53 +115,100 @@ void doInterp(MemRaster& tmem, MemRaster& amem, MemRaster& difmem, int size) {
 	}
 }
 
-double meanDif(std::vector<double>& tmem, std::vector<double>& amem, int tcol, int trow, int tcols, int trows, int size, double tn, double an) {
-	double av, tv;
-	double sum = 0;
+double meanDif(std::vector<double>& tvec, double tn, std::vector<double>& avec, double an, int size) {
+	double av, tv, sum = 0;
 	int count = 0;
-	for(int r = 0; r < size; ++r) {
-		for(int c = 0; c < size; ++c) {
-			int cc = tcol + c - size / 2;
-			int rr = trow + r - size / 2;
-			if(cc < 0 || rr < 0 || rr >= trows || cc >= tcols)
-				continue;
-			tv = tmem[rr * tcols + cc];
-			av = amem[rr * tcols + cc];
-			if(tv != tn && av != an)
-				sum += (av - tv);
-		}
+	for(int i = 0; i < size * size; ++i) {
+		tv = tvec[i];
+		av = avec[i];
+		if(isnan(tv) || isnan(av))
+			continue;
+		if(tv == tn || tv == 0) //  This shouldn't happen.
+			continue;
+		++count;
+		if(av == an)
+			continue;
+		sum += (av - tv);
 	}
-	count = size * size;
 	return count > 0 ? sum / count : 0;
 }
 
-void doInterp2(std::vector<double>& tmem, const GridProps& tprops, std::vector<double>& amem, const GridProps& aprops, std::vector<double>& difmem, int size) {
+void doInterp2(MemRaster& tmem, MemRaster& amem, MemRaster& dmem, int size) {
+
+	const GridProps& tprops = tmem.props();
+	const GridProps& aprops = amem.props();
 
 	double tn = tprops.nodata();
 	double an = aprops.nodata();
+
+	if(size % 2 != 0) ++size;
+	int side = 2 * size + 1;
+
+	dmem.fillFloat(tn, 1);
+
+	std::vector<double> avec(side * side);
+	std::vector<double> tvec(side * side);
+
 	int tcols = tprops.cols();
 	int trows = tprops.rows();
+	double invalid = std::nan("");
 
-	if(size % 2 == 0) ++size;
-
-	std::fill(difmem.begin(), difmem.end(), tn);
-
+	int minp = -1;
 	double tv;
-	for(int trow = 0; trow < tprops.rows(); ++trow) {
-		if(trow % 100 == 0)
-			std::cout << "Row: " << trow << " of " << tprops.rows() << "\n";
-		for(int tcol = 0; tcol < tprops.cols(); ++tcol) {
+	for(int tcol = 0; tcol < tcols; ++tcol) {
 
-			if((tv = tmem[trow * tcols + tcol]) == tn)
-				continue;
+		int p = (int) (((float) tcol / tcols) * 100.0);
+		if(p > minp) {
+			if(p % 25 == 0)
+				std::cout << " " << p << "% ";
+			if(p % 10 == 0)
+				std::cout << ".";
+			minp = p;
+			std::cout << std::flush;
+		}
 
-			double dif = meanDif(tmem, amem, tcol, trow, tcols, trows, size, tn, an);
+		int lastRow = 0;
 
-			difmem[trow * tcols + tcol] = tv + dif;
+		for(int trow = 0; trow < trows; ++trow) {
+
+			if((tv = tmem.getFloat(tcol, trow, 1)) != tn) {
+
+				if((trow - lastRow) != 1) {
+					tmem.writeToVector(tvec, tcol - size, trow - size, side, side, 1, invalid);
+					amem.writeToVector(avec, tcol - size, trow - size, side, side, 1, invalid);
+				} else {
+					int cols = side;
+					int rc = tcol - size, rr = trow + size; // Only interested in the new bottom row. All others stay the same.
+					int vc = 0, vr = (trow - 1) % side;
+					for(int i = 0; i < side; ++i) {
+						avec[vr * side + i] = invalid;
+						tvec[vr * side + i] = invalid;
+					}
+					if(rr < trows) {
+						if(rc < 0) {
+							cols += rc;
+							vc -= rc;
+							rc = 0;
+						}
+						if(rc + cols > tcols)
+							cols = tcols - rc;
+						std::memcpy(avec.data() + vr * side + vc, ((double*) amem.grid()) + rr * tcols + rc, cols * sizeof(double));
+						std::memcpy(tvec.data() + vr * side + vc, ((double*) tmem.grid()) + rr * tcols + rc, cols * sizeof(double));
+					}
+				}
+				lastRow = trow;
+
+				double dif = meanDif(tvec, tn, avec, an, side);
+
+				dmem.setFloat(tcol, trow, tv + dif, 1);
+			} else {
+				dmem.setFloat(tcol, trow, tn, 1);
+			}
 		}
 	}
+	std::cout << "100%\n";
 
-	tmem.swap(difmem);
+	dmem.writeTo(tmem);
 }
 
 int main(int argc, char** argv) {
@@ -169,12 +218,11 @@ int main(int argc, char** argv) {
 	std::string target;
 	int tband = 1;
 	std::string adjusted;
-	std::string adjustment;
 	std::string mask;
 	int mband = 1;
 	std::vector<int> sizes;
+	bool test = true;
 	bool mapped = false;
-
 
 	for(int i = 1; i < argc; ++i) {
 		std::string arg(argv[i]);
@@ -189,24 +237,27 @@ int main(int argc, char** argv) {
 		} else if(arg == "-o") {
 			adjusted = argv[++i];
 			continue;
-		} else if(arg == "-f") {
-			adjustment = argv[++i];
-			continue;
 		} else if(arg == "-m") {
 			mask = argv[++i];
 			mband = atoi(argv[++i]);
 			continue;
 		} else if(arg == "-d") {
-			std::stringstream ss(argv[++i]);
-			std::string part;
-			while(std::getline(ss, part, ','))
-				sizes.push_back(atoi(part.c_str()));
-			continue;
-		} else if(arg == "-p") {
-			mapped = true;
+			std::string val = argv[++i];
+			if(val.find(',') != std::string::npos) {
+				std::stringstream ss(val);
+				std::string part;
+				while(std::getline(ss, part, ','))
+					sizes.push_back(atoi(part.c_str()));
+				std::sort(sizes.begin(), sizes.end());
+			} else {
+				sizes.push_back(atoi(val.c_str()));
+			}
 			continue;
 		}
 	}
+
+	std::sort(sizes.begin(), sizes.end());
+	std::reverse(sizes.begin(), sizes.end());
 
 	Bounds bounds;
 	GridProps tprops;
@@ -217,9 +268,7 @@ int main(int argc, char** argv) {
 		tprops.setWritable(true);
 		tprops.setBands(1);
 		tmem.init(tprops, mapped);
-		tmem.fillFloat(tprops.nodata(), 1);
 		trast.writeTo(tmem, tprops.cols(), tprops.rows(), 0, 0, 0, 0, tband, 1);
-		bounds.extend(tprops.bounds());
 	}
 
 	GridProps mprops;
@@ -228,14 +277,15 @@ int main(int argc, char** argv) {
 		Raster mrast(mask);
 		mprops = mrast.props();
 		mmem.init(mprops, mapped);
-		mmem.fillFloat(mprops.nodata(), 1);
 		mrast.writeTo(mmem, mprops.cols(), mprops.rows(), 0, 0, 0, 0, mband, 1);
 	}
 
 	GridProps aprops(tprops);
 	MemRaster amem;
 	{
-		bool first = true;
+		amem.init(tprops, mapped);
+		amem.fillFloat(tprops.nodata(), 1);
+
 		for(size_t i = 0; i < anchors.size(); ++i) {
 			MemRaster cmem;
 			GridProps cprops;
@@ -245,33 +295,24 @@ int main(int argc, char** argv) {
 				cprops.setBands(1);
 				cprops.setWritable(true);
 				cmem.init(cprops, mapped);
-				cmem.fillFloat(cprops.nodata(), 1);
-				if(first) {
-					aprops.setNoData(cprops.nodata());
-					first = false;
-				}
 				crast.writeTo(cmem, cprops.cols(), cprops.rows(), 0, 0, 0, 0, abands[i], 1);
 			}
 
-			amem.init(aprops, mapped);
-			amem.fillFloat(aprops.nodata(), 1);
-
 			double cv, cn = cprops.nodata();
+			double tn = tprops.nodata();
 			bool hasMask = !mask.empty();
 			for(int crow = 0; crow < cprops.rows(); ++crow) {
 				for(int ccol = 0; ccol < cprops.cols(); ++ccol) {
 					double x = cprops.toCentroidX(ccol);
 					double y = cprops.toCentroidY(crow);
-					int tcol = tprops.toCol(x);
-					int trow = tprops.toRow(y);
 					int mcol = mprops.toCol(x);
 					int mrow = mprops.toRow(y);
+					int tcol = tprops.toCol(x);
+					int trow = tprops.toRow(y);
 					if(tprops.hasCell(tcol, trow)) {
 							if((cv = cmem.getFloat(ccol, crow, 1)) != cn
 									&& (!hasMask || mmem.getInt(mcol, mrow, 1) == 1)) {
 							amem.setFloat(tcol, trow, cv, 1);
-						} else {
-							amem.setFloat(tcol, trow, cn, 1);
 						}
 					}
 				}
@@ -280,20 +321,19 @@ int main(int argc, char** argv) {
 	}
 
 	{
-		std::vector<double> tvec(tprops.cols() * tprops.rows());
-		{
-			std::vector<double> dvec(tvec.size());
-			std::vector<double> avec(dvec.size());
-			tmem.readIntoVector(tvec);
-			amem.readIntoVector(avec);
-			for(int d : sizes) {
-				std::cout << "Interp at " << d << "\n";
-				doInterp2(tvec, tprops, avec, aprops, dvec, d);
+		MemRaster dmem(tprops, mapped);
+		for(const int& d : sizes) {
+
+			doInterp2(tmem, amem, dmem, d);
+
+			if(test) {
+				std::stringstream tmp;
+				tmp << "/tmp/match_" <<  d << ".tif";
+				std::cerr << tmp.str() << "\n";
+				Raster rtmp(tmp.str(), tprops);
+				tmem.writeTo(rtmp);
 			}
 		}
-		//MemRaster difmem(tprops, mapped);
-		//difmem.writeFromVector(dvec);
-		tmem.writeFromVector(tvec);
 	}
 
 	Raster adjrast(adjusted, tprops);

@@ -1473,6 +1473,9 @@ namespace geo {
 					int dstCol = 0, int dstRow = 0,
 					int srcBand = 1, int dstBand = 1);
 
+            bool writeToVector(std::vector<double>& grd, int col, int row, int cols, int rows, int band = 1, double invalid = nan(""));
+
+            bool writeFromVector(std::vector<double>& grd, int col, int row, int cols, int rows, int band = 1);
         };
 
         /**
@@ -1535,6 +1538,8 @@ namespace geo {
             		int srcCol = 0, int srcRow = 0,
 					int dstCol = 0, int dstRow = 0,
             		int srcBand = 1, int dstBand = 1);
+
+			void flushDirtyBlock();
 
             /**
              * Write the raster into another grid instance.

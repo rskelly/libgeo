@@ -352,6 +352,7 @@ void Rasterizer::finalize(int row, double radius,
 		
 		if(count) {
 			for(size_t i = 0; i < m_computers.size(); ++i) {
+				m_out.clear();
 				m_computers[i]->compute(x, y, points, m_filtered, radius, m_out);
 				for(double val : m_out)
 					m_rasters[band++].setFloat(col, 0, std::isnan(val) ? NODATA : val, 1);
