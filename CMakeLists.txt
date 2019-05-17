@@ -116,6 +116,10 @@ target_link_libraries (geoann geoutil)
 
 if(${BUILD_APPS})
 
+	enable_language (Fortran)
+	file (GLOB FSRC src/fitpack/*.f)
+	add_library (fitpack_mod SHARED ${FSRC}) 
+
 	# add_executable (polygonize src/apps/polygonize.cpp)
 	# target_link_libraries (polygonize geoutil georaster ${Boost_LIBRARIES})
 
@@ -157,6 +161,9 @@ if(${BUILD_APPS})
 
 	add_executable (raster_test src/raster.cpp)
 	target_link_libraries (raster_test geoutil geoann georaster ${GEOS_LIBRARY} ${GDAL_LIBRARY})
+
+	add_executable (cloudmatch src/apps/cloudmatch.cpp)
+	target_link_libraries (cloudmatch ${GDAL_LIBRARY} ${LIBLAS_LIBRARY} fitpack_mod)
 
 	# add_executable (rbf src/tests/rbf.cpp)
 	# target_link_libraries (rbf)
