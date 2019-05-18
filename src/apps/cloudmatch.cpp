@@ -46,10 +46,27 @@ public:
 	std::vector<int> counts;
 	std::string projection;
 
+	std::vector<double> m_wrk1;
+	std::vector<double> m_wrk2;
+	std::vector<int> m_iwrk;
+
+	std::vector<double> m_x;
+	std::vector<double> m_y;
+	std::vector<double> m_z;
+	std::vector<double> m_w;
+
+	std::vector<double> m_c;
+	std::vector<double> m_tx;
+	std::vector<double> m_ty;
+
+	int m_nx;
+	int m_ny;
+
 	Item(const std::string& file, double xmin, double ymin, double xmax, double ymax, double res) :
 		file(file),
 		xmin(xmin), xmax(xmax), ymin(ymin), ymax(ymax),
-		res(res) {
+		res(res),
+		m_nx(0), m_ny(0) {
 		calcBounds();
 	}
 
@@ -246,20 +263,20 @@ public:
 		int ky = 3;
 		double eps = std::numeric_limits<double>::min();
 
-		std::vector<double> x;
-		std::vector<double> y;
-		std::vector<double> z;
-		std::vector<double> w;
+		m_x.resize(0);
+		m_y.resize(0);
+		m_z.resize(0);
+		m_w.resize(0);
 
 		int m = 0;
 		for(double yy = ymin; yy < ymax; yy += res) {
 			for(double xx = xmin; xx < xmax; xx += res) {
 				double zz = get(xx, yy);
 				if(zz != -9999.0) {
-					x.push_back(xx);
-					y.push_back(yy);
-					z.push_back(zz);
-					w.push_back(1);
+					m_x.push_back(xx);
+					m_y.push_back(yy);
+					m_z.push_back(zz);
+					m_w.push_back(1);
 					++m;
 				}
 			}
@@ -269,12 +286,10 @@ public:
 		int nxest = (int) std::ceil(kx + 1.0 + std::sqrt(m / 2.0));
 		int nyest = (int) std::ceil(ky + 1.0 + std::sqrt(m / 2.0));
 
-		std::vector<double> c((nxest - kx - 1) * (nyest - ky - 1));
-		std::vector<double> tx(m);
-		std::vector<double> ty(m);
+		m_c.resize((nxest - kx - 1) * (nyest - ky - 1));
+		m_tx.resize(m);
+		m_ty.resize(m);
 
-		int nx;
-		int ny;
 		double fp;
 
 		int u = nxest - kx - 1;
@@ -293,45 +308,50 @@ public:
 		}
 
 		int lwrk1 = u * v * (2 + b1 + b2) + 2 * (u + v + km * (m + ne) + ne - kx - ky) + b2 + 1;
-		std::vector<double> wrk1(lwrk1);
+		m_wrk1.resize(lwrk1);
 		int lwrk2 = u * v * (b2 + 1) + b2;
-		std::vector<double> wrk2(lwrk2);
+		m_wrk2.resize(lwrk2);
 		int kwrk = m + (nxest - 2 * kx - 1) * (nyest - 2 * ky - 1);
-		std::vector<int> iwrk(kwrk);
+		m_iwrk.resize(kwrk);
 
 		int ier;
 
-		surfit_(&iopt, &m, x.data(), y.data(), z.data(), w.data(),
+		surfit_(&iopt, &m, m_x.data(), m_y.data(), m_z.data(), m_w.data(),
 				&xmin, &xmax, &ymin, &ymax, &kx, &ky,
 				&smooth, &nxest, &nyest, &nmax, &eps,
-				&nx, tx.data(), &ny, ty.data(), c.data(), &fp,
-				wrk1.data(), &lwrk1, wrk2.data(), &lwrk2, iwrk.data(), &kwrk,
+				&m_nx, m_tx.data(), &m_ny, m_ty.data(), m_c.data(), &fp,
+				m_wrk1.data(), &lwrk1, m_wrk2.data(), &lwrk2, m_iwrk.data(), &kwrk,
 				&ier);
 
 		if(ier > 0)
 			throw std::runtime_error("Smoothing failed");
+	}
+
+	void smoothAt(double x, double y) {
 
 		int idim = 1;
 
 		int mf = cols * rows * idim;
 
-		x.resize(cols); // A single row.
-		y.resize(rows);
-		z.resize(mf);
+		m_x.resize(cols); // A single row.
+		m_y.resize(rows);
+		m_z.resize(mf);
 
-		lwrk1 = cols * rows * 4;
-		wrk1.resize(lwrk1);
-		kwrk = cols * rows;
-		iwrk.resize(kwrk);
+		int lwrk1 = cols * rows * 4;
+		m_wrk1.resize(lwrk1);
+		int kwrk = cols * rows;
+		m_iwrk.resize(kwrk);
 
-		surev_(&idim, tx.data(), &nx, ty.data(), &ny,
-				c.data(), x.data(), &cols, y.data(), &rows, z.data(), &mf,
-				wrk1.data(), &lwrk1, iwrk.data(), &kwrk, &ier);
+		int ier;
+
+		surev_(&idim, m_tx.data(), &m_nx, m_ty.data(), &m_ny,
+				m_c.data(), m_x.data(), &cols, m_y.data(), &rows, m_z.data(), &mf,
+				m_wrk1.data(), &lwrk1, m_iwrk.data(), &kwrk, &ier);
 
 		fill(-9999.0);
 		for(int r = 0; r < rows; ++r) {
 			for(int c = 0; c < cols; ++c) {
-				set(c, r, z[r * cols + c]);
+				set(c, r, m_z[r * cols + c]);
 			}
 		}
 	}
@@ -414,6 +434,7 @@ int main(int argc, char** argv) {
 
 		avg.average();
 		avg.save(makeFile(outdir, "avg", res, 0, ".tif"));
+		avg.splineSmooth(10);
 
 		std::string s;
 		std::vector<std::string> slas;
