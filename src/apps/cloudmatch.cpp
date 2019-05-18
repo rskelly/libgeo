@@ -18,6 +18,7 @@
 #include <gdal_priv.h>
 #include <ogr_spatialref.h>
 
+constexpr double NO_DATA = -9999.0;
 constexpr double MIN = std::numeric_limits<double>::lowest();
 constexpr double MAX = std::numeric_limits<double>::max();
 
@@ -66,11 +67,13 @@ public:
 		file(file),
 		xmin(xmin), xmax(xmax), ymin(ymin), ymax(ymax),
 		res(res),
+		cols(0), rows(0),
 		m_nx(0), m_ny(0) {
-		calcBounds();
 	}
 
 	Item(const std::string& file) : Item(file, MAX, MAX, MIN, MIN, 0) {}
+
+	Item(const std::string& file, double res) : Item(file, MAX, MAX, MIN, MIN, res) {}
 
 	Item() : Item("") {}
 
@@ -126,6 +129,7 @@ public:
 		fill(0);
 		fillCounts(0);
 
+		rdr.Reset();
 		while(rdr.ReadNextPoint()) {
 			const liblas::Point& pt = rdr.GetPoint();
 			if(pt.GetClassification().GetClass() != 2)
@@ -139,7 +143,7 @@ public:
 
 		for(size_t i = 0; i < grid.size(); ++i) {
 			if(counts[i] == 0)
-				grid[i] = -9999.0;
+				grid[i] = NO_DATA;
 		}
 
 	}
@@ -162,14 +166,14 @@ public:
 
 		for(double y = y1; y < y2; y += res) {
 			for(double x = x1; x < x2; x += res) {
-				if(other.get(x, y) == -9999.0)
+				if(other.get(x, y) == NO_DATA)
 					continue;
-				if(get(x, y) == -9999.0) {
+				if(get(x, y) == NO_DATA) {
 					set(x, y, other.get(x, y));
-					setCount(x, y, 1);
+					setCount(x, y, other.getCount(x, y));
 				} else {
 					set(x, y, get(x, y) + other.get(x, y));
-					setCount(x, y, getCount(x, y) + 1);
+					setCount(x, y, getCount(x, y) + other.getCount(x, y));
 				}
 			}
 		}
@@ -177,11 +181,11 @@ public:
 
 	void diff(Item& other) {
 		std::vector<double> tmp(grid.size());
-		std::fill(tmp.begin(), tmp.end(), -9999.0);
+		std::fill(tmp.begin(), tmp.end(), NO_DATA);
 		double z, oz;
 		for(double y = ymin; y < ymax; y += res) {
 			for(double x = xmin; x < xmax; x += res) {
-				if((oz = other.get(x, y)) == -9999.0 || (z = get(x, y)) == -9999.0)
+				if((oz = other.get(x, y)) == NO_DATA || (z = get(x, y)) == NO_DATA)
 					continue;
 				int c = toCol(x);
 				int r = toRow(y);
@@ -193,8 +197,11 @@ public:
 
 	void average() {
 		for(size_t i = 0; i < grid.size(); ++i) {
-			if(counts[i] > 0)
+			if(counts[i] > 0) {
 				grid[i] /= counts[i];
+			} else {
+				grid[i] = NO_DATA;
+			}
 		}
 	}
 
@@ -203,7 +210,7 @@ public:
 	}
 
 	int toRow(double y) {
-		return (int) ((y - ymin) / res);
+		return (int) ((ymax - y) / res);
 	}
 
 	int toX(int col) {
@@ -211,7 +218,7 @@ public:
 	}
 
 	int toY(int row) {
-		return row * res + ymin + res * 0.5;
+		return ymax - row * res - res * 0.5;
 	}
 
 	void set(double x, double y, double v) {
@@ -240,7 +247,7 @@ public:
 		if(col >= 0 && col < cols && row >= 0 && row < rows) {
 			return grid[row * cols + col];
 		} else {
-			return -9999.0;
+			return NO_DATA;
 		}
 	}
 
@@ -256,12 +263,7 @@ public:
 		}
 	}
 
-	void splineSmooth(double smooth) {
-
-		int iopt = 0;
-		int kx = 3;
-		int ky = 3;
-		double eps = std::numeric_limits<double>::min();
+	void splineSmooth(double& smooth) {
 
 		m_x.resize(0);
 		m_y.resize(0);
@@ -269,10 +271,10 @@ public:
 		m_w.resize(0);
 
 		int m = 0;
-		for(double yy = ymin; yy < ymax; yy += res) {
-			for(double xx = xmin; xx < xmax; xx += res) {
-				double zz = get(xx, yy);
-				if(zz != -9999.0) {
+		for(double yy = ymin; yy <= ymax; yy += res) {										// Include the corners to be sure the spline covers all points.
+			for(double xx = xmin; xx <= xmax; xx += res) {
+				double zz = get(xx == xmax ? xx - res : xx, yy == ymax ? yy - res : yy);	// The right/top corner takes the value of the cell with the previous index.
+				if(zz != NO_DATA) {
 					m_x.push_back(xx);
 					m_y.push_back(yy);
 					m_z.push_back(zz);
@@ -282,9 +284,13 @@ public:
 			}
 		}
 
+		int iopt = 0;
+		int kx = 3;
+		int ky = 3;
 		int nmax = m;
 		int nxest = (int) std::ceil(kx + 1.0 + std::sqrt(m / 2.0));
 		int nyest = (int) std::ceil(ky + 1.0 + std::sqrt(m / 2.0));
+		double eps = std::pow(10.0, -6.0); //std::numeric_limits<double>::min();
 
 		m_c.resize((nxest - kx - 1) * (nyest - ky - 1));
 		m_tx.resize(m);
@@ -315,27 +321,40 @@ public:
 		m_iwrk.resize(kwrk);
 
 		int ier;
+		int tries = 4;
 
-		surfit_(&iopt, &m, m_x.data(), m_y.data(), m_z.data(), m_w.data(),
-				&xmin, &xmax, &ymin, &ymax, &kx, &ky,
-				&smooth, &nxest, &nyest, &nmax, &eps,
-				&m_nx, m_tx.data(), &m_ny, m_ty.data(), m_c.data(), &fp,
-				m_wrk1.data(), &lwrk1, m_wrk2.data(), &lwrk2, m_iwrk.data(), &kwrk,
-				&ier);
+		while(--tries >= 0) {
+			surfit_(&iopt, &m, m_x.data(), m_y.data(), m_z.data(), m_w.data(),
+					&xmin, &xmax, &ymin, &ymax, &kx, &ky,
+					&smooth, &nxest, &nyest, &nmax, &eps,
+					&m_nx, m_tx.data(), &m_ny, m_ty.data(), m_c.data(), &fp,
+					m_wrk1.data(), &lwrk1, m_wrk2.data(), &lwrk2, m_iwrk.data(), &kwrk,
+					&ier);
+			if(ier == 0)
+				break;
+			smooth *= 2;
+		}
 
 		if(ier > 0)
 			throw std::runtime_error("Smoothing failed");
 	}
 
-	void smoothAt(double x, double y) {
+	void smoothGrid() {
 
 		int idim = 1;
-
 		int mf = cols * rows * idim;
 
-		m_x.resize(cols); // A single row.
-		m_y.resize(rows);
+		m_x.resize(mf); // A single col/row.
+		m_y.resize(mf);
 		m_z.resize(mf);
+
+		// Populate the cell-centre coordinates.
+		for(int r = 0; r < rows; ++r) {
+			for(int c = 0; c < cols; ++c) {
+				m_x[r * cols + c] = xmin + c * res + res * 0.5;
+				m_y[r * cols + c] = ymin + r * res + res * 0.5;
+			}
+		}
 
 		int lwrk1 = cols * rows * 4;
 		m_wrk1.resize(lwrk1);
@@ -348,52 +367,98 @@ public:
 				m_c.data(), m_x.data(), &cols, m_y.data(), &rows, m_z.data(), &mf,
 				m_wrk1.data(), &lwrk1, m_iwrk.data(), &kwrk, &ier);
 
-		fill(-9999.0);
-		for(int r = 0; r < rows; ++r) {
-			for(int c = 0; c < cols; ++c) {
-				set(c, r, m_z[r * cols + c]);
-			}
-		}
+		// Apply smoothed values to raster.
+		fill(NO_DATA);
+		for(int i = 0; i < mf; ++i)
+			set(m_x[i], m_y[i], m_z[i]);
+	}
+
+	double smoothAt(double x, double y) {
+
+		int idim = 1;
+		int mx = 1;
+		int my = 1;
+		int mf = mx * my * idim;
+
+		m_x.resize(mx); // A single col/row.
+		m_y.resize(my);
+		m_z.resize(mf);
+
+		m_x[0] = x;
+		m_y[0] = y;
+
+		int lwrk1 = 4 * (mx + my);
+		m_wrk1.resize(lwrk1);
+		int kwrk = mx + my;
+		m_iwrk.resize(kwrk);
+
+		int ier;
+
+		surev_(&idim, m_tx.data(), &m_nx, m_ty.data(), &m_ny,
+				m_c.data(), m_x.data(), &mx, m_y.data(), &my, m_z.data(), &mf,
+				m_wrk1.data(), &lwrk1, m_iwrk.data(), &kwrk, &ier);
+
+		if(ier == 10) // TODO: What about other non-zero returns?
+			throw std::runtime_error("Failed to find smoothed value.");
+
+		return m_z[0];
 	}
 
 	void save(const std::string& outfile) {
-		GDALAllRegister();
 		GDALDriverManager* dm = GetGDALDriverManager();
 		GDALDriver* drv = dm->GetDriverByName("GTiff");
 		GDALDataset* ds = drv->Create(outfile.c_str(), cols, rows, 2, GDT_Float32, 0);
+		double trans[] = {xmin, res, 0, ymax, 0, -res};
+		ds->SetGeoTransform(trans);
 		const char* proj = projection.c_str();
 		ds->SetProjection(proj);
 		GDALRasterBand* b1 = ds->GetRasterBand(1);
-		b1->SetNoDataValue(0);
+		b1->SetNoDataValue(NO_DATA);
 		if(CE_None != b1->RasterIO(GF_Write, 0, 0, cols, rows, counts.data(), cols, rows, GDT_Int32, 0, 0, 0))
 			throw std::runtime_error("Failed to write band 1.");
 		GDALRasterBand* b2 = ds->GetRasterBand(2);
-		b2->SetNoDataValue(0);
+		b2->SetNoDataValue(NO_DATA);
 		if(CE_None != b2->RasterIO(GF_Write, 0, 0, cols, rows, grid.data(), cols, rows, GDT_Float64, 0, 0, 0))
 			throw std::runtime_error("Failed to write band 2.");
+		GDALClose(ds);
 	}
 
-	void adjust(const std::string& outfile) {
+	void adjust(const std::string& outfile, Item& reference) {
 
-		std::ofstream out(outfile);
-		std::ifstream in(file);
+		std::ofstream out(outfile, std::ios::binary|std::ios::out);
+		std::ifstream in(file, std::ios::binary|std::ios::in);
 
 		liblas::ReaderFactory rf;
 		liblas::Reader rdr = rf.CreateWithStream(in);
 		const liblas::Header& hdr = rdr.GetHeader();
 
+		liblas::Header whd(hdr);
 		liblas::WriterFactory wf;
-		liblas::Writer wtr = wf.CreateWithStream(out, hdr);
+		liblas::Writer wtr = liblas::Writer(out, hdr);
 
+		double minx = MAX, miny = MAX, minz = MAX, maxx = MIN, maxy = MIN, maxz = MIN;
 		while(rdr.ReadNextPoint()) {
 			const liblas::Point& pt = rdr.GetPoint();
-			liblas::Point npt(pt);
 			double x = pt.GetX();
 			double y = pt.GetY();
-			npt.SetZ(pt.GetZ() + get(x, y));
+			double z = pt.GetZ() + (reference.smoothAt(x, y) - smoothAt(x, y));
+			liblas::Point npt(pt);
+			npt.SetCoordinates(x, y, z);
 			wtr.WritePoint(npt);
+			if(x < minx) minx = x;
+			if(y < miny) miny = y;
+			if(z < minz) minz = z;
+			if(x > maxx) maxx = x;
+			if(y > maxy) maxy = y;
+			if(z > maxz) maxz = z;
 		}
 
+		whd.SetMin(minx, miny, minz);
+		whd.SetMax(maxx, maxy, maxz);
+		wtr.SetHeader(whd);
+		wtr.WriteHeader();
+		out.close();
+		in.close();
 	}
 };
 
@@ -405,6 +470,11 @@ std::string makeFile(const std::string& outdir, const std::string& tpl, double r
 
 int main(int argc, char** argv) {
 
+	double smooth1 =1000;
+	double smooth2 = 200;
+
+	GDALAllRegister();
+
 	double res = atof(argv[argc - 3]);
 	int steps = atoi(argv[argc - 2]);
 	std::string outdir = argv[argc - 1];
@@ -413,42 +483,54 @@ int main(int argc, char** argv) {
 	double res0 = res * std::pow(2, steps);
 
 	std::vector<std::string> las;
-	for(int i = 1; i < argc - 2; ++i)
+	for(int i = 1; i < argc - 3; ++i)
 		las.push_back(argv[i]);
 
 	while(res0 >= res) {
 
 		for(const std::string& l : las)
-			items.emplace_back(l);
+			items.emplace_back(l, res);
 
-		Item avg;
-		avg.projection = items[0].projection;
+		Item avg("", res);
 
+		// Load each point cloud, add it to the overall average.
+		// Then average the item and save it.
 		for(size_t i = 0; i < items.size(); ++i) {
 			Item& item = items[i];
 			item.load();
-			item.save(makeFile(outdir, "item", res, i, ".tif"));
 			avg.extend(item);
-			avg.add(item);
 		}
-
-		avg.average();
-		avg.save(makeFile(outdir, "avg", res, 0, ".tif"));
-		avg.splineSmooth(10);
-
-		std::string s;
-		std::vector<std::string> slas;
-
+		avg.calcBounds();
+		avg.fill(NO_DATA);
 		for(size_t i = 0; i < items.size(); ++i) {
 			Item& item = items[i];
-			item.diff(avg);
-			item.splineSmooth(10);
-			s = makeFile(outdir, "adj", res, i, ".las");
-			slas.push_back(s);
-			item.adjust(s);
+			avg.add(item);
+			item.average();
+			item.save(makeFile(outdir, "item_avg", res, i, ".tif"));
 		}
 
-		res /= 2;
+		// Make the average of all point clouds, then produce a smoothed raster surface.
+		avg.projection = items[0].projection;
+		avg.average();
+		avg.save(makeFile(outdir, "avg", res, 0, ".tif"));
+		avg.splineSmooth(smooth1);
+		avg.smoothGrid();
+		avg.save(makeFile(outdir, "smooth", res, 0, ".tif"));
+
+		// Adjust each point cloud by adding the difference between the smoothed overall
+		// average, and the smoothed individual average.
+		std::string s;
+		std::vector<std::string> slas;
+		for(size_t i = 0; i < items.size(); ++i) {
+			Item& item = items[i];
+			item.splineSmooth(smooth2);
+			item.smoothGrid();
+			s = makeFile(outdir, "adj", res, i, ".las");
+			slas.push_back(s);
+			item.adjust(s, avg);
+		}
+
+		res0 /= 2;
 		las.swap(slas);
 	}
 }
