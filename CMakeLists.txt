@@ -58,6 +58,7 @@ find_package (Threads REQUIRED)
 find_package (Boost 1.58 COMPONENTS system filesystem date_time REQUIRED)
 find_package (GDAL 2 REQUIRED)
 find_package (CGAL REQUIRED)
+find_package (PDAL)
 
 find_library (LIBLAS_LIBRARY las)
 find_library (JSONCPP_LIBRARY jsoncpp)
@@ -163,7 +164,7 @@ if(${BUILD_APPS})
 	target_link_libraries (raster_test geoutil geoann georaster ${GEOS_LIBRARY} ${GDAL_LIBRARY})
 
 	add_executable (cloudmatch src/apps/cloudmatch.cpp)
-	target_link_libraries (cloudmatch ${GDAL_LIBRARY} ${LIBLAS_LIBRARY} fitpack_mod)
+	target_link_libraries (cloudmatch ${GDAL_LIBRARY} ${PDAL_LIBRARIES} fitpack_mod)
 
 	# add_executable (rbf src/tests/rbf.cpp)
 	# target_link_libraries (rbf)
