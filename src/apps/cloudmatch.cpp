@@ -133,6 +133,7 @@ public:
 	std::vector<double> grid;
 	std::vector<int> counts;
 	std::vector<double> std;
+	std::vector<double> diffs;
 	std::string projection;
 
 	//std::vector<double> m_wrk1;
@@ -202,7 +203,6 @@ public:
 		rows = (int) ((ymax - ymin) / res);
 		grid.resize(cols * rows);
 		counts.resize(cols * rows);
-		std.resize(cols * rows);
 	}
 
 	void load() {
@@ -247,8 +247,11 @@ public:
 		}
 
 		for(size_t i = 0; i < grid.size(); ++i) {
-			if(counts[i] == 0)
+			if(counts[i] == 0) {
 				grid[i] = NODATA;
+			} else {
+				grid[i] /= counts[i];
+			}
 		}
 	}
 
@@ -264,49 +267,13 @@ public:
 		std::fill(std.begin(), std.end(), v);
 	}
 
-	void add(Item& other) {
-		if(res != other.res)
-			throw std::runtime_error("Resolutions do not match.");
-		double x1 = std::max(xmin, other.xmin);
-		double x2 = std::min(xmax, other.xmax);
-		double y1 = std::max(ymin, other.ymin);
-		double y2 = std::min(ymax, other.ymax);
-
-		for(double y = y1; y < y2; y += res) {
-			for(double x = x1; x < x2; x += res) {
-				if(other.get(x, y) == NODATA)
-					continue;
-				if(get(x, y) == NODATA) {
-					set(x, y, other.get(x, y));
-					setCount(x, y, 1);
-				} else {
-					set(x, y, get(x, y) + other.get(x, y));
-					setCount(x, y, getCount(x, y) + 1);
-				}
-			}
-		}
-	}
-
-	void addPoints(Item& other) {
-		if(res != other.res)
-			throw std::runtime_error("Resolutions do not match.");
-
-		for(const std::string& file : other.files) {
-			LasFile las(file);
-			Point pt;
-			while(las.next(pt)) {
-				double x = pt.x;
-				double y = pt.y;
-				double z = pt.z;
-				set(x, y, get(x, y) + z);
-				setCount(x, y, getCount(x, y) + 1);
-			}
-		}
+	bool intersects(const Item& other) {
+		return !(other.xmax < xmin || other.xmin > xmax || other.ymax < ymin || other.ymin > ymax);
 	}
 
 	void diff(Item& other) {
-		std::vector<double> tmp(grid.size());
-		std::fill(tmp.begin(), tmp.end(), NODATA);
+		diffs.resize(cols * rows);
+		std::fill(diffs.begin(), diffs.end(), NODATA);
 		double z, oz;
 		for(double y = ymin; y < ymax; y += res) {
 			for(double x = xmin; x < xmax; x += res) {
@@ -314,34 +281,27 @@ public:
 					continue;
 				int c = toCol(x);
 				int r = toRow(y);
-				tmp[r * cols + c] = oz - z;
+				diffs[r * cols + c] = oz - z;
 			}
 		}
-		grid.swap(tmp);
 	}
 
 	void stats() {
-		for(size_t i = 0; i < grid.size(); ++i) {
-			if(counts[i] > 0) {
-				grid[i] /= counts[i];
-			} else {
-				grid[i] = NODATA;
-			}
-		}
+		std.resize(cols * rows);
+
+		fillStd(0);
+		validCount = 0;
 
 		for(const std::string& file : files) {
 			LasFile las(file);
 			Point pt;
-
-			fillStd(0);
-			validCount = 0;
 
 			while(las.next(pt)) {
 				if(pt.cls != 2)
 					continue;
 				double x = pt.x;
 				double y = pt.y;
-				double z = pt.y;
+				double z = pt.z;
 				setStd(x, y, getStd(x, y) + std::pow(z - get(x, y), 2.0));
 			}
 		}
@@ -350,7 +310,7 @@ public:
 			if(counts[i] == 0) {
 				std[i] = NODATA;
 			} else {
-				std[i] = std::sqrt(counts[i]);
+				std[i] = std::sqrt(std[i]);
 				++validCount;
 			}
 		}
@@ -390,11 +350,11 @@ public:
 			counts[row * cols + col] = v;
 	}
 
-	void setStd(double x, double y, int v) {
+	void setStd(double x, double y, double v) {
 		setStd(toCol(x), toRow(y), v);
 	}
 
-	void setStd(int col, int row, int v) {
+	void setStd(int col, int row, double v) {
 		if(col >= 0 && col < cols && row >= 0 && row < rows)
 			std[row * cols + col] = v;
 	}
@@ -423,11 +383,11 @@ public:
 		}
 	}
 
-	int getStd(double x, double y) {
+	double getStd(double x, double y) {
 		return getStd(toCol(x), toRow(y));
 	}
 
-	int getStd(int col, int row) {
+	double getStd(int col, int row) {
 		if(col >= 0 && col < cols && row >= 0 && row < rows) {
 			return std[row * cols + col];
 		} else {
@@ -435,10 +395,12 @@ public:
 		}
 	}
 
-	void splineSmooth(double smooth) {
+	void splineSmooth(double smooth, std::vector<double>& target) {
+
+		stats();
 
 		if(smooth == 0)
-			smooth = validCount + std::sqrt(2 * validCount);
+			smooth = validCount * 2;
 
 		int iopt = 0;
 		int kx = 3;
@@ -451,21 +413,21 @@ public:
 		m_w.resize(0);
 
 		int m = 0;
+		double gs, gv;
 		for(int r = 0; r < rows; ++r) {
 			for(int c = 0; c < cols; ++c) {
-				double zz = get(c, r);
-				if(zz != NODATA) {
+				if((gv = target[r * cols + c]) != NODATA && (gs = getStd(c, r)) > 0) {
 					m_x.push_back(toX(c));
 					m_y.push_back(toY(r));
-					m_z.push_back(zz);
-					m_w.push_back(1.0 / getStd(c, r));
+					m_z.push_back(gv);
+					m_w.push_back(1.0 / gs);
 					++m;
 				}
 			}
 		}
 
-		int nxest = (int) std::ceil(kx + 1.0 + std::sqrt(m / 2.0));
-		int nyest = (int) std::ceil(ky + 1.0 + std::sqrt(m / 2.0));
+		int nxest = (int) std::ceil(kx + 1.0 + std::sqrt(m / 2.0)) * 2;
+		int nyest = (int) std::ceil(ky + 1.0 + std::sqrt(m / 2.0)) * 2;
 		int nmax = std::max(std::max(m, nxest), nyest);
 
 		m_c.resize((nxest - kx - 1) * (nyest - ky - 1));
@@ -507,43 +469,47 @@ public:
 		//m_iwrk.resize(kwrk);
 		m_iwrk = (int*) mmap(0, m_liwrk * sizeof(int), PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
 
-		int ier;
-
+		int ier, iter = 0;
+		double x0 = toX(0) - res / 2, x1 = toX(cols - 1) + res / 2;
+		double y0 = toY(0) - res / 2, y1 = toY(rows - 1) + res / 2;
 		do {
 			surfit_(&iopt, &m, m_x.data(), m_y.data(), m_z.data(), m_w.data(),
-					&xmin, &xmax, &ymin, &ymax, &kx, &ky,
+					&x0, &x1, &y0, &y1, &kx, &ky,
 					&smooth, &nxest, &nyest, &nmax, &eps,
 					&m_nx, m_tx.data(), &m_ny, m_ty.data(), m_c.data(), &fp,
 					m_wrk1, (int*) &m_lwrk1, m_wrk2, (int*) &m_lwrk2, m_iwrk, (int*) &m_liwrk,	// Dangerous converstion to int.
 					&ier);
-			smooth *= 0.1;
-		} while(ier < 0);
+			std::cerr << "ier : " << ier << "\n";
+			if(ier == 1) {
+				smooth *= 10;
+			} else if(ier == 4) {
+				smooth *= 10;
+			} else if(ier < 0) {
+				smooth *= 0.1;
+			} else if(ier > 5) {
+				throw std::runtime_error("Smoothing failed");
+			} else if(ier == 0) {
+				break;
+				std::cerr << "ier : " << ier << "\n";
+			}
+			++iter;
+		} while(iter < 100);
 
-		if(ier > 0)
-			throw std::runtime_error("Smoothing failed");
 	}
 
-	void smooth() {
+	void smooth(std::vector<double>& target) {
 
 		int idim = 1;
 
-		m_x.resize(0); // A single row.
-		m_y.resize(0);
+		m_x.resize(cols); // A single row.
+		m_y.resize(rows);
 
-		double x0 = m_tx[3], x1 = m_tx[m_nx - 4];
-		while(x0 <= x1) {
-			m_x.push_back(x0);
-			x0 += res;
-		}
-		double y0 = m_ty[3], y1 = m_ty[m_ny - 4];
-		while(y0 <= y1) {
-			m_y.push_back(y0);
-			y0 += res;
-		}
+		for(int c = 0; c < cols; ++c)
+			m_x[c] = toX(c);
+		for(int r = 0; r < rows; ++r)
+			m_y[r] = toY(r);
 
-		int nx = m_x.size();
-		int ny = m_y.size();
-		int mf = nx * ny * idim;
+		int mf = cols * rows * idim;
 		m_z.resize(mf);
 
 		if(m_wrk1)
@@ -561,13 +527,13 @@ public:
 		int ier;
 
 		surev_(&idim, m_tx.data(), &m_nx, m_ty.data(), &m_ny,
-				m_c.data(), m_x.data(), &nx, m_y.data(), &ny, m_z.data(), &mf,
+				m_c.data(), m_x.data(), &cols, m_y.data(), &rows, m_z.data(), &mf,
 				m_wrk1, (int*) &m_lwrk1, m_iwrk, (int*) &m_liwrk, &ier);
 
 		fill(NODATA);
-		for(int r = 0; r < ny; ++r) {
-			for(int c = 0; c < nx; ++c)
-				set(m_x[c], m_y[r], m_z[r * nx + c]);
+		for(int r = 0; r < rows; ++r) {
+			for(int c = 0; c < cols; ++c)
+				target[r * cols + c] = m_z[c * rows + r]; // Note: z is transposed from usual.
 		}
 	}
 
@@ -575,33 +541,48 @@ public:
 		GDALAllRegister();
 		GDALDriverManager* dm = GetGDALDriverManager();
 		GDALDriver* drv = dm->GetDriverByName("GTiff");
-		GDALDataset* ds = drv->Create(outfile.c_str(), cols, rows, 3, GDT_Float32, 0);
+		int bands = 0;
+		if(!grid.empty()) bands++;
+		if(!std.empty()) bands++;
+		if(!counts.empty()) bands++;
+		if(!diffs.empty()) bands++;
+		GDALDataset* ds = drv->Create(outfile.c_str(), cols, rows, bands, GDT_Float32, 0);
 		const char* proj = projection.c_str();
 		ds->SetProjection(proj);
-		GDALRasterBand* b1 = ds->GetRasterBand(1);
+		int b = 1;
+		GDALRasterBand* b1 = ds->GetRasterBand(b++);
 		b1->SetNoDataValue(NODATA);
 		if(CE_None != b1->RasterIO(GF_Write, 0, 0, cols, rows, counts.data(), cols, rows, GDT_Int32, 0, 0, 0))
 			throw std::runtime_error("Failed to write band 1.");
-		GDALRasterBand* b2 = ds->GetRasterBand(2);
-		b2->SetNoDataValue(NODATA);
-		if(CE_None != b2->RasterIO(GF_Write, 0, 0, cols, rows, std.data(), cols, rows, GDT_Float64, 0, 0, 0))
-			throw std::runtime_error("Failed to write band 2.");
-		GDALRasterBand* b3 = ds->GetRasterBand(3);
+		if(!std.empty()) {
+			GDALRasterBand* b2 = ds->GetRasterBand(b++);
+			b2->SetNoDataValue(NODATA);
+			if(CE_None != b2->RasterIO(GF_Write, 0, 0, cols, rows, std.data(), cols, rows, GDT_Float64, 0, 0, 0))
+				throw std::runtime_error("Failed to write band 2.");
+		}
+		if(!diffs.empty()) {
+			GDALRasterBand* b2 = ds->GetRasterBand(b++);
+			b2->SetNoDataValue(NODATA);
+			if(CE_None != b2->RasterIO(GF_Write, 0, 0, cols, rows, diffs.data(), cols, rows, GDT_Float64, 0, 0, 0))
+				throw std::runtime_error("Failed to write band 2.");
+		}
+		GDALRasterBand* b3 = ds->GetRasterBand(b++);
 		b3->SetNoDataValue(NODATA);
 		if(CE_None != b3->RasterIO(GF_Write, 0, 0, cols, rows, grid.data(), cols, rows, GDT_Float64, 0, 0, 0))
 			throw std::runtime_error("Failed to write band 2.");
+		GDALClose(ds);
 	}
 
-	void adjust(const std::string& outfile) {
-		adjust(std::vector<std::string>({outfile}));
+	void adjust(Item& ref, const std::string& outfile) {
+		adjust(ref, std::vector<std::string>({outfile}));
 	}
 
-	void adjust(const std::vector<std::string>& outfiles) {
+	void adjust(Item& ref, const std::vector<std::string>& outfiles) {
 		for(size_t i = 0; i < files.size(); ++i) {
 			LasFile las(files[i]);
 			Point pt;
 			while(las.next(pt)) {
-				pt.z += get(pt.x, pt.y);
+				pt.z += (get(pt.x, pt.y) - ref.get(pt.x, pt.y));
 				las.update(pt);
 			}
 			las.write(outfiles[i]);
@@ -647,23 +628,14 @@ int main(int argc, char** argv) {
 
 	double res = 50;
 	std::string outdir;
-	std::vector<std::string> reflas;
-	std::vector<std::string> adjlas;
+	std::vector<std::string> las;
 
 	for(int i = 1; i < argc - 3; ++i) {
 		std::string arg = argv[i];
 		if(arg == "-f") {
 			std::vector<std::string> files = getFiles(std::string(argv[++i]));
-			int j = 0;
-			for(const std::string& file : files) {
-				if(++j % 25 == 0)
-					reflas.emplace_back(file);
-			}
-			continue;
-		} else if(arg == "-a") {
-			std::vector<std::string> files = getFiles(std::string(argv[++i]));
 			for(const std::string& file : files)
-				adjlas.emplace_back(file);
+				las.emplace_back(file);
 			continue;
 		} else if(arg == "-r") {
 			res = atof(argv[++i]);
@@ -673,24 +645,22 @@ int main(int argc, char** argv) {
 		}
 	}
 
-	Item reference(reflas);
-	reference.res = res;
-	reference.load();
-	reference.stats();
-	reference.splineSmooth(0);
-	reference.smooth();
-	reference.save(makeFile(outdir, "ref_smooth", res, 0, ".tif"));
+	Item ref(las);
+	ref.res = res;
+	ref.load();
+	ref.splineSmooth(0, ref.grid);
+	ref.smooth(ref.grid);
+	ref.save(makeFile(outdir, "ref_smooth", res, 0, ".tif"));
 
-	return 0;
-	std::vector<Item> adjust;
-
-	for(const std::string& l : adjlas) {
-		adjust.emplace_back(l);
-		Item& item = adjust.back();
+	int i = 0;
+	for(const std::string& f : las) {
+		Item item(f);
 		item.res = res;
 		item.load();
-		item.splineSmooth(0);
-		item.adjust(makeFile(outdir, "adj", res, 0, ".las"));
+		item.splineSmooth(0, item.grid);
+		item.smooth(item.grid);
+		item.save(makeFile(outdir, "item_smooth", res, ++i, ".tif"));
+		item.adjust(ref, makeFile(outdir, "las", res, ++i, ".las"));
 	}
 
 }
