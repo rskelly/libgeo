@@ -10,15 +10,26 @@
  * 4) Half resolution, goto 1. Continue until limit.
  */
 
-#include <liblas/liblas.hpp>
 #include <vector>
 #include <fstream>
 #include <sstream>
+#include <dirent.h>
+#include <sys/mman.h>
+
+#include <pdal/PointTable.hpp>
+#include <pdal/PointView.hpp>
+#include <pdal/io/LasReader.hpp>
+#include <pdal/io/LasWriter.hpp>
+#include <pdal/io/LasHeader.hpp>
+#include <pdal/Options.hpp>
+
+//#include <liblas/liblas.hpp>
 
 #include <gdal_priv.h>
 #include <ogr_spatialref.h>
 
-constexpr double NO_DATA = -9999.0;
+constexpr int THIN = 1000;
+constexpr double NODATA = -9999.0;
 constexpr double MIN = std::numeric_limits<double>::lowest();
 constexpr double MAX = std::numeric_limits<double>::max();
 
@@ -36,20 +47,105 @@ extern "C" {
 			double* wrk, int* lwrk, int* iwrk, int* kwrk, int* ier);
 }
 
+class Point {
+public:
+	double x, y, z;
+	int cls;
+};
+
+class LasFile {
+public:
+	pdal::PointTable m_table;
+	pdal::LasReader m_reader;
+	pdal::PointViewSet m_viewSet;
+	pdal::PointViewPtr m_view;
+	pdal::Dimension::IdList m_dims;
+	pdal::LasHeader m_header;
+	pdal::PointId m_ridx;
+	pdal::PointId m_widx;
+
+	LasFile(const std::string& infile) {
+		pdal::Option opt("filename", infile);
+		pdal::Options opts;
+		opts.add(opt);
+		m_reader.setOptions(opts);
+		m_reader.prepare(m_table);
+		m_viewSet = m_reader.execute(m_table);
+		m_view = *m_viewSet.begin();
+		m_dims = m_view->dims();
+		m_header = m_reader.header();
+		m_ridx = 0;
+		m_widx = 0;
+	}
+
+	void write(const std::string& outfile) {
+		pdal::Option opt("filename", outfile);
+		pdal::Options opts;
+		opts.add(opt);
+		pdal::LasWriter writer;
+		writer.setOptions(opts);
+		writer.setSpatialReference(m_reader.getSpatialReference());
+		writer.prepare(m_table);
+		writer.execute(m_table);
+	}
+
+	void reset() {
+		m_ridx = 0;
+		m_widx = 0;
+	}
+
+	bool next(Point& pt) {
+		if(m_ridx >= m_view->size())
+			return false;
+		using namespace pdal::Dimension;
+		pt.x = m_view->getFieldAs<double>(Id::X, m_ridx);
+		pt.y = m_view->getFieldAs<double>(Id::Y, m_ridx);
+		pt.z = m_view->getFieldAs<double>(Id::Z, m_ridx);
+		pt.cls = m_view->getFieldAs<int>(Id::Classification, m_ridx);
+		++m_ridx;
+		return true;
+	}
+
+	bool update(Point& pt) {
+		if(m_widx >= m_view->size())
+			return false;
+		using namespace pdal::Dimension;
+		m_view->setField(Id::X, m_widx, pt.x);
+		m_view->setField(Id::Y, m_widx, pt.y);
+		m_view->setField(Id::Z, m_widx, pt.z);
+		m_view->setField(Id::Classification, m_widx, pt.cls);
+		++m_widx;
+		return true;
+	}
+
+	std::string projection() {
+		return m_table.spatialReference().getWKT();
+	}
+};
 
 class Item {
 public:
-	std::string file;
+	std::vector<std::string> files;
 	double xmin, xmax, ymin, ymax;
 	double res;
 	int cols, rows;
+	int validCount;
 	std::vector<double> grid;
 	std::vector<int> counts;
+	std::vector<double> std;
+	std::vector<double> diffs;
 	std::string projection;
 
-	std::vector<double> m_wrk1;
-	std::vector<double> m_wrk2;
-	std::vector<int> m_iwrk;
+	//std::vector<double> m_wrk1;
+	//std::vector<double> m_wrk2;
+	//std::vector<int> m_iwrk;
+
+	double* m_wrk1;
+	size_t m_lwrk1;
+	double* m_wrk2;
+	size_t m_lwrk2;
+	int* m_iwrk;
+	size_t m_liwrk;
 
 	std::vector<double> m_x;
 	std::vector<double> m_y;
@@ -63,21 +159,25 @@ public:
 	int m_nx;
 	int m_ny;
 
-	Item(const std::string& file, double xmin, double ymin, double xmax, double ymax, double res) :
-		file(file),
+	Item(const std::vector<std::string>& files, double xmin, double ymin, double xmax, double ymax, double res) :
+		files(files),
 		xmin(xmin), xmax(xmax), ymin(ymin), ymax(ymax),
 		res(res),
 		cols(0), rows(0),
+		validCount(0),
+		m_wrk1(nullptr), m_lwrk1(0),
+		m_wrk2(nullptr), m_lwrk2(0),
+		m_iwrk(nullptr), m_liwrk(0),
 		m_nx(0), m_ny(0) {
 	}
 
-	Item(const std::string& file) : Item(file, MAX, MAX, MIN, MIN, 0) {}
+	Item(const std::vector<std::string>& files) : Item(files, MAX, MAX, MIN, MIN, 0) {}
 
-	Item(const std::string& file, double res) : Item(file, MAX, MAX, MIN, MIN, res) {}
+	Item(const std::string& file) : Item(std::vector<std::string>({file}), MAX, MAX, MIN, MIN, 0) {}
 
-	Item() : Item("") {}
+	Item() : Item(std::vector<std::string>({})) {}
 
-	Item(const Item& item) : Item(item.file, item.xmin, item.ymin, item.xmax, item.ymax, item.res) {
+	Item(const Item& item) : Item(item.files, item.xmin, item.ymin, item.xmax, item.ymax, item.res) {
 		grid.assign(item.grid.begin(), item.grid.end());
 		counts.assign(item.counts.begin(), item.counts.end());
 	}
@@ -106,22 +206,25 @@ public:
 	}
 
 	void load() {
-		std::ifstream in(file);
-		liblas::ReaderFactory rf;
-		liblas::Reader rdr = rf.CreateWithStream(in);
-		const liblas::Header& hdr = rdr.GetHeader();
-
-		projection = hdr.GetSRS().GetWKT(liblas::SpatialReference::WKTModeFlag::eCompoundOK);
 
 		reset();
-		while(rdr.ReadNextPoint()) {
-			const liblas::Point& pt = rdr.GetPoint();
-			double x = pt.GetX();
-			double y = pt.GetY();
-			if(x < xmin) xmin = x;
-			if(y < ymin) ymin = y;
-			if(x > xmax) xmax = x;
-			if(y > ymax) ymax = y;
+
+		{
+			LasFile las(files[0]);
+			projection = las.projection();
+		}
+
+		int i = 0;
+		for(const std::string& file : files) {
+			std::cout << "Loading " << ++i << " of " << files.size() << "\n";
+			LasFile las(file);
+			Point pt;
+			while(las.next(pt)) {
+				if(pt.x < xmin) xmin = pt.x;
+				if(pt.y < ymin) ymin = pt.y;
+				if(pt.x > xmax) xmax = pt.x;
+				if(pt.y > ymax) ymax = pt.y;
+			}
 		}
 
 		calcBounds();
@@ -129,23 +232,27 @@ public:
 		fill(0);
 		fillCounts(0);
 
-		rdr.Reset();
-		while(rdr.ReadNextPoint()) {
-			const liblas::Point& pt = rdr.GetPoint();
-			if(pt.GetClassification().GetClass() != 2)
-				continue;
-			double x = pt.GetX();
-			double y = pt.GetY();
-			double z = pt.GetZ();
-			set(x, y, get(x, y) + z);
-			setCount(x, y, getCount(x, y) + 1);
+		for(const std::string& file : files) {
+			LasFile las(file);
+			Point pt;
+			while(las.next(pt)) {
+				if(pt.cls != 2)
+					continue;
+				double x = pt.x;
+				double y = pt.y;
+				double z = pt.z;
+				set(x, y, get(x, y) + z);
+				setCount(x, y, getCount(x, y) + 1);
+			}
 		}
 
 		for(size_t i = 0; i < grid.size(); ++i) {
-			if(counts[i] == 0)
-				grid[i] = NO_DATA;
+			if(counts[i] == 0) {
+				grid[i] = NODATA;
+			} else {
+				grid[i] /= counts[i];
+			}
 		}
-
 	}
 
 	void fill(double v) {
@@ -156,51 +263,55 @@ public:
 		std::fill(counts.begin(), counts.end(), v);
 	}
 
-	void add(Item& other) {
-		if(res != other.res)
-			throw std::runtime_error("Resolutions do not match.");
-		double x1 = std::max(xmin, other.xmin);
-		double x2 = std::min(xmax, other.xmax);
-		double y1 = std::max(ymin, other.ymin);
-		double y2 = std::min(ymax, other.ymax);
+	void fillStd(double v) {
+		std::fill(std.begin(), std.end(), v);
+	}
 
-		for(double y = y1; y < y2; y += res) {
-			for(double x = x1; x < x2; x += res) {
-				if(other.get(x, y) == NO_DATA)
-					continue;
-				if(get(x, y) == NO_DATA) {
-					set(x, y, other.get(x, y));
-					setCount(x, y, other.getCount(x, y));
-				} else {
-					set(x, y, get(x, y) + other.get(x, y));
-					setCount(x, y, getCount(x, y) + other.getCount(x, y));
-				}
-			}
-		}
+	bool intersects(const Item& other) {
+		return !(other.xmax < xmin || other.xmin > xmax || other.ymax < ymin || other.ymin > ymax);
 	}
 
 	void diff(Item& other) {
-		std::vector<double> tmp(grid.size());
-		std::fill(tmp.begin(), tmp.end(), NO_DATA);
+		diffs.resize(cols * rows);
+		std::fill(diffs.begin(), diffs.end(), NODATA);
 		double z, oz;
 		for(double y = ymin; y < ymax; y += res) {
 			for(double x = xmin; x < xmax; x += res) {
-				if((oz = other.get(x, y)) == NO_DATA || (z = get(x, y)) == NO_DATA)
+				if((oz = other.get(x, y)) == NODATA || (z = get(x, y)) == NODATA)
 					continue;
 				int c = toCol(x);
 				int r = toRow(y);
-				tmp[r * cols + c] = oz - z;
+				diffs[r * cols + c] = oz - z;
 			}
 		}
-		grid.swap(tmp);
 	}
 
-	void average() {
+	void stats() {
+		std.resize(cols * rows);
+
+		fillStd(0);
+		validCount = 0;
+
+		for(const std::string& file : files) {
+			LasFile las(file);
+			Point pt;
+
+			while(las.next(pt)) {
+				if(pt.cls != 2)
+					continue;
+				double x = pt.x;
+				double y = pt.y;
+				double z = pt.z;
+				setStd(x, y, getStd(x, y) + std::pow(z - get(x, y), 2.0));
+			}
+		}
+
 		for(size_t i = 0; i < grid.size(); ++i) {
-			if(counts[i] > 0) {
-				grid[i] /= counts[i];
+			if(counts[i] == 0) {
+				std[i] = NODATA;
 			} else {
-				grid[i] = NO_DATA;
+				std[i] = std::sqrt(std[i]);
+				++validCount;
 			}
 		}
 	}
@@ -239,6 +350,15 @@ public:
 			counts[row * cols + col] = v;
 	}
 
+	void setStd(double x, double y, double v) {
+		setStd(toCol(x), toRow(y), v);
+	}
+
+	void setStd(int col, int row, double v) {
+		if(col >= 0 && col < cols && row >= 0 && row < rows)
+			std[row * cols + col] = v;
+	}
+
 	double get(double x, double y) {
 		return get(toCol(x), toRow(y));
 	}
@@ -247,7 +367,7 @@ public:
 		if(col >= 0 && col < cols && row >= 0 && row < rows) {
 			return grid[row * cols + col];
 		} else {
-			return NO_DATA;
+			return NODATA;
 		}
 	}
 
@@ -263,7 +383,29 @@ public:
 		}
 	}
 
-	void splineSmooth(double& smooth) {
+	double getStd(double x, double y) {
+		return getStd(toCol(x), toRow(y));
+	}
+
+	double getStd(int col, int row) {
+		if(col >= 0 && col < cols && row >= 0 && row < rows) {
+			return std[row * cols + col];
+		} else {
+			return 0;
+		}
+	}
+
+	void splineSmooth(double smooth, std::vector<double>& target) {
+
+		stats();
+
+		if(smooth == 0)
+			smooth = validCount * 2;
+
+		int iopt = 0;
+		int kx = 3;
+		int ky = 3;
+		double eps = std::numeric_limits<double>::min();
 
 		m_x.resize(0);
 		m_y.resize(0);
@@ -271,26 +413,22 @@ public:
 		m_w.resize(0);
 
 		int m = 0;
-		for(double yy = ymin; yy <= ymax; yy += res) {										// Include the corners to be sure the spline covers all points.
-			for(double xx = xmin; xx <= xmax; xx += res) {
-				double zz = get(xx == xmax ? xx - res : xx, yy == ymax ? yy - res : yy);	// The right/top corner takes the value of the cell with the previous index.
-				if(zz != NO_DATA) {
-					m_x.push_back(xx);
-					m_y.push_back(yy);
-					m_z.push_back(zz);
-					m_w.push_back(1);
+		double gs, gv;
+		for(int r = 0; r < rows; ++r) {
+			for(int c = 0; c < cols; ++c) {
+				if((gv = target[r * cols + c]) != NODATA && (gs = getStd(c, r)) > 0) {
+					m_x.push_back(toX(c));
+					m_y.push_back(toY(r));
+					m_z.push_back(gv);
+					m_w.push_back(1.0 / gs);
 					++m;
 				}
 			}
 		}
 
-		int iopt = 0;
-		int kx = 3;
-		int ky = 3;
-		int nmax = m;
-		int nxest = (int) std::ceil(kx + 1.0 + std::sqrt(m / 2.0));
-		int nyest = (int) std::ceil(ky + 1.0 + std::sqrt(m / 2.0));
-		double eps = std::pow(10.0, -6.0); //std::numeric_limits<double>::min();
+		int nxest = (int) std::ceil(kx + 1.0 + std::sqrt(m / 2.0)) * 2;
+		int nyest = (int) std::ceil(ky + 1.0 + std::sqrt(m / 2.0)) * 2;
+		int nmax = std::max(std::max(m, nxest), nyest);
 
 		m_c.resize((nxest - kx - 1) * (nyest - ky - 1));
 		m_tx.resize(m);
@@ -313,152 +451,150 @@ public:
 			b2 = b1 + u - kx;
 		}
 
-		int lwrk1 = u * v * (2 + b1 + b2) + 2 * (u + v + km * (m + ne) + ne - kx - ky) + b2 + 1;
-		m_wrk1.resize(lwrk1);
-		int lwrk2 = u * v * (b2 + 1) + b2;
-		m_wrk2.resize(lwrk2);
-		int kwrk = m + (nxest - 2 * kx - 1) * (nyest - 2 * ky - 1);
-		m_iwrk.resize(kwrk);
+		if(m_wrk1)
+			munmap(m_wrk1, m_lwrk1);
+		m_lwrk1 = u * v * (2 + b1 + b2) + 2 * (u + v + km * (m + ne) + ne - kx - ky) + b2 + 1;
+		//m_wrk1.resize(lwrk1);
+		m_wrk1 = (double*) mmap(0, m_lwrk1 * sizeof(double), PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
 
-		int ier;
-		int tries = 4;
+		if(m_wrk2)
+			munmap(m_wrk2, m_lwrk2);
+		m_lwrk2 = u * v * (b2 + 1) + b2;
+		//m_wrk2.resize(lwrk2);
+		m_wrk2 = (double*) mmap(0, m_lwrk2 * sizeof(double), PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
 
-		while(--tries >= 0) {
+		if(m_iwrk)
+			munmap(m_iwrk, m_liwrk);
+		m_liwrk = m + (nxest - 2 * kx - 1) * (nyest - 2 * ky - 1);
+		//m_iwrk.resize(kwrk);
+		m_iwrk = (int*) mmap(0, m_liwrk * sizeof(int), PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
+
+		int ier, iter = 0;
+		double x0 = toX(0) - res / 2, x1 = toX(cols - 1) + res / 2;
+		double y0 = toY(0) - res / 2, y1 = toY(rows - 1) + res / 2;
+		do {
 			surfit_(&iopt, &m, m_x.data(), m_y.data(), m_z.data(), m_w.data(),
-					&xmin, &xmax, &ymin, &ymax, &kx, &ky,
+					&x0, &x1, &y0, &y1, &kx, &ky,
 					&smooth, &nxest, &nyest, &nmax, &eps,
 					&m_nx, m_tx.data(), &m_ny, m_ty.data(), m_c.data(), &fp,
-					m_wrk1.data(), &lwrk1, m_wrk2.data(), &lwrk2, m_iwrk.data(), &kwrk,
+					m_wrk1, (int*) &m_lwrk1, m_wrk2, (int*) &m_lwrk2, m_iwrk, (int*) &m_liwrk,	// Dangerous converstion to int.
 					&ier);
-			if(ier == 0)
+			std::cerr << "ier : " << ier << "\n";
+			if(ier == 1) {
+				smooth *= 10;
+			} else if(ier == 4) {
+				smooth *= 10;
+			} else if(ier < 0) {
+				smooth *= 0.1;
+			} else if(ier > 5) {
+				throw std::runtime_error("Smoothing failed");
+			} else if(ier == 0) {
 				break;
-			smooth *= 2;
-		}
+				std::cerr << "ier : " << ier << "\n";
+			}
+			++iter;
+		} while(iter < 100);
 
-		if(ier > 0)
-			throw std::runtime_error("Smoothing failed");
 	}
 
-	void smoothGrid() {
+	void smooth(std::vector<double>& target) {
 
 		int idim = 1;
-		int mf = cols * rows * idim;
 
-		m_x.resize(mf); // A single col/row.
-		m_y.resize(mf);
+		m_x.resize(cols); // A single row.
+		m_y.resize(rows);
+
+		for(int c = 0; c < cols; ++c)
+			m_x[c] = toX(c);
+		for(int r = 0; r < rows; ++r)
+			m_y[r] = toY(r);
+
+		int mf = cols * rows * idim;
 		m_z.resize(mf);
 
-		// Populate the cell-centre coordinates.
-		for(int r = 0; r < rows; ++r) {
-			for(int c = 0; c < cols; ++c) {
-				m_x[r * cols + c] = xmin + c * res + res * 0.5;
-				m_y[r * cols + c] = ymin + r * res + res * 0.5;
-			}
-		}
+		if(m_wrk1)
+			munmap(m_wrk1, m_lwrk1);
+		m_lwrk1 = cols * rows * 4;
+		//m_wrk1.resize(lwrk1);
+		m_wrk1 = (double*) mmap(0, m_lwrk1 * sizeof(double), PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
 
-		int lwrk1 = cols * rows * 4;
-		m_wrk1.resize(lwrk1);
-		int kwrk = cols * rows;
-		m_iwrk.resize(kwrk);
+		if(m_iwrk)
+			munmap(m_iwrk, m_liwrk);
+		m_liwrk = cols * rows;
+		//m_iwrk.resize(kwrk);
+		m_iwrk = (int*) mmap(0, m_liwrk * sizeof(int), PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
 
 		int ier;
 
 		surev_(&idim, m_tx.data(), &m_nx, m_ty.data(), &m_ny,
 				m_c.data(), m_x.data(), &cols, m_y.data(), &rows, m_z.data(), &mf,
-				m_wrk1.data(), &lwrk1, m_iwrk.data(), &kwrk, &ier);
+				m_wrk1, (int*) &m_lwrk1, m_iwrk, (int*) &m_liwrk, &ier);
 
-		// Apply smoothed values to raster.
-		fill(NO_DATA);
-		for(int i = 0; i < mf; ++i)
-			set(m_x[i], m_y[i], m_z[i]);
-	}
-
-	double smoothAt(double x, double y) {
-
-		int idim = 1;
-		int mx = 1;
-		int my = 1;
-		int mf = mx * my * idim;
-
-		m_x.resize(mx); // A single col/row.
-		m_y.resize(my);
-		m_z.resize(mf);
-
-		m_x[0] = x;
-		m_y[0] = y;
-
-		int lwrk1 = 4 * (mx + my);
-		m_wrk1.resize(lwrk1);
-		int kwrk = mx + my;
-		m_iwrk.resize(kwrk);
-
-		int ier;
-
-		surev_(&idim, m_tx.data(), &m_nx, m_ty.data(), &m_ny,
-				m_c.data(), m_x.data(), &mx, m_y.data(), &my, m_z.data(), &mf,
-				m_wrk1.data(), &lwrk1, m_iwrk.data(), &kwrk, &ier);
-
-		if(ier == 10) // TODO: What about other non-zero returns?
-			throw std::runtime_error("Failed to find smoothed value.");
-
-		return m_z[0];
+		fill(NODATA);
+		for(int r = 0; r < rows; ++r) {
+			for(int c = 0; c < cols; ++c)
+				target[r * cols + c] = m_z[c * rows + r]; // Note: z is transposed from usual.
+		}
 	}
 
 	void save(const std::string& outfile) {
 		GDALDriverManager* dm = GetGDALDriverManager();
 		GDALDriver* drv = dm->GetDriverByName("GTiff");
-		GDALDataset* ds = drv->Create(outfile.c_str(), cols, rows, 2, GDT_Float32, 0);
-		double trans[] = {xmin, res, 0, ymax, 0, -res};
-		ds->SetGeoTransform(trans);
+		int bands = 0;
+		if(!grid.empty()) bands++;
+		if(!std.empty()) bands++;
+		if(!counts.empty()) bands++;
+		if(!diffs.empty()) bands++;
+		GDALDataset* ds = drv->Create(outfile.c_str(), cols, rows, bands, GDT_Float32, 0);
 		const char* proj = projection.c_str();
 		ds->SetProjection(proj);
-		GDALRasterBand* b1 = ds->GetRasterBand(1);
-		b1->SetNoDataValue(NO_DATA);
+		int b = 1;
+		GDALRasterBand* b1 = ds->GetRasterBand(b++);
+		b1->SetNoDataValue(NODATA);
 		if(CE_None != b1->RasterIO(GF_Write, 0, 0, cols, rows, counts.data(), cols, rows, GDT_Int32, 0, 0, 0))
 			throw std::runtime_error("Failed to write band 1.");
-		GDALRasterBand* b2 = ds->GetRasterBand(2);
-		b2->SetNoDataValue(NO_DATA);
-		if(CE_None != b2->RasterIO(GF_Write, 0, 0, cols, rows, grid.data(), cols, rows, GDT_Float64, 0, 0, 0))
+		if(!std.empty()) {
+			GDALRasterBand* b2 = ds->GetRasterBand(b++);
+			b2->SetNoDataValue(NODATA);
+			if(CE_None != b2->RasterIO(GF_Write, 0, 0, cols, rows, std.data(), cols, rows, GDT_Float64, 0, 0, 0))
+				throw std::runtime_error("Failed to write band 2.");
+		}
+		if(!diffs.empty()) {
+			GDALRasterBand* b2 = ds->GetRasterBand(b++);
+			b2->SetNoDataValue(NODATA);
+			if(CE_None != b2->RasterIO(GF_Write, 0, 0, cols, rows, diffs.data(), cols, rows, GDT_Float64, 0, 0, 0))
+				throw std::runtime_error("Failed to write band 2.");
+		}
+		GDALRasterBand* b3 = ds->GetRasterBand(b++);
+		b3->SetNoDataValue(NODATA);
+		if(CE_None != b3->RasterIO(GF_Write, 0, 0, cols, rows, grid.data(), cols, rows, GDT_Float64, 0, 0, 0))
 			throw std::runtime_error("Failed to write band 2.");
 		GDALClose(ds);
 	}
 
-	void adjust(const std::string& outfile, Item& reference) {
+	void adjust(Item& ref, const std::string& outfile) {
+		adjust(ref, std::vector<std::string>({outfile}));
+	}
 
-		std::ofstream out(outfile, std::ios::binary|std::ios::out);
-		std::ifstream in(file, std::ios::binary|std::ios::in);
-
-		liblas::ReaderFactory rf;
-		liblas::Reader rdr = rf.CreateWithStream(in);
-		const liblas::Header& hdr = rdr.GetHeader();
-
-		liblas::Header whd(hdr);
-		liblas::WriterFactory wf;
-		liblas::Writer wtr = liblas::Writer(out, hdr);
-
-		double minx = MAX, miny = MAX, minz = MAX, maxx = MIN, maxy = MIN, maxz = MIN;
-		while(rdr.ReadNextPoint()) {
-			const liblas::Point& pt = rdr.GetPoint();
-			double x = pt.GetX();
-			double y = pt.GetY();
-			double z = pt.GetZ() + (reference.smoothAt(x, y) - smoothAt(x, y));
-			liblas::Point npt(pt);
-			npt.SetCoordinates(x, y, z);
-			wtr.WritePoint(npt);
-			if(x < minx) minx = x;
-			if(y < miny) miny = y;
-			if(z < minz) minz = z;
-			if(x > maxx) maxx = x;
-			if(y > maxy) maxy = y;
-			if(z > maxz) maxz = z;
+	void adjust(Item& ref, const std::vector<std::string>& outfiles) {
+		for(size_t i = 0; i < files.size(); ++i) {
+			LasFile las(files[i]);
+			Point pt;
+			while(las.next(pt)) {
+				pt.z += (get(pt.x, pt.y) - ref.get(pt.x, pt.y));
+				las.update(pt);
+			}
+			las.write(outfiles[i]);
 		}
+	}
 
-		whd.SetMin(minx, miny, minz);
-		whd.SetMax(maxx, maxy, maxz);
-		wtr.SetHeader(whd);
-		wtr.WriteHeader();
-		out.close();
-		in.close();
+	~Item() {
+		if(m_wrk1)
+			munmap(m_wrk1, m_lwrk1);
+		if(m_wrk2)
+			munmap(m_wrk2, m_lwrk2);
+		if(m_iwrk)
+			munmap(m_iwrk, m_liwrk);
 	}
 };
 
@@ -468,69 +604,62 @@ std::string makeFile(const std::string& outdir, const std::string& tpl, double r
 	return ss.str();
 }
 
+std::vector<std::string> getFiles(const std::string& dirname) {
+	std::vector<std::string> files;
+	DIR *dir;
+	struct dirent *ent;
+	if ((dir = opendir (dirname.c_str())) != NULL) {
+	  /* print all the files and directories within directory */
+	  while ((ent = readdir (dir)) != NULL) {
+		  std::string file = dirname + "/" + ent->d_name;
+		  if(file.substr(file.size() - 4, std::string::npos) == ".las")
+			  files.push_back(file);
+	  }
+	  closedir (dir);
+	} else {
+	  /* could not open directory */
+	  perror ("");
+	}
+	return files;
+}
+
 int main(int argc, char** argv) {
 
-	double smooth1 =1000;
-	double smooth2 = 200;
-
-	GDALAllRegister();
-
-	double res = atof(argv[argc - 3]);
-	int steps = atoi(argv[argc - 2]);
-	std::string outdir = argv[argc - 1];
-	std::vector<Item> items;
-
-	double res0 = res * std::pow(2, steps);
-
+	double res = 50;
+	std::string outdir;
 	std::vector<std::string> las;
-	for(int i = 1; i < argc - 3; ++i)
-		las.push_back(argv[i]);
 
-	while(res0 >= res) {
-
-		for(const std::string& l : las)
-			items.emplace_back(l, res);
-
-		Item avg("", res);
-
-		// Load each point cloud, add it to the overall average.
-		// Then average the item and save it.
-		for(size_t i = 0; i < items.size(); ++i) {
-			Item& item = items[i];
-			item.load();
-			avg.extend(item);
+	for(int i = 1; i < argc - 3; ++i) {
+		std::string arg = argv[i];
+		if(arg == "-f") {
+			std::vector<std::string> files = getFiles(std::string(argv[++i]));
+			for(const std::string& file : files)
+				las.emplace_back(file);
+			continue;
+		} else if(arg == "-r") {
+			res = atof(argv[++i]);
+			continue;
+		} else if(arg == "-o") {
+			outdir = argv[++i];
 		}
-		avg.calcBounds();
-		avg.fill(NO_DATA);
-		for(size_t i = 0; i < items.size(); ++i) {
-			Item& item = items[i];
-			avg.add(item);
-			item.average();
-			item.save(makeFile(outdir, "item_avg", res, i, ".tif"));
-		}
-
-		// Make the average of all point clouds, then produce a smoothed raster surface.
-		avg.projection = items[0].projection;
-		avg.average();
-		avg.save(makeFile(outdir, "avg", res, 0, ".tif"));
-		avg.splineSmooth(smooth1);
-		avg.smoothGrid();
-		avg.save(makeFile(outdir, "smooth", res, 0, ".tif"));
-
-		// Adjust each point cloud by adding the difference between the smoothed overall
-		// average, and the smoothed individual average.
-		std::string s;
-		std::vector<std::string> slas;
-		for(size_t i = 0; i < items.size(); ++i) {
-			Item& item = items[i];
-			item.splineSmooth(smooth2);
-			item.smoothGrid();
-			s = makeFile(outdir, "adj", res, i, ".las");
-			slas.push_back(s);
-			item.adjust(s, avg);
-		}
-
-		res0 /= 2;
-		las.swap(slas);
 	}
+
+	Item ref(las);
+	ref.res = res;
+	ref.load();
+	ref.splineSmooth(0, ref.grid);
+	ref.smooth(ref.grid);
+	ref.save(makeFile(outdir, "ref_smooth", res, 0, ".tif"));
+
+	int i = 0;
+	for(const std::string& f : las) {
+		Item item(f);
+		item.res = res;
+		item.load();
+		item.splineSmooth(0, item.grid);
+		item.smooth(item.grid);
+		item.save(makeFile(outdir, "item_smooth", res, ++i, ".tif"));
+		item.adjust(ref, makeFile(outdir, "las", res, ++i, ".las"));
+	}
+
 }
