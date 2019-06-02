@@ -73,7 +73,7 @@ include_directories(BEFORE SYSTEM ./include ./ann/include
 	${GDAL_INCLUDE_DIR} ${Boost_INCLUDE_DIRS})
 	 
 link_directories(./build/lib ./build/bin ${GDAL_LIBRARYDIR} 
-	${GIS_LIBRARYDIR} ${Boost_LIBRARY_DIRS})
+	${GIS_LIBRARYDIR} ${Boost_LIBRARY_DIRS} ${PDAL_LIBRARY_DIRS})
 
 # Build support libraries ################################################################################
 
@@ -170,9 +170,8 @@ if(${BUILD_APPS})
 	# target_link_libraries (rbf)
 
 	# install(TARGETS pc2grid pc2tile rastermatch geopc georaster geoinfo geoutil geoann RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
-
 	
-	install(TARGETS pc2grid geoann geopc georaster geoutil geodb RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
+	install(TARGETS cloudmatch pc2grid geoann geopc georaster geoutil geodb RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
 	
 endif()
 

@@ -23,8 +23,6 @@
 #include <pdal/io/LasHeader.hpp>
 #include <pdal/Options.hpp>
 
-//#include <liblas/liblas.hpp>
-
 #include <gdal_priv.h>
 #include <ogr_spatialref.h>
 
@@ -135,10 +133,6 @@ public:
 	std::vector<double> std;
 	std::vector<double> diffs;
 	std::string projection;
-
-	//std::vector<double> m_wrk1;
-	//std::vector<double> m_wrk2;
-	//std::vector<int> m_iwrk;
 
 	double* m_wrk1;
 	size_t m_lwrk1;
@@ -412,22 +406,36 @@ public:
 		m_z.resize(0);
 		m_w.resize(0);
 
+		double minx = MAX, miny = MAX;
+		double maxx = MIN, maxy = MIN;
+		double x, y;
 		int m = 0;
 		double gs, gv;
 		for(int r = 0; r < rows; ++r) {
 			for(int c = 0; c < cols; ++c) {
 				if((gv = target[r * cols + c]) != NODATA && (gs = getStd(c, r)) > 0) {
-					m_x.push_back(toX(c));
-					m_y.push_back(toY(r));
+					x = toX(c);
+					y = toY(r);
+					m_x.push_back(x);
+					m_y.push_back(y);
 					m_z.push_back(gv);
-					m_w.push_back(1.0 / gs);
+					m_w.push_back(gs);	// Use the inverse of the suggested to de-weight high std areas.
+					if(x < minx) minx = x;
+					if(x > maxx) maxx = x;
+					if(y < miny) miny = y;
+					if(y > maxy) maxy = y;
 					++m;
 				}
 			}
 		}
 
-		int nxest = (int) std::ceil(kx + 1.0 + std::sqrt(m / 2.0)) * 2;
-		int nyest = (int) std::ceil(ky + 1.0 + std::sqrt(m / 2.0)) * 2;
+		minx -= res / 2;
+		miny -= res / 2;
+		maxx += res / 2;
+		maxy += res / 2;
+
+		int nxest = (int) std::ceil(kx + 1.0 + std::sqrt(m / 2.0));
+		int nyest = (int) std::ceil(ky + 1.0 + std::sqrt(m / 2.0));
 		int nmax = std::max(std::max(m, nxest), nyest);
 
 		m_c.resize((nxest - kx - 1) * (nyest - ky - 1));
@@ -470,11 +478,9 @@ public:
 		m_iwrk = (int*) mmap(0, m_liwrk * sizeof(int), PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
 
 		int ier, iter = 0;
-		double x0 = toX(0) - res / 2, x1 = toX(cols - 1) + res / 2;
-		double y0 = toY(0) - res / 2, y1 = toY(rows - 1) + res / 2;
 		do {
 			surfit_(&iopt, &m, m_x.data(), m_y.data(), m_z.data(), m_w.data(),
-					&x0, &x1, &y0, &y1, &kx, &ky,
+					&minx, &maxx, &miny, &maxy, &kx, &ky,
 					&smooth, &nxest, &nyest, &nmax, &eps,
 					&m_nx, m_tx.data(), &m_ny, m_ty.data(), m_c.data(), &fp,
 					m_wrk1, (int*) &m_lwrk1, m_wrk2, (int*) &m_lwrk2, m_iwrk, (int*) &m_liwrk,	// Dangerous converstion to int.
@@ -490,7 +496,6 @@ public:
 				throw std::runtime_error("Smoothing failed");
 			} else if(ier == 0) {
 				break;
-				std::cerr << "ier : " << ier << "\n";
 			}
 			++iter;
 		} while(iter < 100);
@@ -533,11 +538,12 @@ public:
 		fill(NODATA);
 		for(int r = 0; r < rows; ++r) {
 			for(int c = 0; c < cols; ++c)
-				target[r * cols + c] = m_z[c * rows + r]; // Note: z is transposed from usual.
+				target[toRow(m_y[r]) * cols + toCol(m_x[c])] = m_z[c * rows + r]; // Note: z is transposed from usual.
 		}
 	}
 
 	void save(const std::string& outfile) {
+		GDALAllRegister();
 		GDALDriverManager* dm = GetGDALDriverManager();
 		GDALDriver* drv = dm->GetDriverByName("GTiff");
 		int bands = 0;
@@ -633,8 +639,11 @@ int main(int argc, char** argv) {
 		std::string arg = argv[i];
 		if(arg == "-f") {
 			std::vector<std::string> files = getFiles(std::string(argv[++i]));
-			for(const std::string& file : files)
+			int i = 0;
+			for(const std::string& file : files) {
 				las.emplace_back(file);
+				if(++i > 2) break;
+			}
 			continue;
 		} else if(arg == "-r") {
 			res = atof(argv[++i]);
