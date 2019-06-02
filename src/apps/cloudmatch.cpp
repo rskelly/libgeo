@@ -426,8 +426,8 @@ public:
 			}
 		}
 
-		int nxest = (int) std::ceil(kx + 1.0 + std::sqrt(m / 2.0)) * 2;
-		int nyest = (int) std::ceil(ky + 1.0 + std::sqrt(m / 2.0)) * 2;
+		int nxest = (int) std::ceil(kx + 1.0 + std::sqrt(m / 2.0));
+		int nyest = (int) std::ceil(ky + 1.0 + std::sqrt(m / 2.0));
 		int nmax = std::max(std::max(m, nxest), nyest);
 
 		m_c.resize((nxest - kx - 1) * (nyest - ky - 1));
