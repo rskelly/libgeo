@@ -128,10 +128,11 @@ public:
 	double res;
 	int cols, rows;
 	int validCount;
-	std::vector<double> grid;
-	std::vector<int> counts;
-	std::vector<double> std;
-	std::vector<double> diffs;
+	std::vector<double> grid;		// Current calculation result.
+	std::vector<int> counts;		// # Of points in cell.
+	std::vector<double> std;		// Std dev of points.
+	std::vector<double> diffs;		// Difference between this file and another.
+	std::vector<uint8_t> fcounts;	// # Of files that contribute to cell.
 	std::string projection;
 
 	double* m_wrk1;
@@ -197,6 +198,7 @@ public:
 		rows = (int) ((ymax - ymin) / res);
 		grid.resize(cols * rows);
 		counts.resize(cols * rows);
+		fcounts.resize(cols * rows);
 	}
 
 	void load() {
@@ -208,16 +210,18 @@ public:
 			projection = las.projection();
 		}
 
-		int i = 0;
-		for(const std::string& file : files) {
-			std::cout << "Loading " << ++i << " of " << files.size() << "\n";
-			LasFile las(file);
-			Point pt;
-			while(las.next(pt)) {
-				if(pt.x < xmin) xmin = pt.x;
-				if(pt.y < ymin) ymin = pt.y;
-				if(pt.x > xmax) xmax = pt.x;
-				if(pt.y > ymax) ymax = pt.y;
+		{
+			int i = 0;
+			for(const std::string& file : files) {
+				std::cout << "Loading " << ++i << " of " << files.size() << "\n";
+				LasFile las(file);
+				Point pt;
+				while(las.next(pt)) {
+					if(pt.x < xmin) xmin = pt.x;
+					if(pt.y < ymin) ymin = pt.y;
+					if(pt.x > xmax) xmax = pt.x;
+					if(pt.y > ymax) ymax = pt.y;
+				}
 			}
 		}
 
@@ -225,18 +229,34 @@ public:
 
 		fill(0);
 		fillCounts(0);
+		fillFCounts(0);
 
-		for(const std::string& file : files) {
-			LasFile las(file);
-			Point pt;
-			while(las.next(pt)) {
-				if(pt.cls != 2)
-					continue;
-				double x = pt.x;
-				double y = pt.y;
-				double z = pt.z;
-				set(x, y, get(x, y) + z);
-				setCount(x, y, getCount(x, y) + 1);
+		{
+			std::vector<std::vector<bool>> fc(files.size());
+			for(std::vector<bool>& f : fc) {
+				f.resize(cols * rows);
+				std::fill(f.begin(), f.end(), false);
+			}
+
+			size_t i = 0;
+			for(const std::string& file : files) {
+				LasFile las(file);
+				Point pt;
+				while(las.next(pt)) {
+					if(pt.cls != 2)
+						continue;
+					double x = pt.x;
+					double y = pt.y;
+					double z = pt.z;
+					set(x, y, get(x, y) + z);
+					setCount(x, y, getCount(x, y) + 1);
+					fc[i][toRow(y) * cols + toCol(x)] = true;
+				}
+				++i;
+			}
+			for(std::vector<bool>& f : fc) {
+				for(size_t i = 0; i < f.size(); ++i)
+					fcounts[i] += (uint8_t) f[i];
 			}
 		}
 
@@ -254,6 +274,10 @@ public:
 	}
 
 	void fillCounts(int v) {
+		std::fill(counts.begin(), counts.end(), v);
+	}
+
+	void fillFCounts(int v) {
 		std::fill(counts.begin(), counts.end(), v);
 	}
 
@@ -315,15 +339,15 @@ public:
 	}
 
 	int toRow(double y) {
-		return (int) ((ymax - y) / res);
+		return (int) ((y - ymin) / res);
 	}
 
 	int toX(int col) {
-		return col * res + xmin + res * 0.5;
+		return xmin + col * res + res * 0.5;
 	}
 
 	int toY(int row) {
-		return ymax - row * res - res * 0.5;
+		return ymin + row * res + res * 0.5;
 	}
 
 	void set(double x, double y, double v) {
@@ -389,12 +413,21 @@ public:
 		}
 	}
 
-	void splineSmooth(double smooth, std::vector<double>& target) {
+	/**
+	 * \param overlap Only use points with >1 contributing file. Weight by # of files.
+	 */
+	void splineSmooth(double smooth, std::vector<double>& target, bool overlap = false) {
 
 		stats();
 
 		if(smooth == 0)
 			smooth = validCount * 2;
+
+		uint8_t maxfc = 1;
+		for(uint8_t c : fcounts) {
+			if(c > maxfc)
+				maxfc = c;
+		}
 
 		int iopt = 0;
 		int kx = 3;
@@ -409,17 +442,19 @@ public:
 		double minx = MAX, miny = MAX;
 		double maxx = MIN, maxy = MIN;
 		double x, y;
-		int m = 0;
+		int m = 0, fc = 1;
 		double gs, gv;
 		for(int r = 0; r < rows; ++r) {
 			for(int c = 0; c < cols; ++c) {
 				if((gv = target[r * cols + c]) != NODATA && (gs = getStd(c, r)) > 0) {
+					if(overlap && (fc = fcounts[r * cols + c]) < 2)
+						continue;
 					x = toX(c);
 					y = toY(r);
 					m_x.push_back(x);
 					m_y.push_back(y);
 					m_z.push_back(gv);
-					m_w.push_back(gs);	// Use the inverse of the suggested to de-weight high std areas.
+					m_w.push_back(gs * ((double) maxfc / fc));	// Use the inverse of the suggested to de-weight high std areas; optionally weight by fcount.
 					if(x < minx) minx = x;
 					if(x > maxx) maxx = x;
 					if(y < miny) miny = y;
@@ -487,7 +522,7 @@ public:
 					&ier);
 			std::cerr << "ier : " << ier << "\n";
 			if(ier == 1) {
-				smooth *= 10;
+				smooth *= 3;
 			} else if(ier == 4) {
 				smooth *= 10;
 			} else if(ier < 0) {
@@ -531,13 +566,13 @@ public:
 
 		int ier;
 
-		surev_(&idim, m_tx.data(), &m_nx, m_ty.data(), &m_ny,
-				m_c.data(), m_x.data(), &cols, m_y.data(), &rows, m_z.data(), &mf,
+		surev_(&idim, m_tx.data(), &m_nx, m_ty.data(), &m_ny, m_c.data(),
+				m_x.data(), &cols, m_y.data(), &rows, m_z.data(), &mf,
 				m_wrk1, (int*) &m_lwrk1, m_iwrk, (int*) &m_liwrk, &ier);
 
 		fill(NODATA);
-		for(int r = 0; r < rows; ++r) {
-			for(int c = 0; c < cols; ++c)
+		for(int c = 0; c < cols; ++c) {
+			for(int r = 0; r < rows; ++r)
 				target[toRow(m_y[r]) * cols + toCol(m_x[c])] = m_z[c * rows + r]; // Note: z is transposed from usual.
 		}
 	}
@@ -656,7 +691,7 @@ int main(int argc, char** argv) {
 	Item ref(las);
 	ref.res = res;
 	ref.load();
-	ref.splineSmooth(0, ref.grid);
+	ref.splineSmooth(0, ref.grid, true);
 	ref.smooth(ref.grid);
 	ref.save(makeFile(outdir, "ref_smooth", res, 0, ".tif"));
 
