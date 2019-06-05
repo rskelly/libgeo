@@ -130,7 +130,7 @@ if(${BUILD_APPS})
 	# add_executable (pc2tile src/apps/pc2tile.cpp)
 	# target_link_libraries (pc2tile geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY} ${GEOS_LIBRARY})
 
-	add_executable (pcnorm src/apps/pcnorm2.cpp)
+	add_executable (pcnorm src/apps/pcnorm.cpp)
 	target_link_libraries (pcnorm ${LIBLAS_LIBRARY})
 
 	# add_executable (pcperturb src/apps/pcperturb.cpp)
