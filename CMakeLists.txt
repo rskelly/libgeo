@@ -171,7 +171,7 @@ if(${BUILD_APPS})
 
 	# install(TARGETS pc2grid pc2tile rastermatch geopc georaster geoinfo geoutil geoann RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
 	
-	install(TARGETS cloudmatch pc2grid geoann geopc georaster geoutil geodb RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
+	install(TARGETS cloudmatch pc2grid pcnorm geoann geopc georaster geoutil geodb RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
 	
 endif()
 

@@ -133,6 +133,7 @@ public:
 	std::vector<double> std;		// Std dev of points.
 	std::vector<double> diffs;		// Difference between this file and another.
 	std::vector<uint8_t> fcounts;	// # Of files that contribute to cell.
+	std::vector<double> smoothed;
 	std::string projection;
 
 	double* m_wrk1;
@@ -269,6 +270,27 @@ public:
 		}
 	}
 
+	void avg(int rad) {
+		std::vector<double> tmp(grid.size());
+		std::fill(tmp.begin(), tmp.end(), NODATA);
+		for(int r = 0; r < rows; ++r) {
+			for(int c = 0; c < cols; ++c) {
+				double s = 0, v;
+				int n = 0;
+				for(int rr = r - rad / 2; rr < r + rad / 2 + 1; ++rr) {
+					for(int cc = c - rad / 2; cc < c + rad / 2 + 1; ++cc) {
+						if(cc < 0 || rr < 0 || cc >= cols || rr >= rows || (std::pow(c - cc, 2) + std::pow(r - rr, 2)) > (rad * rad) || (v = grid[rr * cols + cc]) == NODATA)
+							continue;
+						s += v;
+						++n;
+					}
+				}
+				tmp[r * cols + c] = n > 0 ? s / n : NODATA;
+			}
+		}
+		grid.assign(tmp.begin(), tmp.end());
+	}
+
 	void fill(double v) {
 		std::fill(grid.begin(), grid.end(), v);
 	}
@@ -328,7 +350,7 @@ public:
 			if(counts[i] == 0) {
 				std[i] = NODATA;
 			} else {
-				std[i] = std::sqrt(std[i]);
+				std[i] = std::sqrt(std[i] / (counts[i] - 1));
 				++validCount;
 			}
 		}
@@ -377,6 +399,15 @@ public:
 			std[row * cols + col] = v;
 	}
 
+	void setSmoothed(double x, double y, double v) {
+		setSmoothed(toCol(x), toRow(y), v);
+	}
+
+	void setSmoothed(int col, int row, double v) {
+		if(col >= 0 && col < cols && row >= 0 && row < rows)
+			smoothed[row * cols + col] = v;
+	}
+
 	double get(double x, double y) {
 		return get(toCol(x), toRow(y));
 	}
@@ -413,10 +444,22 @@ public:
 		}
 	}
 
+	double getSmoothed(double x, double y) {
+		return getSmoothed(toCol(x), toRow(y));
+	}
+
+	double getSmoothed(int col, int row) {
+		if(col >= 0 && col < cols && row >= 0 && row < rows) {
+			return smoothed[row * cols + col];
+		} else {
+			return 0;
+		}
+	}
+
 	/**
 	 * \param overlap Only use points with >1 contributing file. Weight by # of files.
 	 */
-	void splineSmooth(double smooth, std::vector<double>& target, bool overlap = false) {
+	void splineSmooth(double smooth, bool overlap = false) {
 
 		stats();
 
@@ -446,7 +489,7 @@ public:
 		double gs, gv;
 		for(int r = 0; r < rows; ++r) {
 			for(int c = 0; c < cols; ++c) {
-				if((gv = target[r * cols + c]) != NODATA && (gs = getStd(c, r)) > 0) {
+				if((gv = get(c, r)) != NODATA && (gs = getStd(c, r)) > 0) {
 					if(overlap && (fc = fcounts[r * cols + c]) < 2)
 						continue;
 					x = toX(c);
@@ -537,7 +580,7 @@ public:
 
 	}
 
-	void smooth(std::vector<double>& target) {
+	void smooth() {
 
 		int idim = 1;
 
@@ -570,11 +613,31 @@ public:
 				m_x.data(), &cols, m_y.data(), &rows, m_z.data(), &mf,
 				m_wrk1, (int*) &m_lwrk1, m_iwrk, (int*) &m_liwrk, &ier);
 
+		smoothed.resize(cols * rows);
+
 		fill(NODATA);
 		for(int c = 0; c < cols; ++c) {
-			for(int r = 0; r < rows; ++r)
-				target[toRow(m_y[r]) * cols + toCol(m_x[c])] = m_z[c * rows + r]; // Note: z is transposed from usual.
+			for(int r = 0; r < rows; ++r) {
+				if(getCount(m_x[c], m_y[r]) > 0) {
+					setSmoothed(m_x[c], m_y[r], m_z[c * rows + r]); // Note: z is transposed from usual.
+				} else {
+					setSmoothed(m_x[c], m_y[r], NODATA);
+				}
+			}
 		}
+	}
+
+	void save(std::vector<double>& data, const std::string& outfile) {
+		GDALAllRegister();
+		GDALDriverManager* dm = GetGDALDriverManager();
+		GDALDriver* drv = dm->GetDriverByName("GTiff");
+		GDALDataset* ds = drv->Create(outfile.c_str(), cols, rows, 1, GDT_Float32, 0);
+		const char* proj = projection.c_str();
+		ds->SetProjection(proj);
+		GDALRasterBand* b = ds->GetRasterBand(1);
+		b->SetNoDataValue(NODATA);
+		if(CE_None != b->RasterIO(GF_Write, 0, 0, cols, rows, data.data(), cols, rows, GDT_Float64, 0, 0, 0))
+			throw std::runtime_error("Failed to write band 1.");
 	}
 
 	void save(const std::string& outfile) {
@@ -586,6 +649,7 @@ public:
 		if(!std.empty()) bands++;
 		if(!counts.empty()) bands++;
 		if(!diffs.empty()) bands++;
+		if(!smoothed.empty()) bands++;
 		GDALDataset* ds = drv->Create(outfile.c_str(), cols, rows, bands, GDT_Float32, 0);
 		const char* proj = projection.c_str();
 		ds->SetProjection(proj);
@@ -604,6 +668,12 @@ public:
 			GDALRasterBand* b2 = ds->GetRasterBand(b++);
 			b2->SetNoDataValue(NODATA);
 			if(CE_None != b2->RasterIO(GF_Write, 0, 0, cols, rows, diffs.data(), cols, rows, GDT_Float64, 0, 0, 0))
+				throw std::runtime_error("Failed to write band 2.");
+		}
+		if(!smoothed.empty()) {
+			GDALRasterBand* b2 = ds->GetRasterBand(b++);
+			b2->SetNoDataValue(NODATA);
+			if(CE_None != b2->RasterIO(GF_Write, 0, 0, cols, rows, smoothed.data(), cols, rows, GDT_Float64, 0, 0, 0))
 				throw std::runtime_error("Failed to write band 2.");
 		}
 		GDALRasterBand* b3 = ds->GetRasterBand(b++);
@@ -666,7 +736,8 @@ std::vector<std::string> getFiles(const std::string& dirname) {
 
 int main(int argc, char** argv) {
 
-	double res = 50;
+	double res = 10;
+	double rad = 500;
 	std::string outdir;
 	std::vector<std::string> las;
 
@@ -691,17 +762,19 @@ int main(int argc, char** argv) {
 	Item ref(las);
 	ref.res = res;
 	ref.load();
-	ref.splineSmooth(0, ref.grid, true);
-	ref.smooth(ref.grid);
+	ref.avg((int) std::ceil(rad / res / 2));
+	//ref.splineSmooth(0);
+	//ref.smooth();
 	ref.save(makeFile(outdir, "ref_smooth", res, 0, ".tif"));
+	return 0;
 
 	int i = 0;
 	for(const std::string& f : las) {
 		Item item(f);
 		item.res = res;
 		item.load();
-		item.splineSmooth(0, item.grid);
-		item.smooth(item.grid);
+		item.splineSmooth(0);
+		item.smooth();
 		item.save(makeFile(outdir, "item_smooth", res, ++i, ".tif"));
 		item.adjust(ref, makeFile(outdir, "las", res, ++i, ".las"));
 	}
