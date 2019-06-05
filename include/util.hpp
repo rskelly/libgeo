@@ -698,7 +698,7 @@ namespace geo {
                     ++iter;
                     ++i;
                 } else {
-                    error_code ec;
+                    boost::system::error_code ec;
                     directory_iterator end;
                     directory_iterator di(dir, ec);
                     for (; di != end; ++di) {

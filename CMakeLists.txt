@@ -164,7 +164,7 @@ if(${BUILD_APPS})
 	target_link_libraries (raster_test geoutil geoann georaster ${GEOS_LIBRARY} ${GDAL_LIBRARY})
 
 	add_executable (cloudmatch src/apps/cloudmatch.cpp)
-	target_link_libraries (cloudmatch ${GDAL_LIBRARY} ${PDAL_LIBRARIES} fitpack_mod)
+	target_link_libraries (cloudmatch geoann ${Boost_LIBRARIES} ${GDAL_LIBRARY} ${PDAL_LIBRARIES} fitpack_mod)
 
 	# add_executable (rbf src/tests/rbf.cpp)
 	# target_link_libraries (rbf)
