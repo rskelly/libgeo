@@ -11,122 +11,127 @@
 
 using namespace geo::pc;
 
-class PointClassFilter : public PointFilter {
-public:
-	std::vector<int> classes;
-	PointClassFilter(int cls) {
-		classes.push_back(cls);
-	}
-	PointClassFilter(const std::vector<int>& classes) :
-		classes(classes) {
-	}
-	bool keep(const geo::pc::Point& pt) const {
-		int cls = pt.classId();
-		for(size_t i = 0; i < classes.size(); ++i) {
-			if(classes[i] == cls)
-				return true;
+namespace {
+
+	class PointClassFilter : public PointFilter {
+	public:
+		std::vector<int> classes;
+		PointClassFilter(int cls) {
+			classes.push_back(cls);
 		}
-		return false;
-	}
-	void print() const {
-		std::stringstream ss;
-		for(int c : classes)
-			ss << c << ", ";
-		g_debug("Class filter: " << ss.str());
-	}
-};
-
-class PointScanAngleFilter : public PointFilter  {
-public:
-	double minAngle;
-	double maxAngle;
-	PointScanAngleFilter(double minAngle = -DBL_MAX, double maxAngle = DBL_MAX) :
-		minAngle(minAngle), maxAngle(maxAngle) {
-	}
-	bool keep(const geo::pc::Point& pt) const {
-		double a = pt.scanAngle();
-		if(a < minAngle || a > maxAngle)
+		PointClassFilter(const std::vector<int>& classes) :
+			classes(classes) {
+		}
+		bool keep(const geo::pc::Point& pt) const {
+			int cls = pt.classId();
+			for(size_t i = 0; i < classes.size(); ++i) {
+				if(classes[i] == cls)
+					return true;
+			}
 			return false;
-		return true;
-	}
-	void print() const {
-		g_debug("Scan angle filter: " << minAngle << ", " << maxAngle);
-	}
-};
+		}
+		void print() const {
+			std::stringstream ss;
+			for(int c : classes)
+				ss << c << ", ";
+			g_debug("Class filter: " << ss.str());
+		}
+	};
 
-class PointEdgeFilter : public PointFilter  {
-public:
-	bool keepEdge;
-	PointEdgeFilter(bool keepEdge = false) :
-		keepEdge(keepEdge) {
-	}
-	bool keep(const geo::pc::Point& pt) const {
-		return keepEdge || !pt.isEdge();
-	}
-	void print() const {
-		g_debug("Keep edge filter: " << keepEdge);
-	}
-};
+	class PointScanAngleFilter : public PointFilter  {
+	public:
+		double minAngle;
+		double maxAngle;
+		PointScanAngleFilter(double minAngle = -DBL_MAX, double maxAngle = DBL_MAX) :
+			minAngle(minAngle), maxAngle(maxAngle) {
+		}
+		bool keep(const geo::pc::Point& pt) const {
+			double a = pt.scanAngle();
+			if(a < minAngle || a > maxAngle)
+				return false;
+			return true;
+		}
+		void print() const {
+			g_debug("Scan angle filter: " << minAngle << ", " << maxAngle);
+		}
+	};
 
-class PointZRangeFilter : public PointFilter  {
-public:
-	double minZ;
-	double maxZ;
-	PointZRangeFilter(double minZ = -DBL_MAX, double maxZ = DBL_MAX) :
-		minZ(minZ), maxZ(maxZ) {
-	}
-	bool keep(const geo::pc::Point& pt) const {
-		double z = pt.z();
-		return z >= minZ && z <= maxZ;
-	}
-	void print() const {
-		g_debug("Z range filter: " << minZ << ", " << maxZ);
-	}
-};
+	class PointEdgeFilter : public PointFilter  {
+	public:
+		bool keepEdge;
+		PointEdgeFilter(bool keepEdge = false) :
+			keepEdge(keepEdge) {
+		}
+		bool keep(const geo::pc::Point& pt) const {
+			return keepEdge || !pt.isEdge();
+		}
+		void print() const {
+			g_debug("Keep edge filter: " << keepEdge);
+		}
+	};
 
-class PointIntensityFilter : public PointFilter  {
-public:
-	double minIntensity;
-	double maxIntensity;
-	PointIntensityFilter(double minIntensity = -DBL_MAX, double maxIntensity = DBL_MAX) :
-		minIntensity(minIntensity), maxIntensity(maxIntensity) {
-	}
-	bool keep(const geo::pc::Point& pt) const {
-		double i = pt.intensity();
-		return i >= minIntensity && i <= maxIntensity;
-	}
-	void print() const {
-		g_debug("Intensity filter: " << minIntensity << ", " << maxIntensity);
-	}
-};
+	class PointZRangeFilter : public PointFilter  {
+	public:
+		double minZ;
+		double maxZ;
+		PointZRangeFilter(double minZ = -DBL_MAX, double maxZ = DBL_MAX) :
+			minZ(minZ), maxZ(maxZ) {
+		}
+		bool keep(const geo::pc::Point& pt) const {
+			double z = pt.z();
+			return z >= minZ && z <= maxZ;
+		}
+		void print() const {
+			g_debug("Z range filter: " << minZ << ", " << maxZ);
+		}
+	};
 
-class PointFirstOnlyFilter : public PointFilter  {
-public:
-	bool keepFirst;
-	PointFirstOnlyFilter(bool keepFirst = false) :
-		keepFirst(keepFirst) {
-	}
-	bool keep(const geo::pc::Point& pt) const {
-		return !keepFirst || pt.isFirst();
-	}
-	void print() const {
-		g_debug("First only filter: " << keepFirst);
-	}
-};
+	class PointIntensityFilter : public PointFilter  {
+	public:
+		double minIntensity;
+		double maxIntensity;
+		PointIntensityFilter(double minIntensity = -DBL_MAX, double maxIntensity = DBL_MAX) :
+			minIntensity(minIntensity), maxIntensity(maxIntensity) {
+		}
+		bool keep(const geo::pc::Point& pt) const {
+			double i = pt.intensity();
+			return i >= minIntensity && i <= maxIntensity;
+		}
+		void print() const {
+			g_debug("Intensity filter: " << minIntensity << ", " << maxIntensity);
+		}
+	};
 
-class PointLastOnlyFilter : public PointFilter  {
-public:
-	bool keepLast;
-	PointLastOnlyFilter(bool keepLast = false) :
-		keepLast(keepLast) {
-	}
-	bool keep(const geo::pc::Point& pt) const {
-		return !keepLast || pt.isLast();
-	}
-	void print() const {
-		g_debug("Last only filter: " << keepLast);
-	}
-};
+	class PointFirstOnlyFilter : public PointFilter  {
+	public:
+		bool keepFirst;
+		PointFirstOnlyFilter(bool keepFirst = false) :
+			keepFirst(keepFirst) {
+		}
+		bool keep(const geo::pc::Point& pt) const {
+			return !keepFirst || pt.isFirst();
+		}
+		void print() const {
+			g_debug("First only filter: " << keepFirst);
+		}
+	};
+
+	class PointLastOnlyFilter : public PointFilter  {
+	public:
+		bool keepLast;
+		PointLastOnlyFilter(bool keepLast = false) :
+			keepLast(keepLast) {
+		}
+		bool keep(const geo::pc::Point& pt) const {
+			return !keepLast || pt.isLast();
+		}
+		void print() const {
+			g_debug("Last only filter: " << keepLast);
+		}
+	};
+
+}
+
 
 PCPointFilter::PCPointFilter() {
 }
@@ -250,6 +255,30 @@ void PCPointFilter::addIntensityFilter(double min, double max) {
 
 void PCPointFilter::addZRangeFilter(double min, double max) {
 	filters.push_back(new PointZRangeFilter(min, max));
+}
+
+double PCPointFilter::minZRange() const {
+	PointZRangeFilter* zf;
+	double z = std::numeric_limits<double>::max();
+	for(PointFilter* f : filters) {
+		if((zf = dynamic_cast<PointZRangeFilter*>(f)) != nullptr) {
+			if(z > zf->minZ)
+				z = zf->minZ;
+		}
+	}
+	return z;
+}
+
+double PCPointFilter::maxZRange() const {
+	PointZRangeFilter* zf;
+	double z = std::numeric_limits<double>::lowest();
+	for(PointFilter* f : filters) {
+		if((zf = dynamic_cast<PointZRangeFilter*>(f)) != nullptr) {
+			if(z < zf->maxZ)
+				z = zf->maxZ;
+		}
+	}
+	return z;
 }
 
 void PCPointFilter::addScanAngleFilter(double min, double max) {

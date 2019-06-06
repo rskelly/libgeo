@@ -76,7 +76,7 @@ Computer* getComputer(const std::string& name) {
 	} else if(name == "std-dev") { 				return new StdDevComputer();
 	} else if(name == "rugosity-acr") { 		return new RugosityComputer();
 	} else if(name == "idw-2") {				return new IDWComputer();
-	} else if(name == "hlrg-bio") {				return new HLRGBiometricsComputer(20, 75, 2.0);
+	} else if(name == "hlrg-bio") {				return new HLRGBiometricsComputer(20, 75);
 	}
 	g_runerr("Unknown computer name (" << name << ")");
 }
@@ -173,6 +173,10 @@ void Rasterizer::setFilter(PCPointFilter* filter) {
 	m_filter = filter;
 }
 
+PCPointFilter* Rasterizer::filter() const {
+	return m_filter;
+}
+
 Rasterizer::~Rasterizer() {
 }
 
@@ -193,8 +197,11 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 		g_argerr("No methods given; defaulting to mean");
 
 	m_computers.clear();
-	for(const std::string& name : types)
-		m_computers.emplace_back(getComputer(name));
+	for(const std::string& name : types) {
+		std::unique_ptr<Computer> comp(getComputer(name));
+		comp->setRasterizer(this);
+		m_computers.push_back(std::move(comp));
+	}
 
 	g_trace("Checking file bounds");
 	std::vector<std::string> filenames;

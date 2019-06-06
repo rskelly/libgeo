@@ -15,18 +15,6 @@ namespace geo {
 namespace pc {
 namespace compute {
 
-bool pointSort(const geo::pc::Point& a, const geo::pc::Point& b);
-
-template <class T, class U>
-int pointFilter(U begin, U end, T insert, geo::pc::PCPointFilter* filter) {
-	int count = 0;
-	for(auto& it = begin; it < end; ++it) {
-		if(filter && !filter->keep(*it)) continue;
-		insert = *it;
-		++count;
-	}
-	return count;
-}
 
 class IDWComputer : public geo::pc::Computer {
 public:
@@ -146,15 +134,21 @@ public:
 	int bandCount() const;
 };
 
+/**
+ *
+ */
 class HLRGBiometricsComputer : public geo::pc::Computer {
 private:
 	StdDevComputer m_stdDev;
 	PercentileComputer m_perc;
 	int m_bands;
 	int m_minCount;
-	double m_threshold;
 public:
-	HLRGBiometricsComputer(int bands, int minCount, double threshold);
+	/**
+	 * \param bands The number of levels; with 20 bands, each represents a 5% slice.
+	 * \param minCount Minimum number of points required for acomputation.
+	 */
+	HLRGBiometricsComputer(int bands, int minCount);
 	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter = nullptr);
 	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out);
 	int bandCount() const;

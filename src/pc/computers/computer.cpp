@@ -6,8 +6,13 @@
 using namespace geo::pc;
 using namespace geo::pc::compute;
 
-bool geo::pc::compute::pointSort(const geo::pc::Point& a, const geo::pc::Point& b) {
-	return a.value() < b.value();
+
+void Computer::setRasterizer(geo::pc::Rasterizer* rasterizer) {
+	m_rasterizer = rasterizer;
+}
+
+Rasterizer* Computer::rasterizer() const {
+	return m_rasterizer;
 }
 
 int Computer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter) {

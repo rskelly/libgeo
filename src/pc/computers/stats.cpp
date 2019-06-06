@@ -57,7 +57,7 @@ int VarianceComputer::compute(double x, double y, const std::vector<geo::pc::Poi
 }
 
 int VarianceComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out) {
-	std::vector<double> _out; // TODO: Istance variable.
+	std::vector<double> _out; // TODO: Instance variable.
 	MeanComputer::compute(x, y, pts, filtered, radius, _out);
 	double mean = _out[0];
 	if(!std::isnan(mean) && !filtered.empty()){

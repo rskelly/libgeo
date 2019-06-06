@@ -130,7 +130,7 @@ if(${BUILD_APPS})
 	# add_executable (pc2tile src/apps/pc2tile.cpp)
 	# target_link_libraries (pc2tile geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY} ${GEOS_LIBRARY})
 
-	add_executable (pcnorm src/apps/pcnorm2.cpp)
+	add_executable (pcnorm src/apps/pcnorm.cpp)
 	target_link_libraries (pcnorm ${LIBLAS_LIBRARY})
 
 	# add_executable (pcperturb src/apps/pcperturb.cpp)
@@ -164,7 +164,7 @@ if(${BUILD_APPS})
 	target_link_libraries (raster_test geoutil geoann georaster ${GEOS_LIBRARY} ${GDAL_LIBRARY})
 
 	add_executable (cloudmatch src/apps/cloudmatch.cpp)
-	target_link_libraries (cloudmatch ${GDAL_LIBRARY} ${PDAL_LIBRARIES} fitpack_mod)
+	target_link_libraries (cloudmatch geoann ${Boost_LIBRARIES} ${GDAL_LIBRARY} ${PDAL_LIBRARIES} fitpack_mod)
 
 	# add_executable (rbf src/tests/rbf.cpp)
 	# target_link_libraries (rbf)

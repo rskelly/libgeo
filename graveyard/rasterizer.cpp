@@ -24,170 +24,232 @@ using namespace geo::raster;
 using namespace geo::pc;
 using namespace geo::pc::compute;
 
-const std::unordered_map<std::string, std::string> computerNames = {
-		{"min", "The minimum value"},
-		{"max", "The maximum value"},
-		{"percentile-5", "The 5th percentile"},
-		{"decile-1", "The 1st decile"},
-		{"decile-2", "The 2nd decile"},
-		{"quartile-1", "The 1st quartile"},
-		{"decile-3", "The 3rd decile"},
-		{"decile-4", "The 4th decile"},
-		{"decile-5", "The 4th decile"},
-		{"quartile-2", "The 2nd quartile"},
-		{"median", "The median value"},
-		{"decile-6", "The 6th decile"},
-		{"decile-7", "The 7th decile"},
-		{"quantile-3", "The 3rd quantile"},
-		{"decile-8", "The 8th decile"},
-		{"decile-9", "The 9th decile"},
-		{"percentile-95", "The 95th percentile"},
-		{"mean", "The mean value"},
-		{"variance", "The variance with n-1"},
-		{"std-dev", "The standard deviation with n-1"},
-		{"rugosity-acr", "The arc-chord rugosity (DuPreez, 2004)"},
-		{"idw-2", "Inverse distance weighting; coefficient 2"},
-		{"hlrg-bio", "HLRG biometrics set"}
-};
+namespace {
 
-Computer* getComputer(const std::string& name) {
-	if(name == "min") { 						return new MinComputer();
-	} else if(name == "min") { 					return new MaxComputer();
-	} else if(name == "percentile-5") { 		return new PercentileComputer(0.05);
-	} else if(name == "decile-1") { 			return new PercentileComputer(0.1);
-	} else if(name == "decile-2") { 			return new PercentileComputer(0.2);
-	} else if(name == "quartile-1") { 			return new PercentileComputer(0.25);
-	} else if(name == "decile-3") { 			return new PercentileComputer(0.3);
-	} else if(name == "decile-4") { 			return new PercentileComputer(0.4);
-	} else if(name == "decile-5") { 			return new PercentileComputer(0.5);
-	} else if(name == "quartile-2") { 			return new PercentileComputer(0.5);
-	} else if(name == "median") { 				return new PercentileComputer(0.5);
-	} else if(name == "decile-6") { 			return new PercentileComputer(0.6);
-	} else if(name == "decile-7") { 			return new PercentileComputer(0.7);
-	} else if(name == "quartile-3") { 			return new PercentileComputer(0.75);
-	} else if(name == "decile-8") { 			return new PercentileComputer(0.8);
-	} else if(name == "decile-9") { 			return new PercentileComputer(0.9);
-	} else if(name == "percentile-95") { 		return new PercentileComputer(0.95);
-	} else if(name == "mean") { 				return new MeanComputer();
-	} else if(name == "variance") { 			return new VarianceComputer();
-	} else if(name == "std-dev") { 				return new StdDevComputer();
-	} else if(name == "rugosity-acr") { 		return new RugosityComputer();
-	} else if(name == "idw-2") {				return new IDWComputer();
-	} else if(name == "hlrg-bio") {				return new HLRGBiometricsComputer(20, 75, 2.0);
-	}
-	g_runerr("Unknown computer name (" << name << ")");
-}
+	const std::unordered_map<std::string, std::string> computerNames = {
+			{"min", "The minimum value"},
+			{"max", "The maximum value"},
+			{"percentile-5", "The 5th percentile"},
+			{"decile-1", "The 1st decile"},
+			{"decile-2", "The 2nd decile"},
+			{"quartile-1", "The 1st quartile"},
+			{"decile-3", "The 3rd decile"},
+			{"decile-4", "The 4th decile"},
+			{"decile-5", "The 4th decile"},
+			{"quartile-2", "The 2nd quartile"},
+			{"median", "The median value"},
+			{"decile-6", "The 6th decile"},
+			{"decile-7", "The 7th decile"},
+			{"quantile-3", "The 3rd quantile"},
+			{"decile-8", "The 8th decile"},
+			{"decile-9", "The 9th decile"},
+			{"percentile-95", "The 95th percentile"},
+			{"mean", "The mean value"},
+			{"variance", "The variance with n-1"},
+			{"std-dev", "The standard deviation with n-1"},
+			{"rugosity-acr", "The arc-chord rugosity (DuPreez, 2004)"},
+			{"idw-2", "Inverse distance weighting; coefficient 2"},
+			{"hlrg-bio", "HLRG biometrics set"}
+	};
 
-
-// 1) Create byte grid (map) corresponding to output raster.
-// 2) Iterate over bounds. For each one, increment the cells in the grid that are covered by the bounds plus the radius.
-// 4) Iterate over bounds.
-//	-- Create a cell if required and add values to it.
-//  -- Decrement the count for that cell in the grid.
-//  -- If the count is zero, finalize the cell.
-
-class RCell {
-public:
-	std::vector<geo::pc::Point> values;
-};
-
-class RWrite {
-public:
-	int col;
-	int row;
-	std::vector<double> values;
-	RWrite(int col, int row, const std::vector<double>& values) :
-		col(col), row(row),
-		values(values) {
-	}
-};
-
-class RFinalize {
-public:
-	int col, row;
-	double x, y;
-	double radius;
-	RCell cell;
-	PCPointFilter* filter;
-	std::vector<std::unique_ptr<Computer> >* computers;
-
-	RFinalize(int col, int row, double x, double y, double radius, const RCell& cell,
-			PCPointFilter* filter, std::vector<std::unique_ptr<Computer> >* computers) :
-		col(col), row(row),
-		x(x), y(y), radius(radius),
-		cell(cell),
-		filter(filter),
-		computers(computers) {
+	Computer* getComputer(const std::string& name) {
+		if(name == "min") { 						return new MinComputer();
+		} else if(name == "min") { 					return new MaxComputer();
+		} else if(name == "percentile-5") { 		return new PercentileComputer(0.05);
+		} else if(name == "decile-1") { 			return new PercentileComputer(0.1);
+		} else if(name == "decile-2") { 			return new PercentileComputer(0.2);
+		} else if(name == "quartile-1") { 			return new PercentileComputer(0.25);
+		} else if(name == "decile-3") { 			return new PercentileComputer(0.3);
+		} else if(name == "decile-4") { 			return new PercentileComputer(0.4);
+		} else if(name == "decile-5") { 			return new PercentileComputer(0.5);
+		} else if(name == "quartile-2") { 			return new PercentileComputer(0.5);
+		} else if(name == "median") { 				return new PercentileComputer(0.5);
+		} else if(name == "decile-6") { 			return new PercentileComputer(0.6);
+		} else if(name == "decile-7") { 			return new PercentileComputer(0.7);
+		} else if(name == "quartile-3") { 			return new PercentileComputer(0.75);
+		} else if(name == "decile-8") { 			return new PercentileComputer(0.8);
+		} else if(name == "decile-9") { 			return new PercentileComputer(0.9);
+		} else if(name == "percentile-95") { 		return new PercentileComputer(0.95);
+		} else if(name == "mean") { 				return new MeanComputer();
+		} else if(name == "variance") { 			return new VarianceComputer();
+		} else if(name == "std-dev") { 				return new StdDevComputer();
+		} else if(name == "rugosity-acr") { 		return new RugosityComputer();
+		} else if(name == "idw-2") {				return new IDWComputer();
+		} else if(name == "hlrg-bio") {				return new HLRGBiometricsComputer(20, 75);
+		}
+		g_runerr("Unknown computer name (" << name << ")");
 	}
 
-	void finalize(std::vector<double>& write) {
-		//g_debug(idx << ", " << counts.count(idx) << ", " << counts[idx])
-		std::vector<geo::pc::Point> filtered;
-		std::vector<double> out;
-		size_t count = cell.values.size();
-		if(count)
-			count = filter->filter(cell.values.begin(), cell.values.end(), std::back_inserter(filtered));
-		write.push_back(count);
-		if(count) {
-			for(size_t i = 0; i < computers->size(); ++i) {
-				(*computers)[i]->compute(x, y, cell.values, filtered, radius, out);
-				for(double val : out)
-					write.push_back(std::isnan(val) ? NODATA : val);
-				out.clear();
+
+	// 1) Create byte grid (map) corresponding to output raster.
+	// 2) Iterate over bounds. For each one, increment the cells in the grid that are covered by the bounds plus the radius.
+	// 4) Iterate over bounds.
+	//	-- Create a cell if required and add values to it.
+	//  -- Decrement the count for that cell in the grid.
+	//  -- If the count is zero, finalize the cell.
+
+	class RCell {
+	public:
+		std::vector<geo::pc::Point> values;
+	};
+
+	class RWrite {
+	public:
+		int col;
+		int row;
+		std::vector<double> values;
+		RWrite(int col, int row, const std::vector<double>& values) :
+			col(col), row(row),
+			values(values) {
+		}
+	};
+
+	class RFinalize {
+	public:
+		int col, row;
+		double x, y;
+		double radius;
+		RCell cell;
+		PCPointFilter* filter;
+		std::vector<std::unique_ptr<Computer> >* computers;
+
+		RFinalize(int col, int row, double x, double y, double radius, const RCell& cell,
+				PCPointFilter* filter, std::vector<std::unique_ptr<Computer> >* computers) :
+			col(col), row(row),
+			x(x), y(y), radius(radius),
+			cell(cell),
+			filter(filter),
+			computers(computers) {
+		}
+
+		void finalize(std::vector<double>& write) {
+			//g_debug(idx << ", " << counts.count(idx) << ", " << counts[idx])
+			std::vector<geo::pc::Point> filtered;
+			std::vector<double> out;
+			size_t count = cell.values.size();
+			if(count)
+				count = filter->filter(cell.values.begin(), cell.values.end(), std::back_inserter(filtered));
+			write.push_back(count);
+			if(count) {
+				for(size_t i = 0; i < computers->size(); ++i) {
+					(*computers)[i]->compute(x, y, cell.values, filtered, radius, out);
+					for(double val : out)
+						write.push_back(std::isnan(val) ? NODATA : val);
+					out.clear();
+				}
 			}
 		}
-	}
-};
+	};
 
-void rprocess(std::queue<RFinalize>* finalizeQ, std::queue<RWrite>* writeQ,
-		std::condition_variable* fcond, std::condition_variable* wcond,
-		std::mutex* fmtx, std::mutex* wmtx, bool* running) {
-	std::vector<double> write;
-	std::vector<RFinalize> finals;
-	while(*running || !finalizeQ->empty()) {
+	void rprocess(std::queue<RFinalize>* finalizeQ, std::queue<RWrite>* writeQ,
+			std::condition_variable* fcond, std::condition_variable* wcond,
+			std::mutex* fmtx, std::mutex* wmtx, bool* running) {
+		std::vector<double> write;
+		std::vector<RFinalize> finals;
+		while(*running || !finalizeQ->empty()) {
+			{
+				std::unique_lock<std::mutex> lk(*fmtx);
+				while((*running && finalizeQ->empty()) || writeQ->size() > 5000)
+					fcond->wait(lk);
+				while(!finalizeQ->empty()) {
+					finals.push_back(std::move(finalizeQ->front()));
+					finalizeQ->pop();
+				}
+			}
+			{
+				std::unique_lock<std::mutex> lk(*wmtx);
+				for(RFinalize& f : finals) {
+					f.finalize(write);
+					writeQ->emplace(f.col, f.row, write);
+					write.clear();
+				}
+			}
+			finals.clear();
+			wcond->notify_all();
+		}
+	}
+
+	void rwrite(std::queue<RWrite>* writeQ, std::vector<std::unique_ptr<MemRaster> >* rasters,
+		std::condition_variable* wcond, std::condition_variable* fcond, std::mutex* wmtx, bool* running) {
+		std::vector<RWrite> writes;
+		while(*running || !writeQ->empty()) {
+			{
+				std::unique_lock<std::mutex> lk(*wmtx);
+				while(*running && writeQ->empty())
+					wcond->wait(lk);
+				while(!writeQ->empty()) {
+					writes.push_back(std::move(writeQ->front()));
+					writeQ->pop();
+				}
+				fcond->notify_all();
+			}
+			for(RWrite& w : writes) {
+				int i = 0;
+				for(double v : w.values)
+					rasters->at(i++)->setFloat(w.col, w.row, v, 1);
+			}
+			writes.clear();
+		}
+	}
+
+
+	void fixBounds(double* bounds, double resX, double resY, double* easting, double* northing) {
+
+		double aresX = std::abs(resX);
+		double aresY = std::abs(resY);
+
 		{
-			std::unique_lock<std::mutex> lk(*fmtx);
-			while((*running && finalizeQ->empty()) || writeQ->size() > 5000)
-				fcond->wait(lk);
-			while(!finalizeQ->empty()) {
-				finals.push_back(std::move(finalizeQ->front()));
-				finalizeQ->pop();
-			}
+			int a = 0, b = 2;
+			if(resX < 0)
+				a = 2, b = 0;
+			bounds[a] = std::floor(bounds[a] / resX) * resX;
+			bounds[b] = std::ceil(bounds[b] / resX) * resX;
+			a = 1, b = 3;
+			if(resY < 0)
+				a = 3, b = 1;
+			bounds[a] = std::floor(bounds[a] / resY) * resY;
+			bounds[b] = std::ceil(bounds[b] / resY) * resY;
 		}
-		{
-			std::unique_lock<std::mutex> lk(*wmtx);
-			for(RFinalize& f : finals) {
-				f.finalize(write);
-				writeQ->emplace(f.col, f.row, write);
-				write.clear();
-			}
-		}
-		finals.clear();
-		wcond->notify_all();
-	}
-}
 
-void rwrite(std::queue<RWrite>* writeQ, std::vector<std::unique_ptr<MemRaster> >* rasters,
-	std::condition_variable* wcond, std::condition_variable* fcond, std::mutex* wmtx, bool* running) {
-	std::vector<RWrite> writes;
-	while(*running || !writeQ->empty()) {
-		{
-			std::unique_lock<std::mutex> lk(*wmtx);
-			while(*running && writeQ->empty()) 
-				wcond->wait(lk);
-			while(!writeQ->empty()) {
-				writes.push_back(std::move(writeQ->front()));
-				writeQ->pop();
+		if(!std::isnan(*easting)) {
+			if((resX > 0 && *easting < bounds[0]) || (resX < 0 && *easting > bounds[2]))
+				g_argerr("The easting is within the data boundary.");
+			double w = bounds[2] - bounds[0];
+			if(resX > 0) {
+				while(*easting + w < bounds[2])
+					w += resX;
+				bounds[0] = *easting;
+				bounds[2] = *easting + w;
+			} else {
+				while(*easting - w > bounds[1])
+					w += aresX;
+				bounds[2] = *easting;
+				bounds[0] = *easting - w;
 			}
-			fcond->notify_all();
+		} else {
+			*easting = bounds[resX > 0 ? 0 : 2];
 		}
-		for(RWrite& w : writes) {
-			int i = 0;
-			for(double v : w.values)
-				rasters->at(i++)->setFloat(w.col, w.row, v, 1);
+
+		if(!std::isnan(*northing)) {
+			if((resY > 0 && *northing < bounds[1]) || (resY < 0 && *northing > bounds[3]))
+				g_argerr("The *northing is within the data boundary.");
+			double h = bounds[3] - bounds[1];
+			if(resY > 0) {
+				while(*northing + h < bounds[3])
+					h += resY;
+				bounds[1] = *northing;
+				bounds[3] = *northing + h;
+			} else {
+				while(*northing - h > bounds[1])
+					h += aresY;
+				bounds[3] = *northing;
+				bounds[1] = *northing - h;
+			}
+		} else {
+			*northing = bounds[resY > 0 ? 1 : 3];
 		}
-		writes.clear();
 	}
+
 }
 
 Rasterizer::Rasterizer(const std::vector<std::string> filenames) :
@@ -221,67 +283,14 @@ double Rasterizer::density(double resolution, double radius) {
 	return (sum / count) * 1.5 * cell;
 }
 
-void fixBounds(double* bounds, double resX, double resY, double* easting, double* northing) {
-
-	double aresX = std::abs(resX);
-	double aresY = std::abs(resY);
-
-	{
-		int a = 0, b = 2;
-		if(resX < 0)
-			a = 2, b = 0;
-		bounds[a] = std::floor(bounds[a] / resX) * resX;
-		bounds[b] = std::ceil(bounds[b] / resX) * resX;
-		a = 1, b = 3;
-		if(resY < 0)
-			a = 3, b = 1;
-		bounds[a] = std::floor(bounds[a] / resY) * resY;
-		bounds[b] = std::ceil(bounds[b] / resY) * resY;
-	}
-
-	if(!std::isnan(*easting)) {
-		if((resX > 0 && *easting < bounds[0]) || (resX < 0 && *easting > bounds[2]))
-			g_argerr("The easting is within the data boundary.");
-		double w = bounds[2] - bounds[0];
-		if(resX > 0) {
-			while(*easting + w < bounds[2])
-				w += resX;
-			bounds[0] = *easting;
-			bounds[2] = *easting + w;
-		} else {
-			while(*easting - w > bounds[1])
-				w += aresX;
-			bounds[2] = *easting;
-			bounds[0] = *easting - w;
-		}
-	} else {
-		*easting = bounds[resX > 0 ? 0 : 2];
-	}
-
-	if(!std::isnan(*northing)) {
-		if((resY > 0 && *northing < bounds[1]) || (resY < 0 && *northing > bounds[3]))
-			g_argerr("The *northing is within the data boundary.");
-		double h = bounds[3] - bounds[1];
-		if(resY > 0) {
-			while(*northing + h < bounds[3])
-				h += resY;
-			bounds[1] = *northing;
-			bounds[3] = *northing + h;
-		} else {
-			while(*northing - h > bounds[1])
-				h += aresY;
-			bounds[3] = *northing;
-			bounds[1] = *northing - h;
-		}
-	} else {
-		*northing = bounds[resY > 0 ? 1 : 3];
-	}
-}
-
 void Rasterizer::setFilter(PCPointFilter* filter) {
 	//if(m_filter)
 	//	delete m_filter;
 	m_filter = filter;
+}
+
+PCPointFilter* Rasterizer::filter() const {
+	return m_filter;
 }
 
 Rasterizer::~Rasterizer() {
@@ -305,8 +314,11 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 		g_argerr("No methods given; defaulting to mean");
 
 	std::vector<std::unique_ptr<Computer> > computers;
-	for(const std::string& name : types)
-		computers.emplace_back(getComputer(name));
+	for(const std::string& name : types) {
+		std::unique_ptr<geo::pc::Computer> comp(getComputer(name));
+		comp->setRasterizer(this);
+		computers.push_back(std::move(comp));
+	}
 
 	g_trace("Checking file bounds");
 	double bounds[4] = {G_DBL_MAX_POS, G_DBL_MAX_POS, G_DBL_MIN_POS, G_DBL_MIN_POS};

@@ -30,6 +30,10 @@ using namespace geo::raster;
 using namespace geo::util;
 using namespace geo::pc;
 
+bool geo::pc::pointSort(const geo::pc::Point& a, const geo::pc::Point& b) {
+	return a.value() < b.value();
+}
+
 PCFile::PCFile(const std::string& filename, double x, double y, double size, double buffer) :
 	m_x(x), m_y(y),
 	m_fileBounds{G_DBL_MAX_POS, G_DBL_MAX_POS, G_DBL_MIN_POS, G_DBL_MIN_POS, G_DBL_MAX_POS, G_DBL_MIN_POS},
