@@ -160,7 +160,7 @@ int HLRGBiometricsComputer::compute(double x, double y, const std::vector<geo::p
 	if(count) {
 		hlrgLHQ(_pts, m_bands, out);
 	} else {
-		for(int i = 0; i < m_bands; ++i)
+		for(int i = 0; i <= m_bands; ++i)
 			out.push_back(std::nan(""));
 	}
 
@@ -168,7 +168,7 @@ int HLRGBiometricsComputer::compute(double x, double y, const std::vector<geo::p
 	if(count) {
 		hlrgCCF(pts, _pts, m_bands, threshold, out);
 	} else {
-		for(int i = 0; i < m_bands; ++i)
+		for(int i = 0; i <= m_bands; ++i)
 			out.push_back(0);
 	}
 
