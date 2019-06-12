@@ -1120,7 +1120,7 @@ bool _fixCoords(int& srcCol, int& srcRow, int& dstCol, int& dstRow, int& cols, i
 	if(rows <= 0) rows = srcRows;
 
 	if(srcCol >= srcCols || srcRow >= srcRows || srcCol + cols < 0 || srcRow + rows < 0) {
-		//g_warn("Col/row out of range.")
+		g_warn("Col/row out of range." << srcCol << ", " << srcRow << ", " << srcCols << ", " << srcRows << ", " << cols << ", " << rows);
 		return false;
 	}
 	if(srcCol < 0) {
@@ -1152,7 +1152,7 @@ bool _fixCoords(int& srcCol, int& srcRow, int& dstCol, int& dstRow, int& cols, i
 		rows = dstRows - dstRow;
 	}
 	if(cols <= 0 || rows <= 0) {
-		//g_warn("Zero copy area.")
+		g_warn("Zero copy area.")
 		return false;
 	}
 	return true;
