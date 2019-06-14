@@ -13,25 +13,14 @@
 #include <gdal_alg.h>
 #include <ogr_feature.h>
 #include <ogrsf_frmts.h>
+#include <ogr_geometry.h>
 
 #include <geos_c.h>
-#include <geos/geom/PrecisionModel.h>
-#include <geos/geom/GeometryFactory.h>
-#include <geos/geom/CoordinateSequenceFactory.h>
-#include <geos/geom/CoordinateArraySequence.h>
-#include <geos/geom/Geometry.h>
-#include <geos/geom/Polygon.h>
-#include <geos/geom/MultiPolygon.h>
-#include <geos/geom/Point.h>
-#include <geos/geom/LinearRing.h>
-#include <geos/geom/CoordinateSequence.h>
-#include <geos/operation/union/CascadedPolygonUnion.h>
 
 #include "raster.hpp"
 
 using namespace geo::raster;
 using namespace geos::geom;
-using namespace geos::operation::geounion;
 
 std::atomic<long> __fid(0);		// A feature ID for geometries.
 std::mutex __gmtx;  			// For the geoms map.
@@ -41,12 +30,12 @@ std::condition_variable __cv;	// For waiting on the queue.
 
 // Write to the file from the map of geometry lists.
 // On each loop, extracts a single finalized poly ID and loads those polys for unioning.
-void _writeToFile(std::unordered_map<int, std::vector<Polygon*> >* geoms, std::set<int>* finalIds,
-		const std::string* idField, OGRLayer* layer, const GeometryFactory* fact, GEOSContextHandle_t* gctx,
+void _writeToFile(std::unordered_map<int, std::vector<GEOSGeometry*> >* geoms, std::set<int>* finalIds,
+		const std::string* idField, OGRLayer* layer, GEOSContextHandle_t* gctx,
 		bool removeHoles, bool removeDangles, bool* running, bool* cancel) {
 
-	std::vector<Polygon*> polys;
-	Geometry* geom;
+	std::vector<GEOSGeometry*> polys;
+	GEOSGeometry* geom = nullptr;
 	int id;
 
 	while(!*cancel && (*running || !finalIds->empty())) {
@@ -78,15 +67,19 @@ void _writeToFile(std::unordered_map<int, std::vector<Polygon*> >* geoms, std::s
 			continue;
 
 		if(*cancel) {
-			for(Polygon* p : polys)
+			for(GEOSGeometry* p : polys)
 				delete p;
 			continue;
 		}
 
 		// Union the polys.
-		geom = geos::operation::geounion::CascadedPolygonUnion::CascadedPolygonUnion::Union(&polys);
-		for(Polygon* p : polys)
-			delete p;
+		geom = polys.front();
+		for(size_t i = 1; i < polys.size(); ++i) {
+			GEOSGeometry* tmp = GEOSUnion_r(*gctx, geom, polys[i]); //
+			delete geom;
+			delete polys[i];
+			geom = tmp;
+		}
 		polys.clear();
 
 		if(*cancel) {
@@ -96,41 +89,44 @@ void _writeToFile(std::unordered_map<int, std::vector<Polygon*> >* geoms, std::s
 
 		// If we're removing dangles, throw away all but the
 		// largest single polygon. If it was originally a polygon, there are no dangles.
-		if(!*cancel && removeDangles && geom->getNumGeometries() > 1) {
+		size_t numGeoms;
+		if(!*cancel && removeDangles && (numGeoms = GEOSGetNumGeometries(geom)) > 1) {
 			size_t idx = 0;
-			double area = 0;
-			for(size_t i = 0; i < geom->getNumGeometries(); ++i) {
-				const Geometry* p = geom->getGeometryN(i);
-				double a = p->getArea();
+			double a, area = 0;
+			for(size_t i = 0; i < numGeoms; ++i) {
+				const GEOSGeometry* p = GEOSGetGeometryN(geom, i);
+				GEOSArea(p, &a);
 				if(a > area) {
 					area = a;
 					idx = i;
 				}
 			}
-			Geometry *g = geom->getGeometryN(idx)->clone(); // Force copy.
+			GEOSGeometry *g = GEOSGeom_clone_r(*gctx, GEOSGetGeometryN(geom, idx)); // Force copy.
 			delete geom;
 			geom = g;
 		}
 
 		// If we're removing holes, extract the exterior rings of all constituent polygons.
 		if(!*cancel && removeHoles) {
-			std::vector<Geometry*>* geoms0 = new std::vector<Geometry*>();
-			for(size_t i = 0; i < geom->getNumGeometries(); ++i) {
-				const Polygon* p = dynamic_cast<const Polygon*>(geom->getGeometryN(i));
-				const LineString* l = p->getExteriorRing();
-				LinearRing* r = fact->createLinearRing(l->getCoordinates());
-				geoms0->push_back(fact->createPolygon(r, nullptr));
+			std::vector<GEOSGeometry*> geoms0;
+			for(size_t i = 0; i < GEOSGetNumGeometries(geom); ++i) {
+				const GEOSGeometry* p = GEOSGetGeometryN(geom, i);
+				const GEOSGeometry* l = GEOSGetExteriorRing_r(*gctx, p);
+				const GEOSCoordSequence* seq = GEOSGeom_getCoordSeq(l);
+				GEOSGeometry* r = GEOSGeom_createLinearRing(GEOSCoordSeq_clone(seq));
+				GEOSGeometry* npoly = GEOSGeom_createPolygon(r, 0, 0);
+				geoms0.push_back(npoly);
 			}
-			Geometry* g = fact->createMultiPolygon(geoms0); // Do not copy -- take ownership.
+			GEOSGeometry* g = GEOSGeom_createCollection(GEOSGeomTypes::GEOS_MULTIPOLYGON, geoms0.data(), geoms0.size()); // Do not copy -- take ownership.
 			delete geom;
 			geom = g;
 		}
 
 		// If the result is not a multi, make it one.
-		if(!*cancel && geom->getGeometryTypeId() != GeometryTypeId::GEOS_MULTIPOLYGON) {
-			std::vector<Geometry*>* gs = new std::vector<Geometry*>();
-			gs->push_back(geom);
-			geom = fact->createMultiPolygon(gs);
+		if(!*cancel && GEOSGeomTypeId(geom) != GEOSGeomTypes::GEOS_MULTIPOLYGON) {
+			std::vector<GEOSGeometry*> gs;
+			gs.push_back(geom);
+			geom = GEOSGeom_createCollection(GEOSGeomTypes::GEOS_MULTIPOLYGON, gs.data(), gs.size());
 		}
 
 		if(!geom)
@@ -166,17 +162,22 @@ void _writeToFile(std::unordered_map<int, std::vector<Polygon*> >* geoms, std::s
 }
 
 // Produce a rectangular polygon from the four corners.
-Polygon* _makeGeom(double x0, double y0, double x1, double y1, const GeometryFactory* fact, int dims) {
+GEOSGeometry* _makeGeom(double x0, double y0, double x1, double y1, int dims) {
 
 	// Build the geometry.
-	CoordinateSequence* seq = fact->getCoordinateSequenceFactory()->create(5, dims);
-	seq->setAt(Coordinate(x0, y0, 0), 0);
-	seq->setAt(Coordinate(x0, y1, 0), 1);
-	seq->setAt(Coordinate(x1, y1, 0), 2);
-	seq->setAt(Coordinate(x1, y0, 0), 3);
-	seq->setAt(Coordinate(x0, y0, 0), 4);
-	LinearRing* ring = fact->createLinearRing(seq);
-	Polygon* poly = fact->createPolygon(ring, NULL);
+	GEOSCoordSequence* seq = GEOSCoordSeq_create(5, dims);
+	GEOSCoordSeq_setX(seq, 0, x0);
+	GEOSCoordSeq_setY(seq, 0, y0);
+	GEOSCoordSeq_setX(seq, 1, x0);
+	GEOSCoordSeq_setY(seq, 1, y1);
+	GEOSCoordSeq_setX(seq, 2, x1);
+	GEOSCoordSeq_setY(seq, 2, y1);
+	GEOSCoordSeq_setX(seq, 3, x1);
+	GEOSCoordSeq_setY(seq, 3, y0);
+	GEOSCoordSeq_setX(seq, 4, x0);
+	GEOSCoordSeq_setY(seq, 4, y0);
+	GEOSGeometry* ring = GEOSGeom_createLinearRing(seq);
+	GEOSGeometry* poly = GEOSGeom_createPolygon(ring, 0, 0);
 	return poly;
 }
 
@@ -282,14 +283,6 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 
 	// Create the output dataset
 	GEOSContextHandle_t gctx = OGRGeometry::createGEOSContext();
-	PrecisionModel pm(10000, 0, 0);
-#if GEOS_VERSION_MINOR > 4
-	GeometryFactory::unique_ptr factp = GeometryFactory::create(&pm);
-#else
-	std::unique_ptr<GeometryFactory> factp(new GeometryFactory(&pm));
-#endif
-
-	const GeometryFactory* fact = factp.get();
 
 	OGRSpatialReference* sr = nullptr;
 	if(!projection.empty())
@@ -317,7 +310,7 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 	double yeps = 0.001 * (resY > 0 ? 1 : -1);
 
 	// Data containers.
-	std::unordered_map<int, std::vector<Polygon*> > geoms;
+	std::unordered_map<int, std::vector<GEOSGeometry*> > geoms;
 	std::set<int> activeIds;
 	std::set<int> finalIds;
 
@@ -327,7 +320,7 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 
 	// Start output threads.
 	for(int i = 0; i < threads; ++i)
-		ths.emplace_back(&_writeToFile, &geoms, &finalIds, &idField, layer, fact, &gctx, removeHoles, removeDangles, &running, &cancel);
+		ths.emplace_back(&_writeToFile, &geoms, &finalIds, &idField, layer, &gctx, removeHoles, removeDangles, &running, &cancel);
 
 	// Process raster.
 	for(int r = 0; r < rows; ++r) {
@@ -362,7 +355,7 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 				x1 = startX + c * resX;
 				// If the value is a valid ID, create and the geometry and save it for writing.
 				if(v0 > 0) {
-					geoms[v0].push_back(_makeGeom(x0, y0, x1 + xeps, y1 + yeps, fact, d3 ? 3 : 2));
+					geoms[v0].push_back(_makeGeom(x0, y0, x1 + xeps, y1 + yeps, d3 ? 3 : 2));
 					activeIds.insert(v0);
 				}
 				// Update values for next loop.
