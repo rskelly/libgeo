@@ -16,7 +16,7 @@ brew install pdal # pcl, pyqt, vtk, etc.
 # Checkout the repo
 git clone https://github.com/rskelly/libgeo
 cd libgeo
-git checkout geos_capi #-b tag/olaf1.0
+git checkout tags/olaf
 mkdir build
 cd build
 cmake -DBUILD_APPS:BOOL=TRUE -DCMAKE_BUILD_TYPE=Release -DOPENSSL_ROOT_DIR=/usr/local/Cellar/openssl/1.0.2s ..
