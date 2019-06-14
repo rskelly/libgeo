@@ -28,9 +28,6 @@
 #include <ogr_spatialref.h>
 #include <ogr_geometry.h>
 
-#include <geos/geom/Geometry.h>
-#include <geos/geom/GeometryFactory.h>
-
 #include <Eigen/Core>
 
 #include "util.hpp"
@@ -1169,6 +1166,8 @@ namespace geo {
             			fscore[n] = tgscore + heuristic(n, goal);
             		}
             	}
+
+            	return true;
             }
 
             /**
