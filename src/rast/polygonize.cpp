@@ -68,7 +68,7 @@ void _writeToFile(std::unordered_map<int, std::vector<GEOSGeometry*> >* geoms, s
 
 		if(*cancel) {
 			for(GEOSGeometry* p : polys)
-				delete p;
+				GEOSGeom_destroy(p);
 			continue;
 		}
 
@@ -76,14 +76,14 @@ void _writeToFile(std::unordered_map<int, std::vector<GEOSGeometry*> >* geoms, s
 		geom = polys.front();
 		for(size_t i = 1; i < polys.size(); ++i) {
 			GEOSGeometry* tmp = GEOSUnion_r(*gctx, geom, polys[i]); //
-			delete geom;
-			delete polys[i];
+			GEOSGeom_destroy(geom);
+			GEOSGeom_destroy(polys[i]);
 			geom = tmp;
 		}
 		polys.clear();
 
 		if(*cancel) {
-			delete geom;
+			GEOSGeom_destroy(geom);
 			continue;
 		}
 
@@ -102,14 +102,14 @@ void _writeToFile(std::unordered_map<int, std::vector<GEOSGeometry*> >* geoms, s
 				}
 			}
 			GEOSGeometry *g = GEOSGeom_clone_r(*gctx, GEOSGetGeometryN(geom, idx)); // Force copy.
-			delete geom;
+			GEOSGeom_destroy(geom);
 			geom = g;
 		}
 
 		// If we're removing holes, extract the exterior rings of all constituent polygons.
 		if(!*cancel && removeHoles) {
 			std::vector<GEOSGeometry*> geoms0;
-			for(size_t i = 0; i < GEOSGetNumGeometries(geom); ++i) {
+			for(int i = 0; i < GEOSGetNumGeometries(geom); ++i) {
 				const GEOSGeometry* p = GEOSGetGeometryN(geom, i);
 				const GEOSGeometry* l = GEOSGetExteriorRing_r(*gctx, p);
 				const GEOSCoordSequence* seq = GEOSGeom_getCoordSeq(l);
@@ -118,7 +118,7 @@ void _writeToFile(std::unordered_map<int, std::vector<GEOSGeometry*> >* geoms, s
 				geoms0.push_back(npoly);
 			}
 			GEOSGeometry* g = GEOSGeom_createCollection(GEOSGeomTypes::GEOS_MULTIPOLYGON, geoms0.data(), geoms0.size()); // Do not copy -- take ownership.
-			delete geom;
+			GEOSGeom_destroy(geom);
 			geom = g;
 		}
 
@@ -133,13 +133,13 @@ void _writeToFile(std::unordered_map<int, std::vector<GEOSGeometry*> >* geoms, s
 			g_runerr("Null geometry.");
 
 		if(*cancel) {
-			delete geom;
+			GEOSGeom_destroy(geom);
 			continue;
 		}
 
 		// Create and write the OGR geometry.
 		OGRGeometry* ogeom = OGRGeometryFactory::createFromGEOS(*gctx, (GEOSGeom) geom);
-		delete geom;
+		GEOSGeom_destroy(geom);
 
 		// Create and configure the feature. Feature owns the OGRGeometry.
 		OGRFeature* feat = OGRFeature::CreateFeature(layer->GetLayerDefn()); // Creates on the OGR heap.
@@ -253,6 +253,8 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 
 	if(threads < 1)
 		threads = 1;
+
+	initGEOS(0, 0);
 
 	MemRaster src;
 
@@ -403,6 +405,8 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 	GDALClose(ds);
 
 	status.update(1.0f, "Finished polygonization");
+
+	finishGEOS();
 
 }
 
