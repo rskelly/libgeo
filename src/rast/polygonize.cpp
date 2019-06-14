@@ -20,219 +20,223 @@
 #include "raster.hpp"
 
 using namespace geo::raster;
-using namespace geos::geom;
 
-std::atomic<long> __fid(0);		// A feature ID for geometries.
-std::mutex __gmtx;  			// For the geoms map.
-std::mutex __fmtx; 			// For the final list.
-std::mutex __omtx;  			// For OGR writes.
-std::condition_variable __cv;	// For waiting on the queue.
+namespace {
 
-// Write to the file from the map of geometry lists.
-// On each loop, extracts a single finalized poly ID and loads those polys for unioning.
-void _writeToFile(std::unordered_map<int, std::vector<GEOSGeometry*> >* geoms, std::set<int>* finalIds,
-		const std::string* idField, OGRLayer* layer, GEOSContextHandle_t* gctx,
-		bool removeHoles, bool removeDangles, bool* running, bool* cancel) {
+	std::atomic<long> __fid(0);		// A feature ID for geometries.
+	std::mutex __gmtx;  			// For the geoms map.
+	std::mutex __fmtx; 			// For the final list.
+	std::mutex __omtx;  			// For OGR writes.
+	std::condition_variable __cv;	// For waiting on the queue.
 
-	std::vector<GEOSGeometry*> polys;
-	GEOSGeometry* geom = nullptr;
-	int id;
+	// Write to the file from the map of geometry lists.
+	// On each loop, extracts a single finalized poly ID and loads those polys for unioning.
+	void writeToFile(std::unordered_map<int, std::vector<GEOSGeometry*> >* geoms, std::set<int>* finalIds,
+			const std::string* idField, OGRLayer* layer, GEOSContextHandle_t* gctx,
+			bool removeHoles, bool removeDangles, bool* running, bool* cancel) {
 
-	while(!*cancel && (*running || !finalIds->empty())) {
+		std::vector<GEOSGeometry*> polys;
+		GEOSGeometry* geom = nullptr;
+		int id;
 
-		// Get an ID and the list of polys from the queue.
-		{
-			std::unique_lock<std::mutex> lk(__fmtx);
-			// Wait for a notification if the queue is empty.
-			while(!*cancel && *running && finalIds->empty())
-				__cv.wait(lk);
-			// If the wakeup is spurious, skip.
-			if(finalIds->empty())
+		while(!*cancel && (*running || !finalIds->empty())) {
+
+			// Get an ID and the list of polys from the queue.
+			{
+				std::unique_lock<std::mutex> lk(__fmtx);
+				// Wait for a notification if the queue is empty.
+				while(!*cancel && *running && finalIds->empty())
+					__cv.wait(lk);
+				// If the wakeup is spurious, skip.
+				if(finalIds->empty())
+					continue;
+				// Get the ID.
+				id = *(finalIds->begin());
+				finalIds->erase(id);
+			}
+			// Get the list of polys and remove the list from the map.
+			{
+				std::lock_guard<std::mutex> lk(__gmtx);
+				// If the geoms list is still here, grab it.
+				if(geoms->find(id) == geoms->end())
+					continue;
+				polys = geoms->at(id);
+				geoms->erase(id);
+			}
+
+			if(polys.empty())
 				continue;
-			// Get the ID.
-			id = *(finalIds->begin());
-			finalIds->erase(id);
-		}
-		// Get the list of polys and remove the list from the map.
-		{
-			std::lock_guard<std::mutex> lk(__gmtx);
-			// If the geoms list is still here, grab it.
-			if(geoms->find(id) == geoms->end())
+
+			if(*cancel) {
+				for(GEOSGeometry* p : polys)
+					GEOSGeom_destroy(p);
 				continue;
-			polys = geoms->at(id);
-			geoms->erase(id);
-		}
+			}
 
-		if(polys.empty())
-			continue;
+			// Union the polys.
+			geom = polys.front();
+			for(size_t i = 1; i < polys.size(); ++i) {
+				GEOSGeometry* tmp = GEOSUnion_r(*gctx, geom, polys[i]); //
+				GEOSGeom_destroy(geom);
+				GEOSGeom_destroy(polys[i]);
+				geom = tmp;
+			}
+			polys.clear();
 
-		if(*cancel) {
-			for(GEOSGeometry* p : polys)
-				GEOSGeom_destroy(p);
-			continue;
-		}
+			if(*cancel) {
+				GEOSGeom_destroy(geom);
+				continue;
+			}
 
-		// Union the polys.
-		geom = polys.front();
-		for(size_t i = 1; i < polys.size(); ++i) {
-			GEOSGeometry* tmp = GEOSUnion_r(*gctx, geom, polys[i]); //
-			GEOSGeom_destroy(geom);
-			GEOSGeom_destroy(polys[i]);
-			geom = tmp;
-		}
-		polys.clear();
-
-		if(*cancel) {
-			GEOSGeom_destroy(geom);
-			continue;
-		}
-
-		// If we're removing dangles, throw away all but the
-		// largest single polygon. If it was originally a polygon, there are no dangles.
-		size_t numGeoms;
-		if(!*cancel && removeDangles && (numGeoms = GEOSGetNumGeometries(geom)) > 1) {
-			size_t idx = 0;
-			double a, area = 0;
-			for(size_t i = 0; i < numGeoms; ++i) {
-				const GEOSGeometry* p = GEOSGetGeometryN(geom, i);
-				GEOSArea(p, &a);
-				if(a > area) {
-					area = a;
-					idx = i;
+			// If we're removing dangles, throw away all but the
+			// largest single polygon. If it was originally a polygon, there are no dangles.
+			size_t numGeoms;
+			if(!*cancel && removeDangles && (numGeoms = GEOSGetNumGeometries(geom)) > 1) {
+				size_t idx = 0;
+				double a, area = 0;
+				for(size_t i = 0; i < numGeoms; ++i) {
+					const GEOSGeometry* p = GEOSGetGeometryN(geom, i);
+					GEOSArea(p, &a);
+					if(a > area) {
+						area = a;
+						idx = i;
+					}
 				}
+				GEOSGeometry *g = GEOSGeom_clone_r(*gctx, GEOSGetGeometryN(geom, idx)); // Force copy.
+				GEOSGeom_destroy(geom);
+				geom = g;
 			}
-			GEOSGeometry *g = GEOSGeom_clone_r(*gctx, GEOSGetGeometryN(geom, idx)); // Force copy.
-			GEOSGeom_destroy(geom);
-			geom = g;
-		}
 
-		// If we're removing holes, extract the exterior rings of all constituent polygons.
-		if(!*cancel && removeHoles) {
-			std::vector<GEOSGeometry*> geoms0;
-			for(int i = 0; i < GEOSGetNumGeometries(geom); ++i) {
-				const GEOSGeometry* p = GEOSGetGeometryN(geom, i);
-				const GEOSGeometry* l = GEOSGetExteriorRing_r(*gctx, p);
-				const GEOSCoordSequence* seq = GEOSGeom_getCoordSeq(l);
-				GEOSGeometry* r = GEOSGeom_createLinearRing(GEOSCoordSeq_clone(seq));
-				GEOSGeometry* npoly = GEOSGeom_createPolygon(r, 0, 0);
-				geoms0.push_back(npoly);
+			// If we're removing holes, extract the exterior rings of all constituent polygons.
+			if(!*cancel && removeHoles) {
+				std::vector<GEOSGeometry*> geoms0;
+				for(int i = 0; i < GEOSGetNumGeometries(geom); ++i) {
+					const GEOSGeometry* p = GEOSGetGeometryN(geom, i);
+					const GEOSGeometry* l = GEOSGetExteriorRing_r(*gctx, p);
+					const GEOSCoordSequence* seq = GEOSGeom_getCoordSeq(l);
+					GEOSGeometry* r = GEOSGeom_createLinearRing(GEOSCoordSeq_clone(seq));
+					GEOSGeometry* npoly = GEOSGeom_createPolygon(r, 0, 0);
+					geoms0.push_back(npoly);
+				}
+				GEOSGeometry* g = GEOSGeom_createCollection(GEOSGeomTypes::GEOS_MULTIPOLYGON, geoms0.data(), geoms0.size()); // Do not copy -- take ownership.
+				GEOSGeom_destroy(geom);
+				geom = g;
 			}
-			GEOSGeometry* g = GEOSGeom_createCollection(GEOSGeomTypes::GEOS_MULTIPOLYGON, geoms0.data(), geoms0.size()); // Do not copy -- take ownership.
+
+			// If the result is not a multi, make it one.
+			if(!*cancel && GEOSGeomTypeId(geom) != GEOSGeomTypes::GEOS_MULTIPOLYGON) {
+				std::vector<GEOSGeometry*> gs;
+				gs.push_back(geom);
+				geom = GEOSGeom_createCollection(GEOSGeomTypes::GEOS_MULTIPOLYGON, gs.data(), gs.size());
+			}
+
+			if(!geom)
+				g_runerr("Null geometry.");
+
+			if(*cancel) {
+				GEOSGeom_destroy(geom);
+				continue;
+			}
+
+			// Create and write the OGR geometry.
+			OGRGeometry* ogeom = OGRGeometryFactory::createFromGEOS(*gctx, (GEOSGeom) geom);
 			GEOSGeom_destroy(geom);
-			geom = g;
+
+			// Create and configure the feature. Feature owns the OGRGeometry.
+			OGRFeature* feat = OGRFeature::CreateFeature(layer->GetLayerDefn()); // Creates on the OGR heap.
+			feat->SetGeometryDirectly(ogeom);
+			feat->SetField(idField->c_str(), (GIntBig) id);
+			feat->SetFID(++__fid);
+
+			// Write to the output file.
+			int err;
+			{
+				std::lock_guard<std::mutex> lk(__omtx);
+				err = layer->CreateFeature(feat);
+			}
+
+			OGRFeature::DestroyFeature(feat);
+
+			if(OGRERR_NONE != err)
+				g_runerr("Failed to add geometry.");
 		}
-
-		// If the result is not a multi, make it one.
-		if(!*cancel && GEOSGeomTypeId(geom) != GEOSGeomTypes::GEOS_MULTIPOLYGON) {
-			std::vector<GEOSGeometry*> gs;
-			gs.push_back(geom);
-			geom = GEOSGeom_createCollection(GEOSGeomTypes::GEOS_MULTIPOLYGON, gs.data(), gs.size());
-		}
-
-		if(!geom)
-			g_runerr("Null geometry.");
-
-		if(*cancel) {
-			GEOSGeom_destroy(geom);
-			continue;
-		}
-
-		// Create and write the OGR geometry.
-		OGRGeometry* ogeom = OGRGeometryFactory::createFromGEOS(*gctx, (GEOSGeom) geom);
-		GEOSGeom_destroy(geom);
-
-		// Create and configure the feature. Feature owns the OGRGeometry.
-		OGRFeature* feat = OGRFeature::CreateFeature(layer->GetLayerDefn()); // Creates on the OGR heap.
-		feat->SetGeometryDirectly(ogeom);
-		feat->SetField(idField->c_str(), (GIntBig) id);
-		feat->SetFID(++__fid);
-
-		// Write to the output file.
-		int err;
-		{
-			std::lock_guard<std::mutex> lk(__omtx);
-			err = layer->CreateFeature(feat);
-		}
-
-		OGRFeature::DestroyFeature(feat);
-
-		if(OGRERR_NONE != err)
-			g_runerr("Failed to add geometry.");
 	}
-}
 
-// Produce a rectangular polygon from the four corners.
-GEOSGeometry* _makeGeom(double x0, double y0, double x1, double y1, int dims) {
+	// Produce a rectangular polygon from the four corners.
+	GEOSGeometry* makeGeom(double x0, double y0, double x1, double y1, int dims) {
 
-	// Build the geometry.
-	GEOSCoordSequence* seq = GEOSCoordSeq_create(5, dims);
-	GEOSCoordSeq_setX(seq, 0, x0);
-	GEOSCoordSeq_setY(seq, 0, y0);
-	GEOSCoordSeq_setX(seq, 1, x0);
-	GEOSCoordSeq_setY(seq, 1, y1);
-	GEOSCoordSeq_setX(seq, 2, x1);
-	GEOSCoordSeq_setY(seq, 2, y1);
-	GEOSCoordSeq_setX(seq, 3, x1);
-	GEOSCoordSeq_setY(seq, 3, y0);
-	GEOSCoordSeq_setX(seq, 4, x0);
-	GEOSCoordSeq_setY(seq, 4, y0);
-	GEOSGeometry* ring = GEOSGeom_createLinearRing(seq);
-	GEOSGeometry* poly = GEOSGeom_createPolygon(ring, 0, 0);
-	return poly;
-}
+		// Build the geometry.
+		GEOSCoordSequence* seq = GEOSCoordSeq_create(5, dims);
+		GEOSCoordSeq_setX(seq, 0, x0);
+		GEOSCoordSeq_setY(seq, 0, y0);
+		GEOSCoordSeq_setX(seq, 1, x0);
+		GEOSCoordSeq_setY(seq, 1, y1);
+		GEOSCoordSeq_setX(seq, 2, x1);
+		GEOSCoordSeq_setY(seq, 2, y1);
+		GEOSCoordSeq_setX(seq, 3, x1);
+		GEOSCoordSeq_setY(seq, 3, y0);
+		GEOSCoordSeq_setX(seq, 4, x0);
+		GEOSCoordSeq_setY(seq, 4, y0);
+		GEOSGeometry* ring = GEOSGeom_createLinearRing(seq);
+		GEOSGeometry* poly = GEOSGeom_createPolygon(ring, 0, 0);
+		return poly;
+	}
 
-// Make or open an OGR database to write the polygons to.
-void _makeDataset(const std::string& filename, const std::string& driver, const std::string& layerName, const std::string& idField,
-		OGRSpatialReference* sr, OGRwkbGeometryType gType,
-		GDALDataset** ds, OGRLayer** layer) {
+	// Make or open an OGR database to write the polygons to.
+	void makeDataset(const std::string& filename, const std::string& driver, const std::string& layerName, const std::string& idField,
+			OGRSpatialReference* sr, OGRwkbGeometryType gType,
+			GDALDataset** ds, OGRLayer** layer) {
 
-	*ds = (GDALDataset*) GDALOpenEx(filename.c_str(), GDAL_OF_VECTOR | GDAL_OF_UPDATE, nullptr, nullptr, nullptr);
+		*ds = (GDALDataset*) GDALOpenEx(filename.c_str(), GDAL_OF_VECTOR | GDAL_OF_UPDATE, nullptr, nullptr, nullptr);
 
-	std::string drvl = Util::lower(driver);
+		std::string drvl = Util::lower(driver);
 
-	if(!*ds) {
-		// Get the vector driver.
-		GDALDriver *drv = GetGDALDriverManager()->GetDriverByName(driver.c_str());
-		if(!drv)
-			g_runerr("Failed to find driver for " << driver << ".");
+		if(!*ds) {
+			// Get the vector driver.
+			GDALDriver *drv = GetGDALDriverManager()->GetDriverByName(driver.c_str());
+			if(!drv)
+				g_runerr("Failed to find driver for " << driver << ".");
 
-		// Create an output dataset for the polygons.
-		char** dopts = NULL;
-		if(drvl == "sqlite")
-			dopts = CSLSetNameValue(dopts, "SPATIALITE", "YES");
+			// Create an output dataset for the polygons.
+			char** dopts = NULL;
+			if(drvl == "sqlite")
+				dopts = CSLSetNameValue(dopts, "SPATIALITE", "YES");
 
-		*ds = drv->Create(filename.c_str(), 0, 0, 0, GDT_Unknown, dopts);
-		CPLFree(dopts);
-		if(!*ds)
-			g_runerr("Failed to create dataset " << filename << ".");
+			*ds = drv->Create(filename.c_str(), 0, 0, 0, GDT_Unknown, dopts);
+			CPLFree(dopts);
+			if(!*ds)
+				g_runerr("Failed to create dataset " << filename << ".");
+
+		}
+
+		// Create the layer.
+		char** lopts = NULL;
+		if(drvl == "sqlite") {
+			lopts = CSLSetNameValue(lopts, "FORMAT", "SPATIALITE");
+		} else if(drvl == "esri shapefile") {
+			lopts = CSLSetNameValue(lopts, "2GB_LIMIT", "YES");
+		}
+		*layer = (*ds)->CreateLayer(layerName.c_str(), sr, gType, lopts);
+		CPLFree(lopts);
+
+		if(!*layer)
+			g_runerr("Failed to create layer " << layerName << ".");
+
+		// There's only one field -- an ID.
+		OGRFieldDefn field(idField.c_str(), OFTInteger);
+		(*layer)->CreateField(&field);
 
 	}
 
-	// Create the layer.
-	char** lopts = NULL;
-	if(drvl == "sqlite") {
-		lopts = CSLSetNameValue(lopts, "FORMAT", "SPATIALITE");
-	} else if(drvl == "esri shapefile") {
-		lopts = CSLSetNameValue(lopts, "2GB_LIMIT", "YES");
+	// Produce a status message from the current and total row counds.
+	std::string rowStatus(int r, int rows) {
+		std::stringstream ss;
+		ss << "Polygonizing row " << (r + 1) << " of " << rows;
+		return ss.str();
 	}
-	*layer = (*ds)->CreateLayer(layerName.c_str(), sr, gType, lopts);
-	CPLFree(lopts);
-
-	if(!*layer)
-		g_runerr("Failed to create layer " << layerName << ".");
-
-	// There's only one field -- an ID.
-	OGRFieldDefn field(idField.c_str(), OFTInteger);
-	(*layer)->CreateField(&field);
 
 }
 
-// Produce a status message from the current and total row counds.
-std::string _rowStatus(int r, int rows) {
-	std::stringstream ss;
-	ss << "Polygonizing row " << (r + 1) << " of " << rows;
-	return ss.str();
-}
 
 void Grid::polygonize(const std::string& filename, const std::string& layerName, const std::string& idField,
 		const std::string& driver, const std::string& projection, int band, bool removeHoles, bool removeDangles,
@@ -292,7 +296,7 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 
 	GDALDataset* ds;
 	OGRLayer* layer;
-	_makeDataset(filename, driver, layerName, idField, sr, d3 ? wkbMultiPolygon25D : wkbMultiPolygon, &ds, &layer);
+	makeDataset(filename, driver, layerName, idField, sr, d3 ? wkbMultiPolygon25D : wkbMultiPolygon, &ds, &layer);
 
 	if(sr)
 		sr->Release();
@@ -322,14 +326,14 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 
 	// Start output threads.
 	for(int i = 0; i < threads; ++i)
-		ths.emplace_back(&_writeToFile, &geoms, &finalIds, &idField, layer, &gctx, removeHoles, removeDangles, &running, &cancel);
+		ths.emplace_back(&writeToFile, &geoms, &finalIds, &idField, layer, &gctx, removeHoles, removeDangles, &running, &cancel);
 
 	// Process raster.
 	for(int r = 0; r < rows; ++r) {
 
 		if(cancel) break;
 
-		status.update((float) r / rows, _rowStatus(r, rows));
+		status.update((float) r / rows, rowStatus(r, rows));
 
 		// Load the row buffer.
 		src.writeTo(buf, cols, 1, 0, r, 0, 0, 1, 1);
@@ -357,7 +361,7 @@ void Grid::polygonize(const std::string& filename, const std::string& layerName,
 				x1 = startX + c * resX;
 				// If the value is a valid ID, create and the geometry and save it for writing.
 				if(v0 > 0) {
-					geoms[v0].push_back(_makeGeom(x0, y0, x1 + xeps, y1 + yeps, d3 ? 3 : 2));
+					geoms[v0].push_back(makeGeom(x0, y0, x1 + xeps, y1 + yeps, d3 ? 3 : 2));
 					activeIds.insert(v0);
 				}
 				// Update values for next loop.
