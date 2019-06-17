@@ -17,13 +17,15 @@
 #include <algorithm>
 
 #include "util.hpp"
-#include "raster.hpp"
 #include "pointcloud.hpp"
 #include "pc_computer.hpp"
 #include "externalmergesort.hpp"
+#include "grid.hpp"
+#include "ds/mtree.hpp"
 
-using namespace geo::raster;
+using namespace geo::grid;
 using namespace geo::pc;
+using namespace geo::ds;
 using namespace geo::pc::compute;
 using namespace geo::pc::sort;
 
@@ -242,142 +244,93 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	props.setWritable(true);
 	props.setBands(bandCount);
 
-	// The final output raster.
-	Raster outrast(filename, props);
-
-	// Single-row grid for the buffers.
-	GridProps rowProps(props);
-	rowProps.setSize(cols, 1);
-
-	m_rasters.clear();
-	m_rasters.resize(bandCount); // Constructs the default MemRasters.
-	for(int i = 0; i < bandCount; ++i)
-		m_rasters[i].init(rowProps, false);
-
-	g_trace("Sorting...")
-	ExternalMergeSort es(filename, filenames, "/tmp");
-	CountComputer countComp;
-
-	es.setTransformer(new PointTransformer(easting, northing, resX, resY));
-	es.setLoader(new LASPointLoader());
-	es.sort(true);
-
-	g_trace("Running...")
-	// The last finalized row.
-	int lastR = 0;
-	// The squared radius for distance comparisons without sqrt.
-	double radiusSq = radius * radius;
-	// Radius in pixel coords.
-	int rad = (int) std::ceil(radius / std::max(std::abs(resX), std::abs(resY)));
-	// Dictionary of cells/points.
-	std::unordered_map<size_t, std::vector<geo::pc::Point> > cells;
-
-	size_t count = 0;
-	size_t numPoints = es.numPoints();
-
+	mtree<geo::pc::Point> tree(bounds, 1024);
 	geo::pc::Point pt;
-	while(es.next(pt)) {
 
-		if(++count % 1000000 == 0)
-			std::cerr << count << " of " << numPoints << "\n";
-
-		double px = pt.x();
-		double py = pt.y();
-		int col = props.toCol(px);
-		int row = props.toRow(py);
-		size_t idx = row * cols + col;
-
-		if(rad) {
-			for(int r = std::max(0, row - rad); r < std::min(rows, row + rad + 1); ++r) {
-				for(int c = std::max(0, col - rad); c < std::min(cols, col + rad + 1); ++c) {
-					double cx = props.toCentroidX(c);
-					double cy = props.toCentroidY(r);
-					if(std::pow(px - cx, 2) + std::pow(py - cy, 2) <= radiusSq)
-						cells[r * cols + c].emplace_back(pt);
-				}
-			}
-		} else {
-			cells[idx].emplace_back(pt);
-		}
-
-		if(row - rad > lastR) {
-			// If the row counter is at least rad greater than the last finalized row, finalize the rows.
-			for(int r = lastR; r < row - rad; ++r)
-				finalize(r, radius, cells, outrast);
-			lastR = row - rad;
+	g_trace("Adding files to tree");
+	{
+		for(PCFile& f: m_files) {
+			for(const std::string& fn : f.filenames())
+				filenames.push_back(fn);
+			f.init(useHeader);
+			while(f.next(pt))
+				tree.add(pt);
 		}
 	}
 
-	g_debug("Finalizing the rest " << cells.size())
-	for(int r = lastR; r < rows; ++r)
-		finalize(r, radius, cells, outrast);
 
-	m_rasters.clear();
+	// The final output raster.
+	Grid<double> outrast(filename, props);
+
+	CountComputer countComp;
+
+	g_trace("Running...")
+
+	// The squared radius for distance comparisons without sqrt.
+	double radiusSq = radius * radius;
+
+
+	size_t count = 0;
+	int band;
+
+	std::vector<geo::pc::Point> pts;
+	std::vector<geo::pc::Point> cpts;
+	std::vector<geo::pc::Point> filtered;
+	std::vector<double> out;
+
+	for(int r = 0; r < rows; ++r) {
+		for(int c = 0; c < cols; ++c) {
+			double x = props.toCentroidX(c);
+			double y = props.toCentroidY(r);
+			double bounds[] = {x - radiusSq, y - radiusSq, x + radiusSq, y + radiusSq};
+			if(tree.get(bounds, pts)) {
+				for(const geo::pc::Point& pt : pts) {
+					if(std::pow(pt.x() - x, 2) + std::pow(pt.y() - y, 2) <= radiusSq)
+						cpts.push_back(pt);
+				}
+
+
+				if(!cpts.empty()) {
+					count = m_filter->filter(cpts.begin(), cpts.end(), std::back_inserter(filtered));
+
+					if(m_thin > 0) {
+						// Thin the points to the desired density, if required.
+						if(filtered.size() < (size_t) m_thin) {
+							filtered.clear();
+							count = 0;
+						} else {
+							std::random_shuffle(filtered.begin(), filtered.end());
+							filtered.resize(m_thin);
+							count = m_thin;
+						}
+					}
+				}
+
+				band = 1;
+
+				outrast.set(c, r, count, band++);
+
+				if(count) {
+					for(size_t i = 0; i < m_computers.size(); ++i) {
+						out.clear();
+						m_computers[i]->compute(x, y, cpts, filtered, radius, out);
+						for(double val : out)
+							outrast.set(c, r, std::isnan(val) ? NODATA : val, band++);
+					}
+				} else {
+					for(size_t i = 0; i < m_computers.size(); ++i) {
+						for(int j = 0; j < m_computers[i]->bandCount(); ++j)
+							outrast.set(c, r, NODATA, band++);
+					}
+				}
+				filtered.clear();
+				out.clear();
+				cpts.clear();
+				pts.clear();
+			}
+		}
+	}
 
 	g_debug("Done")
 }
 
-void Rasterizer::finalize(int row, double radius,
-		std::unordered_map<size_t, std::vector<geo::pc::Point> >& cells, 
-		Raster& outrast) {
-
-	const GridProps& props = outrast.props();
-	double y = props.toCentroidY(row);
-	int cols = props.cols();
-
-	std::list<size_t> remove;
-
-	for(int col = 0; col < cols; ++col) {
-		
-		size_t idx = row * cols + col;
-		std::vector<geo::pc::Point>& points = cells[idx];
-
-		double x = props.toCentroidX(col);
-		size_t count = points.size();
-		size_t band = 0;
-
-		remove.push_back(idx);
-		
-		if(count) {
-			count = m_filter->filter(points.begin(), points.end(), std::back_inserter(m_filtered));
-		
-			if(m_thin > 0) {
-				// Thin the points to the desired density, if required.
-				if(m_filtered.size() < (size_t) m_thin) {
-					m_filtered.clear();
-					count = 0;
-				} else {
-					std::random_shuffle(m_filtered.begin(), m_filtered.end());
-					m_filtered.resize(m_thin);
-					count = m_thin;
-				}
-			}
-		}
-
-		m_rasters[band++].setFloat(col, 0, count, 1);
-		
-		if(count) {
-			for(size_t i = 0; i < m_computers.size(); ++i) {
-				m_out.clear();
-				m_computers[i]->compute(x, y, points, m_filtered, radius, m_out);
-				for(double val : m_out)
-					m_rasters[band++].setFloat(col, 0, std::isnan(val) ? NODATA : val, 1);
-			}
-		} else {
-			for(size_t i = 0; i < m_computers.size(); ++i) {
-				for(int j = 0; j < m_computers[i]->bandCount(); ++j)
-					m_rasters[band++].setFloat(col, 0, NODATA, 1);
-			}
-		}
-		m_filtered.clear();
-		m_out.clear();
-	}
-
-	// Remove processed cells.
-	for(const size_t& i : remove)
-		cells.erase(i);
-
-	for(size_t i = 0; i < m_rasters.size(); ++i)
-		m_rasters[i].writeTo(outrast, cols, 1, 0, 0, 0, row, 1, i + 1);
-
-}

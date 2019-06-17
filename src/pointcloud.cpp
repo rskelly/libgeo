@@ -1,3 +1,4 @@
+
 #define _USE_MATH_DEFINES
 
 #include <fstream>
@@ -21,12 +22,12 @@
 #include <liblas/liblas.hpp>
 
 #include "util.hpp"
-#include "raster.hpp"
+#include "grid.hpp"
 #include "pointcloud.hpp"
 #include "ds/kdtree.hpp"
 #include "pc_computer.hpp"
 
-using namespace geo::raster;
+using namespace geo::grid;
 using namespace geo::util;
 using namespace geo::pc;
 

@@ -5,13 +5,13 @@
  *      Author: rob
  */
 
+#include <grid.hpp>
 #include <iostream>
 #include <vector>
 #include <algorithm>
 #include <thread>
 #include <iomanip>
 
-#include "raster.hpp"
 #include "ds/kdtree.hpp"
 
 using namespace geo::raster;

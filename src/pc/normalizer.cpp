@@ -8,10 +8,10 @@
 #include <vector>
 #include <string>
 
-#include "raster.hpp"
 #include "pointcloud.hpp"
+#include "grid.hpp"
 
-using namespace geo::raster;
+using namespace geo::grid;
 using namespace geo::pc;
 
 Normalizer::Normalizer(const std::vector<std::string> filenames) :
@@ -30,7 +30,7 @@ Normalizer::~Normalizer() {
 
 void Normalizer::normalize(const std::string& dtmpath, const std::string& outdir, int band, bool force) {
 
-	Raster dtm(dtmpath);
+	Grid<double> dtm(dtmpath);
 	const GridProps& props = dtm.props();
 	double nodata = props.nodata();
 
@@ -68,13 +68,9 @@ void Normalizer::normalize(const std::string& dtmpath, const std::string& outdir
 			double x = pt.GetX();
 			double y = pt.GetY();
 
-			int col = props.toCol(x);
-			int row = props.toRow(y);
+			if(!props.hasCell(x, y)) continue;
 
-			if(col < 0 || col >= props.cols() || row < 0 || row >= props.rows())
-				continue;
-
-			double t = dtm.getFloat(props.toCol(x), props.toRow(y), band);
+			double t = dtm.get(x, y, band);
 
 			if(t == nodata)
 				continue;
