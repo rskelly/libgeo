@@ -12,9 +12,6 @@
 
 void getBounds(liblas::Reader& rdr, double* bounds) {
 
-	bounds[0] = bounds[2] = bounds[4] = std::numeric_limits<double>::max();
-	bounds[1] = bounds[3] = bounds[5] = std::numeric_limits<double>::lowest();
-
 	double x, y, z;
 
 	rdr.Reset();
@@ -32,7 +29,7 @@ void getBounds(liblas::Reader& rdr, double* bounds) {
 	}
 }
 
-void buildGrid(liblas::Reader& rdr, double* bounds, double res, int& cols, int& rows, std::vector<float>& grid) {
+void buildGrid(const std::vector<std::string>& infiles, double* bounds, double res, int& cols, int& rows, std::vector<float>& grid) {
 
 	// Increase bounds enough to add 2 cells all around.
 	bounds[0] -= res;
@@ -57,35 +54,41 @@ void buildGrid(liblas::Reader& rdr, double* bounds, double res, int& cols, int& 
 		int col, row;
 		double rad = std::pow(res, 2);
 
-		rdr.Reset();
-		while(rdr.ReadNextPoint()) {
+		size_t num = 0;
+		for(const std::string& infile : infiles) {
+			std::cout << ++num << " of " << infiles.size() << "\n";
+			std::ifstream input(infile);
+			liblas::ReaderFactory rf;
+			liblas::Reader rdr = rf.CreateWithStream(input);
+			while(rdr.ReadNextPoint()) {
 
-			const liblas::Point& pt = rdr.GetPoint();
-			if(pt.GetClassification().GetClass() != 2)
-				continue;
+				const liblas::Point& pt = rdr.GetPoint();
+				if(pt.GetClassification().GetClass() != 2)
+					continue;
 
-			px = pt.GetX();
-			py = pt.GetY();
-			pz = pt.GetZ();
-			col = (int) (px - bounds[0]) / res;
-			row = (int) (py - bounds[2]) / res;
+				px = pt.GetX();
+				py = pt.GetY();
+				pz = pt.GetZ();
+				col = (int) (px - bounds[0]) / res;
+				row = (int) (py - bounds[2]) / res;
 
-			for(int r = row - 1; r < row + 2; ++r) {
-				for(int c = col - 1; c < col + 2; ++c) {
-					if(c >= 0 && r >= 0 && c < cols && r < rows) {
+				for(int r = row - 1; r < row + 2; ++r) {
+					for(int c = col - 1; c < col + 2; ++c) {
+						if(c >= 0 && r >= 0 && c < cols && r < rows) {
 
-						x = bounds[0] + (c * res) + res * 0.5;
-						y = bounds[2] + (r * res) + res * 0.5;
-						d = std::pow(x - px, 2.0) + std::pow(y - py, 2.0);
+							x = bounds[0] + (c * res) + res * 0.5;
+							y = bounds[2] + (r * res) + res * 0.5;
+							d = std::pow(x - px, 2.0) + std::pow(y - py, 2.0);
 
-						if(d > rad)
-							continue;
+							if(d > rad)
+								continue;
 
-						w = 1.0 - d / rad;
+							w = 1.0 - d / rad;
 
-						// Accumulate the weighted heights and weights.
-						grid[r * cols + c] += pz * w;
-						weights[r * cols + c] += w;
+							// Accumulate the weighted heights and weights.
+							grid[r * cols + c] += pz * w;
+							weights[r * cols + c] += w;
+						}
 					}
 				}
 			}
@@ -99,7 +102,10 @@ void buildGrid(liblas::Reader& rdr, double* bounds, double res, int& cols, int& 
 	}
 
 	// Fill in zeroes.
+	std::cout << "Filling gaps\n";
 	for(size_t i = 0; i < grid.size(); ++i) {
+		if(i % cols == 0)
+			std::cout << "Row " << (i / cols) << " of " << rows << "\n";
 		if(weights[i] == 0) {
 			double x, y, d, w0, rad, w = 0, s = 0;
 			int o = 2;
@@ -149,7 +155,7 @@ double bary(double x, double y,
 	return (w0 * z0) + (w1 * z1) + (w2 * z2);
 }
 
-void normalize(liblas::Reader& rdr, liblas::Writer& wtr, double* bounds, double res, int cols, int rows, std::vector<float>& grid) {
+void normalize(const std::vector<std::string>& infiles, liblas::Writer& wtr, double* bounds, double res, int cols, int rows, std::vector<float>& grid) {
 
 	bounds[4] = std::numeric_limits<double>::max();
 	bounds[5] = std::numeric_limits<double>::lowest();
@@ -157,60 +163,80 @@ void normalize(liblas::Reader& rdr, liblas::Writer& wtr, double* bounds, double 
 	double z, px, py, pz, cx0, cy0, cz0, cx1, cy1, cz1, cx2, cy2, cz2, nz;
 	int col, row, col0, row0;
 
-	rdr.Reset();
-	while(rdr.ReadNextPoint()) {
-		const liblas::Point& pt = rdr.GetPoint();
-		px = pt.GetX();
-		py = pt.GetY();
-		pz = pt.GetZ();
-		// Point's home cell.
-		col = (int) (px - bounds[0]) / res;
-		row = (int) (py - bounds[2]) / res;
-		// Center of home cell.
-		cx0 = bounds[0] + (col * res) + res * 0.5;
-		cy0 = bounds[2] + (row * res) + res * 0.5;
-		cz0 = grid[row * cols + col];
-		// Cell offsets.
-		col0 = px < cx0 ? col - 1 : col + 1;
-		row0 = py < cy0 ? row - 1 : row + 1;
-		// Centers of offset cells.
-		cx1 = bounds[0] + (col0 * res) + res * 0.5;
-		cy1 = bounds[2] + (row * res) + res * 0.5;
-		cz1 = grid[row * cols + col0];
-		cx2 = bounds[0] + (col * res) + res * 0.5;
-		cy2 = bounds[2] + (row0 * res) + res * 0.5;
-		cz2 = grid[row0 * cols + col];
+	size_t num = 0;
+	for(const std::string& infile : infiles) {
+		std::cout << ++num << " of " << infiles.size() << "\n";
+		std::ifstream input(infile);
+		liblas::ReaderFactory rf;
+		liblas::Reader rdr = rf.CreateWithStream(input);
+		while(rdr.ReadNextPoint()) {
+			const liblas::Point& pt = rdr.GetPoint();
+			px = pt.GetX();
+			py = pt.GetY();
+			pz = pt.GetZ();
+			// Point's home cell.
+			col = (int) (px - bounds[0]) / res;
+			row = (int) (py - bounds[2]) / res;
+			// Center of home cell.
+			cx0 = bounds[0] + (col * res) + res * 0.5;
+			cy0 = bounds[2] + (row * res) + res * 0.5;
+			cz0 = grid[row * cols + col];
+			// Cell offsets.
+			col0 = px < cx0 ? col - 1 : col + 1;
+			row0 = py < cy0 ? row - 1 : row + 1;
+			// Centers of offset cells.
+			cx1 = bounds[0] + (col0 * res) + res * 0.5;
+			cy1 = bounds[2] + (row * res) + res * 0.5;
+			cz1 = grid[row * cols + col0];
+			cx2 = bounds[0] + (col * res) + res * 0.5;
+			cy2 = bounds[2] + (row0 * res) + res * 0.5;
+			cz2 = grid[row0 * cols + col];
 
-		if(cz0 == -9999.0 || cz1 == -9999.0 || cz2 == -9999.0)
-			continue;
+			if(cz0 == -9999.0 || cz1 == -9999.0 || cz2 == -9999.0)
+				continue;
 
-		// Get the barycentric z
-		nz = bary(px, py, cx0, cy0, cz0, cx1, cy1, cz1, cx2, cy2, cz2);
-		// Make point and write it.
-		liblas::Point pt0(pt);
-		pt0.SetZ((z = pz - nz));
-		wtr.WritePoint(pt0);
-		// Adjust bounds.
-		if(z < bounds[4]) bounds[4] = z;
-		if(z > bounds[5]) bounds[5] = z;
+			// Get the barycentric z
+			nz = bary(px, py, cx0, cy0, cz0, cx1, cy1, cz1, cx2, cy2, cz2);
+			// Make point and write it.
+			liblas::Point pt0(pt);
+			pt0.SetZ((z = pz - nz));
+			wtr.WritePoint(pt0);
+			// Adjust bounds.
+			if(z < bounds[4]) bounds[4] = z;
+			if(z > bounds[5]) bounds[5] = z;
+		}
 	}
 }
 
 int main(int argc, char** argv) {
 
-	std::string infile = argv[1];
-	std::string outfile = argv[2];
-	double resolution = atof(argv[3]);
+	if(argc < 4) {
+		std::cerr << "Usage: pcnorm <outfile (.las)> <resolution> <infile(s) (.las)>\n";
+		return 1;
+	}
 
-	std::ifstream input(infile);
-	liblas::ReaderFactory rf;
-	liblas::Reader rdr = rf.CreateWithStream(input);
-	const liblas::Header& rhdr = rdr.GetHeader();
-
-	liblas::Header whdr(rhdr);
+	std::string outfile = argv[1];
+	double resolution = atof(argv[2]);
+	std::vector<std::string> infiles;
+	for(int i = 3; i < argc; ++i)
+		infiles.push_back(argv[i]);
 
 	double bounds[6];
-	getBounds(rdr, bounds);
+	bounds[0] = bounds[2] = bounds[4] = std::numeric_limits<double>::max();
+	bounds[1] = bounds[3] = bounds[5] = std::numeric_limits<double>::lowest();
+
+	std::unique_ptr<liblas::Header> whdr;
+
+	std::cout << "Computing bounds\n";
+	for(const std::string& infile : infiles) {
+		std::ifstream input(infile);
+		liblas::ReaderFactory rf;
+		liblas::Reader rdr = rf.CreateWithStream(input);
+		const liblas::Header& rhdr = rdr.GetHeader();
+		getBounds(rdr, bounds);
+		if(infile == infiles.front())
+			whdr.reset(new liblas::Header(rhdr));
+	}
 
 	double gbounds[6];
 	for(int i = 0; i < 6; ++i)
@@ -218,18 +244,21 @@ int main(int argc, char** argv) {
 
 	int cols, rows;
 	std::vector<float> grid;
-	buildGrid(rdr, gbounds, resolution, cols, rows, grid);
+
+	std::cout << "Building grid\n";
+	buildGrid(infiles, gbounds, resolution, cols, rows, grid);
 
 	std::ofstream output;
 	liblas::WriterFactory wf;
 	liblas::Create(output, outfile);
-	liblas::Writer wtr(output, whdr);
+	liblas::Writer wtr(output, *whdr);
 
-	normalize(rdr, wtr, gbounds, resolution, cols, rows, grid);
+	std::cout << "Normalizing\n";
+	normalize(infiles, wtr, gbounds, resolution, cols, rows, grid);
 
-	whdr.SetMin(bounds[0], bounds[2], gbounds[4]);
-	whdr.SetMax(bounds[1], bounds[3], gbounds[5]);
+	whdr->SetMin(bounds[0], bounds[2], gbounds[4]);
+	whdr->SetMax(bounds[1], bounds[3], gbounds[5]);
 
-	wtr.SetHeader(whdr);
+	wtr.SetHeader(*whdr);
 
 }

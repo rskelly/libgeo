@@ -198,9 +198,8 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 
 	m_computers.clear();
 	for(const std::string& name : types) {
-		std::unique_ptr<Computer> comp(getComputer(name));
-		comp->setRasterizer(this);
-		m_computers.push_back(std::move(comp));
+		m_computers.emplace_back(getComputer(name));
+		m_computers.back()->setRasterizer(this);
 	}
 
 	g_trace("Checking file bounds");
