@@ -60,4 +60,31 @@ G_DLL_EXPORT extern int g__loglevel;
 #define g_implerr(x) {std::stringstream _ss; _ss << x; throw std::runtime_error(_ss.str());}
 #define g_runerr(x) {std::stringstream _ss; _ss << x; throw std::runtime_error(_ss.str());}
 
+
+namespace geo {
+
+/**
+ * Monitors and controls the operation of a running program.
+ * Provides access to status-tracking functions, and cancelation flags.
+ */
+class Monitor {
+private:
+	bool m_cancel;
+public:
+	bool cancel() const {
+		return m_cancel;
+	}
+	void status(float status, const std::string& message = "") {
+
+	}
+	void exception(const std::exception* ex) {
+
+	}
+};
+
+} // geo
+
+
 #endif
+
+

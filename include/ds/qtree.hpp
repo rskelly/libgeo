@@ -1,5 +1,6 @@
 #ifndef __QTREE_HPP__
 #define __QTREE_HPP__
+#include <util_old.hpp>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -13,7 +14,6 @@
 #include "geos/geom/Point.h"
 #include "geos/geom/GeometryFactory.h"
 
-#include "util.hpp"
 
 using namespace geo::util;
 using namespace geos::geom;

@@ -38,8 +38,8 @@ void Normalizer::normalize(const std::string& dtmpath, const std::string& outdir
 
 	for(const std::string& filename : m_filenames) {
 
-		std::string outfile = Util::pathJoin(outdir, Util::basename(filename) + ".las");
-		if(!force && Util::exists(outfile)) {
+		std::string outfile = join(outdir, basename(filename) + ".las");
+		if(!force && isfile(outfile)) {
 			g_trace("File " << outfile << " exists. Skipping.")
 			continue;
 		}

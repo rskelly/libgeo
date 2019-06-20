@@ -74,7 +74,7 @@ int main(int argc, char** argv) {
 		std::string v = argv[i];
 		if(v == "-m") {
 			std::string type = argv[++i];
-			Util::splitString(std::back_inserter(types), Util::lower(type), ",");
+			split(std::back_inserter(types), lowercase(type), ",");
 		} else if(v == "-l") {
 			memory = atoi(argv[++i]);
 		} else if(v == "-h") {

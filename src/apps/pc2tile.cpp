@@ -28,8 +28,8 @@
 #include <cstdint>
 
 #include <liblas/liblas.hpp>
+#include <util_old.hpp>
 
-#include "util.hpp"
 #include "pointcloud.hpp"
 
 /**

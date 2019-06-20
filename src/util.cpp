@@ -1,116 +1,254 @@
-#include <iterator>
-#include <fstream>
+/*
+ * contrem_util.cpp
+ *
+ *  Created on: Jun 4, 2019
+ *      Author: rob
+ */
+
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <stdlib.h>
+
+#include <cstdio>
 #include <algorithm>
+#include <sstream>
+#include <regex>
 
-#include <ogr_spatialref.h>
+#include <gdal_priv.h>
 
-#include <boost/interprocess/mapped_region.hpp>
-#include <boost/interprocess/shared_memory_object.hpp>
-#include <boost/interprocess/file_mapping.hpp>
-#include <boost/filesystem.hpp>
-#include <boost/algorithm/string/join.hpp>
-#include <boost/algorithm/string/case_conv.hpp>
-#include <boost/algorithm/string/predicate.hpp>
-
-#include <openssl/sha.h>
-
-#include "crypto/md5.hpp"
-#include "crypto/uuid.hpp"
 #include "util.hpp"
 
 using namespace geo::util;
 
-Stopwatch::Stopwatch() : m_reset(false), m_running(false) {
-	m_stop = m_start = std::chrono::system_clock::now();
-	reset();
-}
-
-void Stopwatch::reset() {
-	m_reset = true;
-}
-
-void Stopwatch::start() {
-	if(m_reset)
-		m_start = std::chrono::system_clock::now();
-	m_running = true;
-}
-
-void Stopwatch::stop() {
-	m_stop = std::chrono::system_clock::now();
-	m_running = false;
-}
-std::string Stopwatch::time() {
-	uint64_t sec = millis() / 1000;
-	std::stringstream ss;
-	uint64_t h = sec / 3600;
-	uint64_t m = (sec / 60) % 60;
-	uint64_t s = sec % 60;
-	ss << h << ":" << (m > 9 ? "" : "0") << m << ":" << (s > 9 ? "" : "0") << s;
-	return ss.str();
-}
-
-uint64_t Stopwatch::millis() {
-	std::chrono::time_point<std::chrono::system_clock> now = m_running ? std::chrono::system_clock::now() : m_stop;
-	uint64_t ms = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_start).count();
-	return ms;
-}
-
-void Callbacks::stepCallback(float status) const {
-	g_debug("Step: " << (int) (status * 100.0f) << "%");
-}
-
-void Callbacks::overallCallback(float status) const {
-	g_debug("Overall: " << (int) (status * 100.0f) << "%");
-}
-
-void Callbacks::statusCallback(const std::string &msg) const {
-	g_debug("Status: " << msg);
-}
-
-
-Status::Status(Callbacks *callbacks, float start, float end) :
-	m_callbacks(callbacks), m_start(start), m_end(end) {
-}
-
-Status::Status() :
-		m_callbacks(nullptr), m_start(0), m_end(1) {}
-
-Callbacks* Status::callbacks() const {
-	return m_callbacks;
-}
-
-float Status::start() const {
-	return m_start;
-}
-
-float Status::end()  const {
-	return m_end;
-}
-
-void Status::update(float s, const std::string& msg) {
-	if(!m_callbacks) {
-		g_debug("Status: " << s << ", " << msg);
+FileType geo::util::getFileType(const std::string& filename) {
+	std::string ext;
+	{
+		size_t p = filename.find('.');
+		if(p < std::string::npos) {
+			std::string ext0 = filename.substr(p);
+			std::transform(ext0.begin(), ext0.end(), std::back_inserter(ext), ::tolower);
+		}
+	}
+	if(ext == ".csv" || ext == ".txt") {
+		return FileType::CSV;
+	} else if(ext == ".roi") {
+		return FileType::ROI;
 	} else {
-		m_callbacks->stepCallback(m_start + (m_end - m_start) * s);
-		if(!msg.empty())
-			m_callbacks->statusCallback(msg);
+		GDALAllRegister();
+		GDALDataset* ds = static_cast<GDALDataset*>(GDALOpenEx(filename.c_str(), GDAL_OF_READONLY, 0, 0, 0));
+		if(ds) {
+			std::string drv(ds->GetDriverName());
+			FileType type = FileType::Unknown;
+			if(drv == "GTiff") {
+				type = FileType::GTiff;
+			} else if(drv == "ENVI") {
+				type = FileType::ENVI;
+			} else if(drv == "ESRI Shapefile") {
+				type = FileType::SHP;
+			} else if(drv == "SQLite") {
+				type = FileType::SQLITE;
+			}
+			GDALClose(ds);
+			return type;
+		}
+	}
+	return FileType::Unknown;
+}
+
+std::string geo::util::fileTypeAsString(FileType type) {
+	switch(type) {
+	case FileType::GTiff: return "GTiff";
+	case FileType::ENVI: return "ENVI";
+	case FileType::ROI: return "ENVI ROI";
+	case FileType::SHP: return "Shapefile";
+	case FileType::CSV: return "CSV";
+	default: return "";
 	}
 }
 
-Point::Point(double x, double y, double z) :
-		x(x), y(y), z(z) {
+FileType geo::util::fileTypeFromString(const std::string& type) {
+	if(type == "GTiff") {
+		return FileType::GTiff;
+	} else if(type == "ENVI") {
+		return FileType::ENVI;
+	} else if(type == "ENVI ROI") {
+		return FileType::ROI;
+	} else if(type == "Shapefile" || type == "ESRI Shapefile") {
+		return FileType::SHP;
+	} else if(type == "CSV") {
+		return FileType::CSV;
+	} else {
+		return FileType::Unknown;
+	}
 }
 
-Point::Point(double x, double y, double z,
-		const std::map<std::string, std::string> &fields) :
-		x(x), y(y), z(z) {
-	for (auto it : fields)
-		this->fields[it.first] = it.second;
+std::string geo::util::normMethodAsString(NormMethod method) {
+	switch(method) {
+	case NormMethod::ConvexHull:
+		return "Convex Hull";
+	case NormMethod::ConvexHullLongestSeg:
+		return "Convex Hull, Longest Segment";
+	case NormMethod::Line:
+		return "Line";
+	case NormMethod::Unknown:
+	default:
+		return "Unknown";
+	}
 }
 
-Point::Point() :
-		x(0), y(0), z(0) {
+NormMethod geo::util::normMethodFromString(const std::string& method) {
+	if(method == normMethodAsString(NormMethod::ConvexHull)) {
+		return NormMethod::ConvexHull;
+	} else if(method == normMethodAsString(NormMethod::ConvexHullLongestSeg)) {
+		return NormMethod::ConvexHullLongestSeg;
+	} else if(method == normMethodAsString(NormMethod::Line)) {
+		return NormMethod::Line;
+	} else {
+		return NormMethod::Unknown;
+	}
 }
+
+bool geo::util::isnonzero(const double& v) {
+	return v != 0;
+}
+
+bool geo::util::isdir(const std::string& path) {
+	struct stat st;
+	if(!stat(path.c_str(), &st))
+		return S_ISDIR(st.st_mode);
+	return false;
+}
+
+bool geo::util::isfile(const std::string& path) {
+	struct stat st;
+	if(!stat(path.c_str(), &st))
+		return S_ISREG(st.st_mode);
+	return false;
+}
+
+bool geo::util::rem(const std::string& dir) {
+	return !unlink(dir.c_str());
+}
+
+#ifdef _WIN32
+	const char pathsep = '\\';
+#else
+	const char pathsep = '/';
+#endif
+
+std::string geo::util::join(const std::string& a, const std::string& b) {
+	std::string _a, _b;
+	for(size_t i = a.size() - 1; i >= 0; --i) {
+		if(a[i] != pathsep) {
+			_a = a.substr(0, i);
+			break;
+		}
+	}
+	for(size_t i = 0; i < b.size(); ++i) {
+		if(b[i] != pathsep) {
+			_b = b.substr(0, i);
+			break;
+		}
+	}
+	return _a + pathsep + _b;
+}
+
+std::string geo::util::basename(const std::string& path) {
+	size_t a = path.find_last_of(pathsep);
+	size_t b = path.find_last_of('.');
+	if(a == std::string::npos)
+		a = 0;
+	if(b < a)
+		b = std::string::npos;
+	return path.substr(a, b);
+}
+
+std::string geo::util::extension(const std::string& path) {
+	size_t pos = path.find_last_of('.');
+	if(pos < std::string::npos)
+		return path.substr(pos, std::string::npos);
+	return path;
+}
+
+bool geo::util::makedir(const std::string& filename) {
+	std::stringstream path(filename);
+	std::stringstream inter;
+	std::string part, current;
+	if(filename[0] == '/')
+		inter << '/';
+	while(std::getline(path, part, '/')) {
+		inter << part;
+		current = inter.str();
+		if(!isdir(current) && !isfile(current)) {
+			if(mkdir(current.c_str(), 0755))
+				return false;
+		}
+		if(!part.empty())
+			inter << '/';
+	}
+	return true;
+}
+
+std::string geo::util::sanitize(const std::string& str) {
+	std::regex repl("([^0-9A-Za-z]+)");
+	std::stringstream ss;
+	std::regex_replace(std::ostreambuf_iterator<char>(ss), str.begin(), str.end(), repl, "_");
+	return ss.str();
+}
+
+std::string geo::util::lowercase(const std::string& str) {
+	std::string out;
+	std::transform(str.begin(), str.end(), std::back_inserter(out), ::tolower);
+	return out;
+}
+
+int geo::util::gdalTypeSize(GDALDataType type) {
+	switch(type) {
+	case GDT_Float32:
+	case GDT_Int32:
+	case GDT_UInt32: 	return 4;
+	case GDT_Int16:
+	case GDT_UInt16: 	return 2;
+	case GDT_Float64: 	return 8;
+	case GDT_Byte: 		return 1;
+	default:
+		throw std::runtime_error("Unknown GDAL data type: " + std::to_string((int) type));
+	}
+}
+
+
+TmpFile::TmpFile(size_t size) :
+	fd(0), size(0) {
+	char tpl[] = {"geo_util_XXXXXX"};
+	fd = mkstemp(tpl);
+	filename = tpl;
+	resize(size);
+}
+
+void TmpFile::resize(size_t newSize) {
+	if(newSize > size) {
+		if(fd <= 0)
+			throw std::runtime_error(std::string("File is not open: ") + strerror(errno));
+
+		if((size_t) lseek(fd, newSize - 1, SEEK_SET) != (newSize - 1))
+			throw std::runtime_error(std::string("Failed to create temporary file for mapping.") + strerror(errno));
+
+		if(write(fd, "", 1) < 1)
+			throw std::runtime_error(std::string("Failed to create temporary file for mapping.") + strerror(errno));
+
+		size = newSize;
+	}
+}
+
+void TmpFile::close() {
+	::close(fd);
+}
+
+TmpFile::~TmpFile() {
+	::close(fd);
+	unlink(filename.c_str());
+}
+
 
 Bounds::Bounds() :
 	m_minx(G_DBL_MAX_POS), m_miny(G_DBL_MAX_POS), m_maxx(G_DBL_MAX_NEG), m_maxy(G_DBL_MAX_NEG), m_minz(G_DBL_MAX_POS), m_maxz(G_DBL_MAX_NEG) {
@@ -278,7 +416,7 @@ int Bounds::toCol(double x, double resolution) const {
         return (int) ((x - m_maxx) / width() * (width() / resolution));
     }
 }
-            
+
 int Bounds::toRow(double y, double resolution) const {
     if(height() == 0.0)
         return 0;
@@ -389,7 +527,7 @@ void Bounds::print(std::ostream &str) const {
 
 void Bounds::fromString(const std::string &str) {
 	std::vector<std::string> parts;
-	Util::splitString(std::back_inserter(parts), str);
+	split(std::back_inserter(parts), str);
 	if (parts.size() < 4)
 		g_runerr("Bounds string must be 4 or 6 comma-separated doubles.");
 	m_minx = atof(parts[0].c_str());
@@ -430,373 +568,3 @@ void Bounds::align(double x, double y, double xres, double yres) {
 	m_maxy = y;
 }
 
-double Util::computeArea(double x1, double y1, double z1, double x2, double y2,
-		double z2, double x3, double y3, double z3) {
-	double side0 = std::sqrt(
-			std::pow(x1 - x2, 2.0) + std::pow(y1 - y2, 2.0)
-					+ std::pow(z1 - z2, 2.0));
-	double side1 = std::sqrt(
-			std::pow(x2 - x3, 2.0) + std::pow(y2 - y3, 2.0)
-					+ std::pow(z2 - z3, 2.0));
-	double side2 = std::sqrt(
-			std::pow(x3 - x1, 2.0) + std::pow(y3 - y1, 2.0)
-					+ std::pow(z3 - z1, 2.0));
-	double s = (side0 + side1 + side2) / 2.0;
-	return std::sqrt(s * (s - side0) * (s - side1) * (s - side2));
-}
-
-void Util::copyfile(const std::string &srcfile, const std::string &dstfile) {
-	std::ifstream src(srcfile.c_str(), std::ios::binary);
-	std::ofstream dst(dstfile.c_str(), std::ios::binary);
-	dst << src.rdbuf();
-}
-
-void Util::rename(const std::string &srcfile, const std::string &dstfile) {
-	using namespace boost::filesystem;
-	try {
-		boost::filesystem::rename(path(srcfile), path(dstfile));
-	} catch(...) {
-		// If there's a cross-link or some other crap, try a copy-verify-remove
-		boost::filesystem::remove(path(dstfile));
-		boost::filesystem::copy(path(srcfile), path(dstfile));
-		std::ifstream src(srcfile, std::ios::binary);
-		std::ifstream dst(dstfile, std::ios::binary);
-		char sc;
-		char dc;
-		while(!src.eof()) {
-			src >> sc;
-			dst >> dc;
-			if(sc != dc)
-				g_runerr("Failed to copy file " << srcfile << " to " << dstfile << ".");
-		}
-		if(!dst.eof())
-			g_warn("File lengths not the same.");
-	}
-}
-
-bool Util::exists(const std::string &name) {
-	boost::filesystem::path p(name);
-	return boost::filesystem::exists(p);
-}
-
-std::string Util::basename(const std::string &filename) {
-	boost::filesystem::path p(filename);
-	return boost::filesystem::basename(filename);
-}
-
-std::string Util::filename(const std::string &filename) {
-	boost::filesystem::path p(filename);
-	return p.filename().string();
-}
-
-std::string Util::pathJoin(const std::string& a, const std::string& b) {
-	boost::filesystem::path pa(a);
-	boost::filesystem::path pb(b);
-	return (pa / pb).string();
-}
-
-bool Util::pathExists(const std::string &name) {
-	boost::filesystem::path p(name);
-	return boost::filesystem::exists(p.remove_filename());
-}
-
-bool Util::rm(const std::string &name) {
-	using namespace boost::filesystem;
-	path p(name);
-	return remove_all(p) > 0;
-}
-
-uint64_t Util::filesize(const std::string& name) {
-    struct stat stat_buf;
-    int rc = stat(name.c_str(), &stat_buf);
-    return rc == 0 ? stat_buf.st_size : -1;
-}
-
-bool Util::mkdir(const std::string &dir) {
-	using namespace boost::filesystem;
-	path bdir(dir);
-	if (!boost::filesystem::exists(bdir))
-		return create_directories(bdir);
-	return true;
-}
-
-bool Util::isDir(const std::string& path) {
-	boost::filesystem::path p(path);
-	return boost::filesystem::is_directory(p);
-
-}
-
-bool Util::isFile(const std::string& path) {
-	boost::filesystem::path p(path);
-	return boost::filesystem::is_regular(p);
-
-}
-
-std::string Util::parent(const std::string& file) {
-	using namespace boost::filesystem;
-	path p(file);
-	return p.parent_path().string();
-}
-
-std::string Util::extension(const std::string &filename) {
-	using namespace boost::filesystem;
-	path p(filename);
-	return p.extension().string();
-}
-
-std::string& Util::lower(std::string &str) {
-	std::transform(str.begin(), str.end(), str.begin(), ::tolower);
-	return str;
-}
-
-std::string& Util::upper(std::string &str) {
-	std::transform(str.begin(), str.end(), str.begin(), ::toupper);
-	return str;
-}
-
-std::string Util::lower(const std::string &str) {
-	std::string n(str);
-	std::transform(n.begin(), n.end(), n.begin(), ::tolower);
-	return n;
-}
-
-std::string Util::upper(const std::string &str) {
-	std::string n(str);
-	std::transform(n.begin(), n.end(), n.begin(), ::toupper);
-	return n;
-}
-
-std::string Util::tmpDir() {
-	return boost::filesystem::temp_directory_path().string();
-}
-
-uint64_t Util::diskSpace(const std::string& path) {
-	using namespace boost::filesystem;
-	space_info si = space(path);
-	return si.available;
-}
-
-std::string Util::tmpFile(const std::string &root) {
-	using namespace boost::filesystem;
-	path p = unique_path();
-	if (!root.empty()) {
-		path r(root);
-		return (r / p).string();
-	}
-	p = temp_directory_path() / p;
-	return p.string(); // Windows can have wide string paths.
-}
-
-std::string Util::md5(const std::string& input) {
-	geo::crypto::MD5 m(input);
-	m.finalize();
-	return m.hexdigest();
-}
-
-std::string Util::sha256(const std::string& input) {
-	const char* str = input.c_str();
-	char outputBuffer[65];
-	unsigned char hash[SHA256_DIGEST_LENGTH];
-	SHA256_CTX sha256;
-	SHA256_Init(&sha256);
-	SHA256_Update(&sha256, str, strlen(str));
-	SHA256_Final(hash, &sha256);
-	for(int i = 0; i < SHA256_DIGEST_LENGTH; i++)
-		sprintf(outputBuffer + (i * 2), "%02x", hash[i]);
-	outputBuffer[64] = 0;
-	return std::string(outputBuffer);
-}
-
-std::string Util::sha256File(const std::string& file) {
-	const char *path = file.c_str();
-	char outputBuffer[65];
-	std::FILE *f = std::fopen(path, "rb");
-	if(!f)
-		throw std::runtime_error("Failed to open file for hashing.");
-	unsigned char hash[SHA256_DIGEST_LENGTH];
-	SHA256_CTX sha256;
-	SHA256_Init(&sha256);
-	const int bufSize = 32768;
-	char *buffer = (char*) malloc(bufSize);
-	if(!buffer)
-		throw std::runtime_error("Failed to allocate buffer for hashing.");
-	int bytesRead = 0;
-	while((bytesRead = std::fread(buffer, 1, bufSize, f)))
-		SHA256_Update(&sha256, buffer, bytesRead);
-	std::fclose(f);
-	SHA256_Final(hash, &sha256);
-	for(int i = 0; i < SHA256_DIGEST_LENGTH; i++)
-		sprintf(outputBuffer + (i * 2), "%02x", hash[i]);
-	free(buffer);
-	return std::string(outputBuffer);
-}
-
-
-using namespace boost::interprocess;
-
-std::string mapName() {
-	return Util::pathJoin(Util::tmpDir(), "geo_util_mapped_" + geo::crypto::UUID::uuid());
-}
-
-MappedFile::MappedFile() :
-		MappedFile(0, false, false) {
-}
-
-MappedFile::MappedFile(uint64_t size, bool fileBacked, bool deleteOnDestruct) :
-		MappedFile(mapName(), size, fileBacked, deleteOnDestruct) {
-}
-
-MappedFile::MappedFile(const std::string& name, uint64_t size, bool fileBacked, bool deleteOnDestruct) :
-	m_size(0),
-	m_name(name),
-	m_region(nullptr),
-	m_shm(nullptr),
-	m_fm(nullptr),
-	m_fileBacked(fileBacked),
-	m_deleteOnDestruct(deleteOnDestruct),
-	m_fileExists(false),
-	m_fileInited(false) {
-
-	if(m_fileBacked && Util::exists(name)) {
-		m_fileExists = true;
-		m_deleteOnDestruct = false;
-	}
-
-	if (size > 0)
-		reset(size);
-}
-
-void MappedFile::flush() {
-	if(m_region)
-		m_region->flush();
-}
-
-void MappedFile::init(size_t size, bool fileBacked, bool deleteOnDestruct) {
-	init(mapName(), size, fileBacked, deleteOnDestruct);
-}
-
-void MappedFile::init(const std::string& name, size_t size, bool fileBacked, bool deleteOnDestruct) {
-	m_name = name;
-	m_fileBacked = fileBacked;
-	m_deleteOnDestruct = deleteOnDestruct;
-
-	if(m_fileBacked && Util::exists(name)) {
-		m_fileExists = true;
-		m_deleteOnDestruct = false;
-	}
-
-	if(size > 0)
-		reset(size);
-}
-
-const std::string& MappedFile::name() const {
-	return m_name;
-}
-
-size_t MappedFile::fixSize(size_t size) {
-	size_t page = MappedFile::pageSize();
-	if(size % page == 0) {
-		return size;
-	} else {
-		return (size / page + 1) * page;
-	}
-}
-
-bool MappedFile::write(void* input, uint64_t position, uint64_t length) {
-    if(size() < position + length)
-        reset(position + length);
-    std::memcpy((char*) data() + position, input, length);
-    return true;
-}
-
-bool MappedFile::read(void* output, uint64_t position, uint64_t length) {
-    if(position + length > size())
-        return false;
-    std::memcpy(output, (char*) data() + position, length);
-    return true;
-}
-
-void MappedFile::reset(uint64_t size) {
-	size = fixSize(size);
-	if(size < m_size)
-		g_runerr("Cannot shrink mapped files.");
-	if(size != 0 && size != m_size) {
-		m_size = size;
-		if (m_region) {
-			m_region->flush();
-			delete m_region;
-		}
-
-		if(m_fileBacked) {
-			if(!m_fileExists) {
-				if(!m_fileInited) {
-					std::filebuf fbuf;
-					fbuf.open(m_name, std::ios_base::in | std::ios_base::out | std::ios_base::trunc | std::ios_base::binary);
-					fbuf.pubseekoff(m_size - 1, std::ios_base::beg);
-					fbuf.sputc(0);
-					m_fileInited = true;
-				} else {
-					std::filebuf fbuf;
-					fbuf.open(m_name, std::ios_base::in | std::ios_base::out | std::ios_base::binary);
-					fbuf.pubseekoff(m_size - 1, std::ios_base::beg);
-					fbuf.sputc(0);
-				}
-			}
-			if (m_fm)
-				delete m_fm;
-			m_fm = new file_mapping(m_name.c_str(), read_write);
-			m_region = new mapped_region(*m_fm, read_write, 0, m_size);
-		} else {
-			if (m_shm)
-				delete m_shm;
-			m_shm = new shared_memory_object(open_or_create, m_name.c_str(), read_write);
-			m_shm->truncate(m_size);
-			m_region = new mapped_region(*m_shm, read_write);
-		}
-	}
-}
-
-void* MappedFile::data() {
-	return m_region ? m_region->get_address() : nullptr;
-}
-
-
-uint64_t MappedFile::size() const {
-	return m_size;
-}
-
-size_t MappedFile::pageSize() {
-	return boost::interprocess::mapped_region::get_page_size();
-}
-
-MappedFile::~MappedFile() {
-	if(m_region) {
-		m_region->flush();
-		if(m_fm) {
-			if(m_deleteOnDestruct)
-				file_mapping::remove(m_name.c_str());
-			delete m_fm;
-		}
-		if(m_shm) {
-			m_shm->remove(name().c_str());
-			delete m_shm;
-		}
-		delete m_region;
-	}
-}
-
-std::string CRS::epsg2Proj4(int crs) const {
-	OGRSpatialReference ref;
-	char *wkt;
-	ref.importFromEPSG(crs);
-	ref.exportToProj4(&wkt);
-	return std::string(wkt);
-}
-
-std::string CRS::epsg2WKT(int crs) const {
-	OGRSpatialReference ref;
-	char *wkt;
-	ref.importFromEPSG(crs);
-	ref.exportToWkt(&wkt);
-	return std::string(wkt);
-}

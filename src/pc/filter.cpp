@@ -165,7 +165,7 @@ bool PCPointFilter::parseArgs(int& idx, char** argv) {
 		std::vector<std::string> tmp;
 		std::vector<int> classes;
 		std::string cls = argv[++idx];
-		Util::splitString(std::back_inserter(tmp), cls);
+		split(std::back_inserter(tmp), cls);
 		for(const std::string& t : tmp)
 			classes.push_back(atoi(t.c_str()));
 		addClassFilter(classes);
@@ -190,7 +190,7 @@ bool PCPointFilter::parseArgs(int& idx, char** argv) {
 	} else if(v == "-p:z") {
 		std::string arg = argv[++idx];
 		std::vector<std::string> parts;
-		Util::splitString(std::back_inserter(parts), arg);
+		split(std::back_inserter(parts), arg);
 		addZRangeFilter(atof(parts[0].c_str()), atof(parts[1].c_str()));
 		found = true;
 	} else if(v == "-p:mini") {
@@ -204,7 +204,7 @@ bool PCPointFilter::parseArgs(int& idx, char** argv) {
 	} else if(v == "-p:i") {
 		std::string arg = argv[++idx];
 		std::vector<std::string> parts;
-		Util::splitString(std::back_inserter(parts), arg);
+		split(std::back_inserter(parts), arg);
 		addIntensityFilter(atof(parts[0].c_str()), atof(parts[1].c_str()));
 		found = true;
 	} else if(v == "-p:mina") {
@@ -218,7 +218,7 @@ bool PCPointFilter::parseArgs(int& idx, char** argv) {
 	} else if(v == "-p:a") {
 		std::string arg = argv[++idx];
 		std::vector<std::string> parts;
-		Util::splitString(std::back_inserter(parts), arg);
+		split(std::back_inserter(parts), arg);
 		addScanAngleFilter(atof(parts[0].c_str()), atof(parts[1].c_str()));
 		found = true;
 	} else if(v == "-p:e") {

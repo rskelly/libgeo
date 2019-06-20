@@ -16,12 +16,12 @@
 #include <thread>
 #include <algorithm>
 
-#include "util.hpp"
 #include "pointcloud.hpp"
 #include "pc_computer.hpp"
 #include "externalmergesort.hpp"
 #include "grid.hpp"
-#include "ds/mtree.hpp"
+#include "ds/kdtree.hpp"
+#include "util.hpp"
 
 using namespace geo::grid;
 using namespace geo::pc;
@@ -244,7 +244,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	props.setWritable(true);
 	props.setBands(bandCount);
 
-	mtree<geo::pc::Point> tree(bounds, 1024);
+	KDTree<geo::pc::Point> tree(2, true);
 	geo::pc::Point pt;
 
 	g_trace("Adding files to tree");
@@ -258,6 +258,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 		}
 	}
 
+	tree.build();
 
 	// The final output raster.
 	Grid<double> outrast(filename, props);
@@ -266,10 +267,6 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 
 	g_trace("Running...")
 
-	// The squared radius for distance comparisons without sqrt.
-	double radiusSq = radius * radius;
-
-
 	size_t count = 0;
 	int band;
 
@@ -277,18 +274,14 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	std::vector<geo::pc::Point> cpts;
 	std::vector<geo::pc::Point> filtered;
 	std::vector<double> out;
+	std::vector<double> dist;
 
 	for(int r = 0; r < rows; ++r) {
 		for(int c = 0; c < cols; ++c) {
-			double x = props.toCentroidX(c);
-			double y = props.toCentroidY(r);
-			double bounds[] = {x - radiusSq, y - radiusSq, x + radiusSq, y + radiusSq};
-			if(tree.get(bounds, pts)) {
-				for(const geo::pc::Point& pt : pts) {
-					if(std::pow(pt.x() - x, 2) + std::pow(pt.y() - y, 2) <= radiusSq)
-						cpts.push_back(pt);
-				}
-
+			double x = props.toX(c);
+			double y = props.toY(r);
+			geo::pc::Point search(x, y, 0);
+			if(tree.radSearch(search, radius, 0, std::back_inserter(cpts), std::back_inserter(dist))) {
 
 				if(!cpts.empty()) {
 					count = m_filter->filter(cpts.begin(), cpts.end(), std::back_inserter(filtered));

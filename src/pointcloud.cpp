@@ -344,7 +344,7 @@ PCWriter::~PCWriter() {
 	delete m_header;
 	if(!m_totalReturns || m_dod) {
 		for(const std::string& f : m_filenames)
-			Util::rm(f);
+			rem(f);
 	}
 }
 
@@ -466,7 +466,7 @@ void Tiler::tile(const std::string& outdir, double size, double buffer, int srid
 							double x = file.x() + c * size0;
 							double y = file.y() + r * size0;
 							ss << "tile_" << (int) x << "_" << (int) y << "_" << size0;
-							std::string outfile = Util::pathJoin(outdir, ss.str());
+							std::string outfile = join(outdir, ss.str());
 							writers.emplace_back(new PCWriter(outfile, ihdr, x, y, size0, buffer));
 						}
 					}
@@ -509,7 +509,7 @@ void Tiler::tile(const std::string& outdir, double size, double buffer, int srid
 						double x = allBounds[0] + c * size0;
 						double y = allBounds[1] + r * size0;
 						ss << "tile_" << (int) x << "_" << (int) y << "_" << size0;
-						std::string outfile = Util::pathJoin(outdir, ss.str());
+						std::string outfile = join(outdir, ss.str());
 						writers.emplace_back(new PCWriter(outfile, ihdr, x, y, size0, buffer));
 					}
 				}

@@ -16,9 +16,9 @@ Interleave geo::grid::interleaveFromString(const std::string& str) {
 	std::string lower;
 	std::transform(str.begin(), str.end(), lower.begin(), ::tolower);
 	if(lower == "band") {
-		return Interleave::Band;
+		return Interleave::BIL;
 	} else {
-		return Interleave::Pixel;
+		return Interleave::BIP;
 	}
 }
 

@@ -6,6 +6,7 @@
  */
 
 #include <grid.hpp>
+#include <util_old.hpp>
 #include <memory>
 #include <string>
 #include <fstream>
@@ -16,7 +17,6 @@
 #include <condition_variable>
 #include <thread>
 
-#include "util.hpp"
 #include "pointcloud.hpp"
 #include "pc_computer.hpp"
 #include "pc_memgrid.hpp"
