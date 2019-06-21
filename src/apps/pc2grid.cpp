@@ -10,8 +10,6 @@
 #include <unordered_set>
 #include <iostream>
 
-#include <pointcloud.hpp>
-
 #include "pointcloud.hpp"
 
 using namespace geo::pc;

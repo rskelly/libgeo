@@ -24,7 +24,7 @@
 #include "util.hpp"
 #include "grid.hpp"
 #include "pointcloud.hpp"
-#include "ds/kdtree.hpp"
+#include "ds/mkdtree.hpp"
 #include "pc_computer.hpp"
 
 using namespace geo::grid;
@@ -725,7 +725,7 @@ void PCTreeIterator::reset() {
 	m_idx = -1;
 }
 
-bool PCTreeIterator::next(geo::ds::KDTree<geo::pc::Point>& tree) {
+bool PCTreeIterator::next(geo::ds::mKDTree<geo::pc::Point>& tree) {
 	tree.destroy();
 	if(++m_idx >= m_cols * m_rows)
 		return false;
@@ -741,7 +741,7 @@ bool PCTreeIterator::next(geo::ds::KDTree<geo::pc::Point>& tree) {
 				double x = pt.x();
 				double y = pt.y();
 				if(x >= tileBounds[0] && x <= tileBounds[2] && y >= tileBounds[1] && y <= tileBounds[2])
-					tree.add(new geo::pc::Point(pt));
+					tree.add(pt);
 			}
 		}
 	}

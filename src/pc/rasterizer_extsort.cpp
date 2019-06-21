@@ -244,7 +244,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	props.setWritable(true);
 	props.setBands(bandCount);
 
-	KDTree<geo::pc::Point> tree(2, true);
+	mKDTree<geo::pc::Point> tree(2);
 	geo::pc::Point pt;
 
 	g_trace("Adding files to tree");
@@ -281,7 +281,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 			double x = props.toX(c);
 			double y = props.toY(r);
 			geo::pc::Point search(x, y, 0);
-			if(tree.radSearch(search, radius, 0, std::back_inserter(cpts), std::back_inserter(dist))) {
+			if(tree.search(search, radius, std::back_inserter(cpts))) {
 
 				if(!cpts.empty()) {
 					count = m_filter->filter(cpts.begin(), cpts.end(), std::back_inserter(filtered));

@@ -219,11 +219,11 @@ public:
 		if(m_mapped) {
 			m_mcoords.resize(m_mitems.size() * m_dims);
 			m_coords = (ANNcoord*) m_mcoords.data();
-			m_pts = (ANNpoint*) m_coords;
+			m_pts = (ANNpoint*) &m_coords;
 		} else {
 			m_vcoords.resize(m_items.size() * m_dims);
 			m_coords = (ANNcoord*) m_vcoords.data();
-			m_pts = (ANNpoint*) m_coords;
+			m_pts = (ANNpoint*) &m_coords;
 		}
 
 		// Write points into the buffer and save pointers.

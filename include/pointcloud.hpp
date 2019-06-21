@@ -23,7 +23,7 @@
 #include <liblas/liblas.hpp>
 
 #include "util.hpp"
-#include "ds/kdtree.hpp"
+#include "ds/mkdtree.hpp"
 
 #define NODATA -9999.0
 #define D_MAX std::numeric_limits<double>::max()
@@ -860,7 +860,7 @@ public:
 
 	void reset();
 
-	bool next(geo::ds::KDTree<geo::pc::Point>& tree);
+	bool next(geo::ds::mKDTree<geo::pc::Point>& tree);
 
 };
 
