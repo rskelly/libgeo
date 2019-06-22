@@ -14,8 +14,6 @@
 #include <iterator>
 #include <list>
 
-#include <fstream>
-
 #include "geo.hpp"
 #include "util.hpp"
 #include "ds/mvector.hpp"
@@ -59,9 +57,6 @@ namespace {
 		}
 	};
 
-	int __oid = 0;
-
-
 	template <class T>
 	class node {
 	private:
@@ -97,12 +92,6 @@ namespace {
 				bounds[i] = bbounds[i];
 
 			if(depth == maxDepth || end - start <= minSize) {
-				std::ofstream out("test.csv", std::ios::app);
-				out << std::setprecision(9);
-				out << ++__oid << "," << bounds[0];
-				for(int i = 1; i < 4; ++i)
-					out << "," << bounds[i];
-				out << "\n";
 				leaf = true;
 				return;
 			}
