@@ -127,7 +127,7 @@ bool geo::util::isfile(const std::string& path) {
 }
 
 bool geo::util::rem(const std::string& dir) {
-	return !unlink(dir.c_str());
+	return !::unlink(dir.c_str());
 }
 
 #ifdef _WIN32
@@ -135,6 +135,23 @@ bool geo::util::rem(const std::string& dir) {
 #else
 	const char pathsep = '/';
 #endif
+
+std::string geo::util::parent(const std::string& path) {
+	std::string _p = path;
+
+	while(_p.size() > 0 && _p.back() == pathsep)
+		_p = _p.substr(0, _p.size() - 1);
+
+	if(_p.empty())
+		return _p;
+
+	size_t a = _p.find_last_of(pathsep);
+	if(a == std::string::npos)
+		return "";
+
+	return _p.substr(0, a);
+
+}
 
 std::string geo::util::join(const std::string& a, const std::string& b) {
 	std::string _a, _b;
@@ -154,13 +171,21 @@ std::string geo::util::join(const std::string& a, const std::string& b) {
 }
 
 std::string geo::util::basename(const std::string& path) {
-	size_t a = path.find_last_of(pathsep);
-	size_t b = path.find_last_of('.');
+	std::string _p = path;
+
+	while(_p.size() > 0 && _p.back() == pathsep)
+		_p = _p.substr(0, _p.size() - 1);
+
+	if(_p.empty())
+		return _p;
+
+	size_t a = _p.find_last_of(pathsep);
+	size_t b = _p.find_last_of('.');
 	if(a == std::string::npos)
 		a = 0;
 	if(b < a)
 		b = std::string::npos;
-	return path.substr(a, b);
+	return _p.substr(a, b);
 }
 
 std::string geo::util::extension(const std::string& path) {
