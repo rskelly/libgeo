@@ -243,7 +243,6 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	GridProps props;
 	props.setTrans(easting, resX, northing, resY);
 	props.setSize(cols, rows);
-	props.setNoData(NODATA);
 	props.setDataType(DataType::Float32);
 	props.setSrid(srid);
 	props.setWritable(true);
