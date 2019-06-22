@@ -97,7 +97,7 @@ add_library (geogrid SHARED $<TARGET_OBJECTS:geogridobj>)
 target_link_libraries (geogrid geoutil geodb Threads::Threads ${GEOS_LIBRARY} ${GDAL_LIBRARY})
 
 file(GLOB PC_COMPUTERS src/pc/computers/*.cpp)
-add_library (geopc SHARED src/geo.cpp src/pointcloud.cpp src/pc/normalizer.cpp src/pc/rasterizer_extsort.cpp src/pc/filter.cpp ${PC_COMPUTERS})
+add_library (geopc SHARED src/geo.cpp src/pointcloud.cpp src/pc/normalizer.cpp src/pc/rasterizer.cpp src/pc/filter.cpp ${PC_COMPUTERS})
 target_link_libraries (geopc geoutil geogrid geoann ${LIBLAS_LIBRARY} CGAL CGAL_Core gmp)
 
 set (geoannsrc src/geo.cpp ann/src/ANN.cpp ann/src/brute.cpp 

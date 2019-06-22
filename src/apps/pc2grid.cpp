@@ -36,7 +36,10 @@ void usage() {
 			<< "                  good bounds (etc.) info\n"
 			<< " -t <min>         Normalize the point density in each cell. Any cell with more than this\n"
 			<< "                  number of points will be randomly thinned. Any cell with less will be\n"
-			<< "                  reduced to zero. This occurs after filtering.\n";
+			<< "                  reduced to zero. This occurs after filtering.\n"
+			<< " -d <nodata>      A nodata value. The default is -9999.0\n"
+			<< " -o               Fill voids. Does this by doubling the search radius iteratively.\n"
+			<< "                  the point count in this cells remains at zero.\n";
 
 	PCPointFilter::printHelp(std::cerr);
 
@@ -65,6 +68,8 @@ int main(int argc, char** argv) {
 	std::vector<std::string> args;
 	PCPointFilter filter;
 	int thin = 0;
+	double nodata = -9999;
+	bool voids = false;
 
 	for(int i = 1; i < argc; ++i) {
 		if(filter.parseArgs(i, argv))
@@ -93,6 +98,10 @@ int main(int argc, char** argv) {
 			northing = atof(argv[++i]);
 		} else if(v == "-t") {
 			thin = atoi(argv[++i]);
+		} else if(v == "-d") {
+			nodata = atof(argv[++i]);
+		} else if(v == "-o") {
+			voids = true;
 		} else {
 			args.push_back(argv[i]);
 		}
@@ -112,7 +121,8 @@ int main(int argc, char** argv) {
 		Rasterizer r(infiles);
 		r.setFilter(&filter);
 		r.setThin(thin);
-		r.rasterize(args[0], types, resX, resY, easting, northing, radius, srid, memory, useHeader);
+		r.setNoData(nodata);
+		r.rasterize(args[0], types, resX, resY, easting, northing, radius, srid, memory, useHeader, voids);
 	} catch(const std::exception& ex) {
 		std::cerr << ex.what() << "\n";
 		usage();

@@ -71,12 +71,19 @@ class Monitor {
 private:
 	bool m_cancel;
 public:
+
 	bool cancel() const {
 		return m_cancel;
 	}
+
 	void status(float status, const std::string& message = "") {
 
 	}
+
+	void error(const std::string& err) {
+
+	}
+
 	void exception(const std::exception* ex) {
 
 	}

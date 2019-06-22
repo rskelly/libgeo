@@ -222,15 +222,15 @@ public:
 	 * \return The index.
 	 */
 	size_t index(int col, int row, int band) const {
-		if(band < 1 || band > m_bands)
+		if(band < 0 || band >= m_bands)
 			g_runerr("Invalid band: " << band);
 		switch(m_interleave) {
 		case Interleave::BIL:
-			return row * m_cols * m_bands + row * m_cols + col;
+			return row * m_cols * m_bands + band * m_cols + col;
 		case Interleave::BSQ:
 			return band * m_cols * m_rows + row * m_cols + col;
 		case Interleave::BIP:
-			return row * m_cols * m_bands + col * m_bands;
+			return row * m_cols * m_bands + col * m_bands + band;
 		default:
 			g_runerr("Invalid interleave: "  << (int) m_interleave);
 		}
@@ -783,6 +783,7 @@ private:
 	GDALDataset *m_ds;          				///<! GDAL data set pointer.
 	GDALDataType m_type;        				///<! GDALDataType -- limits the possible template types.
 	GridProps m_props;							///<! Properties of the raster.
+	std::unique_ptr<TmpFile> m_mapFile;
 	bool m_mapped;
 	size_t m_size;
 	T* m_data;
@@ -792,7 +793,8 @@ private:
 		if(m_data)
 			destroy();
 		m_size = props().cols() * props().rows() * props().bands() * sizeof(T);
-		m_data = (T*) mmap(0, m_size, PROT_READ|PROT_WRITE, MAP_ANONYMOUS|MAP_PRIVATE, 0, 0);
+		m_mapFile.reset(new TmpFile(m_size));
+		m_data = (T*) mmap(0, m_size, PROT_READ|PROT_WRITE, MAP_SHARED, m_mapFile->fd, 0);
 		if(!m_data)
 			g_runerr("Failed to map " << m_size << " bytes for grid.");
 		m_mapped = true;
@@ -826,6 +828,28 @@ private:
 			return DataType::Byte;
 		} else {
 			return DataType::None;
+		}
+	}
+
+	GDALDataType gdalType() const {
+		if(std::is_same<T, double>::value) {
+			return GDT_Float64;
+		} else if(std::is_same<T, float>::value) {
+			return GDT_Float32;
+		} else if(std::is_same<T, int>::value) {
+			return GDT_Int32;
+		} else if(std::is_same<T, unsigned int>::value) {
+			return GDT_UInt32;
+		} else if(std::is_same<T, short>::value) {
+			return GDT_Int16;
+		} else if(std::is_same<T, unsigned short>::value) {
+			return GDT_UInt16;
+		} else if(std::is_same<T, char>::value) {
+			return GDT_Byte;
+		} else if(std::is_same<T, unsigned char>::value) {
+			return GDT_Byte;
+		} else {
+			return GDT_Unknown;
 		}
 	}
 
@@ -1337,12 +1361,7 @@ public:
 	template <class U>
 	void fill(U value, int band) {
 
-		if(band == 0) {
-
-			for(size_t i = 0; i < m_size; ++i)
-				m_data[i] = value;
-
-		} else if(band > 0 && band < props().bands()){
+		if(band >= 0 && band < props().bands()){
 
 			int cols = props().cols();
 			int rows = props().rows();
@@ -1370,6 +1389,17 @@ public:
 		fill<T>(value, band);
 	}
 
+	/**
+	 * Fill all bands with the given value.
+	 *
+	 * \param value The fill value.
+	 */
+	void fill(T value) {
+
+		for(int i = 0; i < props().bands(); ++i)
+			fill(value, i);
+
+	}
 
 	/**
 	 * Return a the value held at the given position in the grid.
@@ -2034,6 +2064,32 @@ public:
 		return true;
 	}
 
+	void flush(Monitor* monitor = nullptr) {
+
+		if(!m_ds || !props().writable())
+			return;
+
+		int cols = props().cols();
+		int rows = props().rows();
+		int bands = props().bands();
+
+		std::vector<T> buf(cols);
+
+		for(int b = 0; b < bands; ++b) {
+			GDALRasterBand* band = m_ds->GetRasterBand(b + 1);
+			for(int r = 0; r < rows; ++r) {
+				getRow(r, b, buf.data());
+				if(CE_None != band->RasterIO(GF_Write, 0, r, cols, 1, buf.data(), cols, 1, gdalType(), 0, 0, 0)) {
+					if(monitor)
+						monitor->error("Failed to write to raster.");
+				}
+
+				if(monitor)
+					monitor->status((float) r / rows, "Flushing grid to file.");
+			}
+		}
+	}
+
 	void destroy()  {
 
 		if(m_ds) {
@@ -2315,28 +2371,6 @@ public:
 
 		finishGEOS();
 
-	}
-
-	void flush() {
-
-		if(m_ds && props().writable()) {
-
-			int cols = props().cols();
-			int rows = props().rows();
-			int bands = props().bands();
-
-			if(props().interleave() != Interleave::BIL)
-				remap(Interleave::BIL);
-
-			for(int b = 1; b <= bands; b++) {
-				for(int r = 0; r < rows; ++r) {
-					GDALRasterBand* band = m_ds->GetRasterBand(b);
-					if(CE_None != band->RasterIO(GF_Write,0, r, cols, 1, m_data + (r * cols), cols, 1, dataType2GDT(props().dataType()), 0, 0, 0))
-						g_runerr("Failed to write data.");
-				}
-			}
-
-		}
 	}
 
 	/**

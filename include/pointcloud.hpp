@@ -8,6 +8,7 @@
  *  Author: rob
  */
 
+#include <ds/mqtree.hpp>
 #include <grid.hpp>
 #include <fstream>
 #include <vector>
@@ -23,7 +24,6 @@
 #include <liblas/liblas.hpp>
 
 #include "util.hpp"
-#include "ds/mkdtree.hpp"
 
 #define NODATA -9999.0
 #define D_MAX std::numeric_limits<double>::max()
@@ -510,6 +510,10 @@ public:
 	 */
 	double z() const;
 
+	void x(double x);
+	void y(double y);
+	void z(double z);
+
 	/**
 	 * Return the intensity.
 	 * \return The intensity.
@@ -742,6 +746,7 @@ private:
 	std::vector<PCFile> m_files;		///< A list of PCFile instances.
 	PCPointFilter* m_filter;
 	int m_thin;
+	double m_nodata;
 
 	// Used by finalizer.
 	std::vector<std::unique_ptr<Computer> > m_computers;
@@ -780,10 +785,10 @@ public:
 	 * \param srid 		The spatial reference ID of the output.
 	 * \param memory    The number of bytes to consume in RAM before changing to disk-backed storage.
 	 * \param useHeader True to trust the LAS file headers for things like bounds. Otherwise, read the points.
-
+	 * \param voids     If true, fill voids in the raster by expanding the radius iteratively.
 	 */
 	void rasterize(const std::string& filename, const std::vector<std::string>& types, double resX, double resY,
-		double easting, double northing, double radius, int srid, int memory, bool useHeader);
+		double easting, double northing, double radius, int srid, int memory, bool useHeader, bool voids);
 
 	/**
 	 * Esitmate the point density (per cell) given the source files, resolution and search radius.
@@ -801,6 +806,13 @@ public:
 	 * \param thin The number of points in each cell.
 	 */
 	void setThin(int thin);
+
+	/**
+	 * Set the nodata value. Default is -9999.
+	 *
+	 * \param nodata The nodata value.
+	 */
+	void setNoData(double nodata);
 
 	/**
 	 * Set a point filter to use for filtering points. Removes the old filter.
@@ -860,7 +872,7 @@ public:
 
 	void reset();
 
-	bool next(geo::ds::mKDTree<geo::pc::Point>& tree);
+	bool next(geo::ds::mqtree<geo::pc::Point>& tree);
 
 };
 

@@ -86,7 +86,8 @@ Computer* getComputer(const std::string& name) {
 
 Rasterizer::Rasterizer(const std::vector<std::string> filenames) :
 	m_filter(nullptr),
-	m_thin(0) {
+	m_thin(0),
+	m_nodata(-9999) {
 	for(const std::string& filename : filenames)
 		m_files.emplace_back(filename);
 }
@@ -171,6 +172,10 @@ void Rasterizer::setThin(int thin) {
 	m_thin = thin;
 }
 
+void Rasterizer::setNoData(double nodata) {
+	m_nodata = nodata;
+}
+
 void Rasterizer::setFilter(PCPointFilter* filter) {
 	m_filter = filter;
 }
@@ -185,7 +190,7 @@ Rasterizer::~Rasterizer() {
 
 void Rasterizer::rasterize(const std::string& filename, const std::vector<std::string>& types,
 		double resX, double resY, double easting, double northing, double radius, 
-		int srid, int memory, bool useHeader) {
+		int srid, int memory, bool useHeader, bool voids) {
 
 	if(std::isnan(resX) || std::isnan(resY))
 		g_runerr("Resolution not valid");
@@ -243,8 +248,9 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	props.setSrid(srid);
 	props.setWritable(true);
 	props.setBands(bandCount);
+	props.setNoData(m_nodata);
 
-	mKDTree<geo::pc::Point> tree(2);
+	mqtree<geo::pc::Point> tree(2);
 	geo::pc::Point pt;
 
 	g_trace("Adding files to tree");
@@ -275,54 +281,79 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	std::vector<geo::pc::Point> filtered;
 	std::vector<double> out;
 	std::vector<double> dist;
+	geo::pc::Point spt;
 
-	for(int r = 0; r < rows; ++r) {
-		for(int c = 0; c < cols; ++c) {
-			double x = props.toX(c);
-			double y = props.toY(r);
-			geo::pc::Point search(x, y, 0);
-			if(tree.search(search, radius, std::back_inserter(cpts))) {
+	outrast.fill(props.nodata());
 
-				if(!cpts.empty()) {
-					count = m_filter->filter(cpts.begin(), cpts.end(), std::back_inserter(filtered));
+	bool voidCells = false;
 
-					if(m_thin > 0) {
-						// Thin the points to the desired density, if required.
-						if(filtered.size() < (size_t) m_thin) {
-							filtered.clear();
-							count = 0;
-						} else {
-							std::random_shuffle(filtered.begin(), filtered.end());
-							filtered.resize(m_thin);
-							count = m_thin;
+	do {
+
+		// If this is a void filling loop, increase the radius.
+		if(voidCells)
+			radius *= 2;
+
+		for(int r = 0; r < rows; ++r) {
+			for(int c = 0; c < cols; ++c) {
+
+				spt.x(props.toX(c));
+				spt.y(props.toY(r));
+
+				// If this is a void filing loop, skip when the value is valid.
+				if(voidCells && outrast.get(c, r, 1) != props.nodata())
+					continue;
+
+				if(tree.search(spt, radius, std::back_inserter(cpts))) {
+
+					if(!cpts.empty()) {
+						count = m_filter->filter(cpts.begin(), cpts.end(), std::back_inserter(filtered));
+
+						if(m_thin > 0) {
+							// Thin the points to the desired density, if required.
+							if(filtered.size() < (size_t) m_thin) {
+								filtered.clear();
+								count = 0;
+							} else {
+								// Randomize, then take the first n points.
+								std::random_shuffle(filtered.begin(), filtered.end());
+								filtered.resize(m_thin);
+								count = m_thin;
+							}
 						}
 					}
-				}
 
-				band = 1;
+					band = 0;
 
-				outrast.set(c, r, count, band++);
+					// Write the point count.
+					outrast.set(c, r, count, band++);
 
-				if(count) {
-					for(size_t i = 0; i < m_computers.size(); ++i) {
-						out.clear();
-						m_computers[i]->compute(x, y, cpts, filtered, radius, out);
-						for(double val : out)
-							outrast.set(c, r, std::isnan(val) ? NODATA : val, band++);
+					if(count) {
+						for(size_t i = 0; i < m_computers.size(); ++i) {
+							out.clear();
+							// Calculate the values in the computer and append to the raster.
+							m_computers[i]->compute(spt.x(), spt.y(), cpts, filtered, radius, out);
+							for(double val : out)
+								outrast.set(c, r, std::isnan(val) ? NODATA : val, band++);
+						}
 					}
-				} else {
-					for(size_t i = 0; i < m_computers.size(); ++i) {
-						for(int j = 0; j < m_computers[i]->bandCount(); ++j)
-							outrast.set(c, r, NODATA, band++);
-					}
+					filtered.clear();
+					out.clear();
+					cpts.clear();
+					pts.clear();
 				}
-				filtered.clear();
-				out.clear();
-				cpts.clear();
-				pts.clear();
 			}
 		}
-	}
+
+		if(voids) {
+			voidCells = false;
+			for(int r = 0; !voidCells && r < rows; ++r) {
+				for(int c = 0; !voidCells && c < cols; ++c) {
+					if(outrast.get(c, r, 1) == props.nodata())
+						voidCells = true;
+				}
+			}
+		}
+	} while(voidCells);
 
 	g_debug("Done")
 }

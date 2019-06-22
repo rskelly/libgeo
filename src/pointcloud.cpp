@@ -24,7 +24,7 @@
 #include "util.hpp"
 #include "grid.hpp"
 #include "pointcloud.hpp"
-#include "ds/mkdtree.hpp"
+#include <ds/mqtree.hpp>
 #include "pc_computer.hpp"
 
 using namespace geo::grid;
@@ -648,6 +648,18 @@ double geo::pc::Point::z() const {
 	return m_z;
 }
 
+void geo::pc::Point::x(double x) {
+	m_x = x;
+}
+
+void geo::pc::Point::y(double y) {
+	m_y = y;
+}
+
+void geo::pc::Point::z(double z) {
+	m_z = z;
+}
+
 double geo::pc::Point::value() const {
 	return z();
 }
@@ -725,7 +737,7 @@ void PCTreeIterator::reset() {
 	m_idx = -1;
 }
 
-bool PCTreeIterator::next(geo::ds::mKDTree<geo::pc::Point>& tree) {
+bool PCTreeIterator::next(geo::ds::mqtree<geo::pc::Point>& tree) {
 	tree.destroy();
 	if(++m_idx >= m_cols * m_rows)
 		return false;
