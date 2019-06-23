@@ -59,7 +59,7 @@ public:
 	bool push(const T& item) {
 		if(m_idx * sizeof(T) >= m_file->size)
 			resize((m_idx + 1) *  2);
-		std::memcpy(m_data + m_idx, &item, sizeof(T)) ;
+		std::memcpy(m_data + m_idx, &item, sizeof(T));
 		++m_idx;
 		return true;
 	}
@@ -67,7 +67,7 @@ public:
 	bool insert(size_t idx, const T& item) {
 		if(idx >= m_idx)
 			return false;
-		std::memcpy(m_data + idx, &item, sizeof(T)) ;
+		std::memcpy(m_data + idx, &item, sizeof(T));
 		return true;
 	}
 

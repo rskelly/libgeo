@@ -42,17 +42,14 @@ namespace {
 	public:
 		size_t from;
 		size_t idx;
-		index(size_t from, size_t idx) :
+		index(size_t from = 0, size_t idx = 0) :
 			from(from), idx(idx) {}
-	};
 
-	class indexsort {
-	public:
-		bool operator()(const index& a, const index& b) {
-			if(a.idx == b.idx) {
-				return a.from < b.from;	// Attempt to preserve locality.
+		bool operator<(const index& other) const {
+			if(idx == other.idx) {
+				return from < other.from;
 			} else {
-				return a.idx < b.idx;
+				return idx < other.idx;
 			}
 		}
 	};
@@ -102,39 +99,54 @@ namespace {
 			size_t idxCounts[4] = {0};
 			{
 				T item;
-				size_t idx;
-				indexsort idxSort;
-				std::vector<index> indices;
+				if(start - end > 1000000) {
+					index idx;
+					mvector<index> indices(end - start);
 
-				// Collect the node indices and the current position in the list.
-				for(size_t i = start; i < end; ++i) {
-					items->get(i, item);
-					idx = nindex(item[0], item[1]);
-					indices.emplace_back(i, idx);
-					idxCounts[idx]++;
-				}
+					// Collect the node indices and the current position in the list.
+					for(size_t i = start; i < end; ++i) {
+						items->get(i, item);
+						idx.from = i;
+						idx.idx = nindex(item[0], item[1]);
+						indices.push(idx);
+						idxCounts[idx.idx]++;
+					}
 
-				// Sort on node index.
-				std::sort(indices.begin(), indices.end(), idxSort);
+					// Sort on node index.
+					indices.sort();
 
-				if(indices.size() > 1000000) {
 					mvector<T> tmp(end - start);
 					for(size_t i = 0; i < indices.size(); ++i) {
 						items->get(indices[i].from, item);
-						tmp.insert(i, item);
+						tmp.push(item);
 					}
 					for(size_t i = 0; i < indices.size(); ++i) {
 						tmp.get(i, item);
 						items->insert(i + start, item);
 					}
+
 				} else {
+					size_t idx;
+					std::vector<index> indices;
+					indices.reserve(end - start);
+
+					// Collect the node indices and the current position in the list.
+					for(size_t i = start; i < end; ++i) {
+						items->get(i, item);
+						idx = nindex(item[0], item[1]);
+						indices.emplace_back(i, idx);
+						idxCounts[idx]++;
+					}
+
+					// Sort on node index.
+					std::sort(indices.begin(), indices.end());
+
 					std::vector<T> tmp(end - start);
 					for(size_t i = 0; i < indices.size(); ++i)
 						items->get(indices[i].from, tmp[i]);
 					for(size_t i = 0; i < indices.size(); ++i)
 						items->insert(i + start, tmp[i]);
 				}
-
 			}
 
 			size_t s = start, e;
@@ -361,8 +373,10 @@ public:
 		if(empty())
 			g_runerr("Not enough items.");
 
+		g_trace("Buildng...")
 		m_root = new node<T>(&m_items, m_dims);
 		m_root->build();
+		g_trace("Buiding... Done.")
 	}
 
 	/**

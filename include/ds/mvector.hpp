@@ -81,8 +81,10 @@ public:
 
 	bool insert(size_t idx, const T& item) {
 		if(idx >= m_count)
-			return false;
+			resize(m_count *  2);
 		std::memcpy(m_data + idx, &item, sizeof(T)) ;
+		if(idx > m_idx)
+			m_idx = idx;
 		return true;
 	}
 
@@ -119,6 +121,53 @@ public:
 
 	size_t size() const {
 		return m_idx;
+	}
+
+	void sort() {
+
+		std::list<std::pair<size_t, size_t>> q;
+		size_t p = partition(0, size());
+		q.emplace_back(0, p);
+		q.emplace_back(p + 1, size());
+
+		while(!q.empty()) {
+
+			std::pair<size_t, size_t> v = q.front();
+			q.pop_front();
+
+			if(v.first < v.second) {
+				size_t p = partition(v.first, v.second);
+				q.emplace_back(v.first, p);
+				q.emplace_back(p + 1, v.second);
+			}
+		}
+	}
+
+	size_t partition(size_t s, size_t e) {
+		T pivot, a, b;
+		get((s + e) / 2, pivot);
+		while(true) {
+			bool roll = false;
+			do {
+				get(s, a);
+				++s;
+			} while(a < pivot);
+			do {
+				get(e, b);
+				if(e == 0) {
+					roll = true;
+					break;
+				}
+				--e;
+			} while(pivot < b);
+			--s;
+			if(!roll)
+				++e;
+			if(s >= e)
+				return e;
+			insert(e, a);
+			insert(s, b);
+		}
 	}
 
 	~mvector() {
