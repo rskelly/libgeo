@@ -139,11 +139,43 @@ bool isfile(const std::string& path);
 bool rem(const std::string& dir);
 
 /**
+ * Return the parent directory of the path.
+ */
+std::string parent(const std::string& path);
+
+/**
  * Recursively make the directory.
  */
 bool makedir(const std::string& filename);
 
+/**
+ * Join to paths together using the appropriate separator for the system.
+ *
+ * \param a The first path part.
+ * \param b The second path part.
+ * \return The joined path.
+ */
 std::string join(const std::string& a, const std::string& b);
+
+/**
+ * Join the items represented by the iterator using the given delimited.
+ *
+ * \param begin The start iterator.
+ * \param end The end iterator.
+ * \param delim The delimiter.
+ * \return The joined string.
+ */
+template <class Iter>
+std::string join(Iter begin, Iter end, const std::string& delim = ",") {
+	std::stringstream ss;
+	ss << *begin;
+	++begin;
+	while(begin != end) {
+		ss << delim << *begin;
+		++begin;
+	}
+	return ss.str();
+}
 
 std::string basename(const std::string& path);
 
