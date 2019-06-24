@@ -547,6 +547,12 @@ public:
 	double value() const;
 
 	/**
+	 * Intended to be used for z-ordering (space-filling) to facilitate
+	 * the construction of quad trees.
+	 */
+	bool operator<(const Point& other) const;
+
+	/**
 	 * Destroy the point.
 	 */
 	~Point();
@@ -747,6 +753,7 @@ private:
 	PCPointFilter* m_filter;
 	int m_thin;
 	double m_nodata;
+	size_t m_limit;
 
 	// Used by finalizer.
 	std::vector<std::unique_ptr<Computer> > m_computers;
@@ -783,12 +790,11 @@ public:
 	 * \param northing 	The minimum corner coordinate of the raster.
 	 * \param radius 	The size of the neighbourhood around each cell centre.
 	 * \param srid 		The spatial reference ID of the output.
-	 * \param memory    The number of bytes to consume in RAM before changing to disk-backed storage.
 	 * \param useHeader True to trust the LAS file headers for things like bounds. Otherwise, read the points.
 	 * \param voids     If true, fill voids in the raster by expanding the radius iteratively.
 	 */
 	void rasterize(const std::string& filename, const std::vector<std::string>& types, double resX, double resY,
-		double easting, double northing, double radius, int srid, int memory, bool useHeader, bool voids);
+		double easting, double northing, double radius, int srid, bool useHeader, bool voids);
 
 	/**
 	 * Esitmate the point density (per cell) given the source files, resolution and search radius.
@@ -813,6 +819,14 @@ public:
 	 * \param nodata The nodata value.
 	 */
 	void setNoData(double nodata);
+
+	/**
+	 * The memory usage limit of data items which will trigger the use
+	 * of file-backed memory.
+	 *
+	 * \param limit The memory limit (bytes).
+	 */
+	void setMemLimit(size_t limit);
 
 	/**
 	 * Set a point filter to use for filtering points. Removes the old filter.

@@ -274,6 +274,11 @@ TmpFile::~TmpFile() {
 	unlink(filename.c_str());
 }
 
+uint64_t geo::util::morton(double x, double y, int scale) {
+	uint32_t xa = splitBy3((uint32_t) (x * scale));
+	uint32_t ya = splitBy3((uint32_t) (y * scale));
+	return xa | (ya << 1);
+}
 
 Bounds::Bounds() :
 	m_minx(G_DBL_MAX_POS), m_miny(G_DBL_MAX_POS), m_maxx(G_DBL_MAX_NEG), m_maxy(G_DBL_MAX_NEG), m_minz(G_DBL_MAX_POS), m_maxz(G_DBL_MAX_NEG) {

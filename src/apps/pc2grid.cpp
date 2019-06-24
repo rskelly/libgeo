@@ -39,7 +39,9 @@ void usage() {
 			<< "                  reduced to zero. This occurs after filtering.\n"
 			<< " -d <nodata>      A nodata value. The default is -9999.0\n"
 			<< " -o               Fill voids. Does this by doubling the search radius iteratively.\n"
-			<< "                  the point count in this cells remains at zero.\n";
+			<< "                  the point count in this cells remains at zero.\n"
+			<< " -l <bytes>       The limit of memory devoted to point data that will trigger the use\n"
+			<< "                  of file-backed memory. This will be slow but less likely to crash.\n";
 
 	PCPointFilter::printHelp(std::cerr);
 
@@ -61,7 +63,6 @@ int main(int argc, char** argv) {
 	double easting = std::nan("");
 	double northing = std::nan("");
 	double radius = std::nan("");
-	int memory = 0;
 	uint16_t srid = 0;
 	bool useHeader = true;
 	std::vector<std::string> types;
@@ -70,6 +71,7 @@ int main(int argc, char** argv) {
 	int thin = 0;
 	double nodata = -9999;
 	bool voids = false;
+	size_t limit = 0;
 
 	for(int i = 1; i < argc; ++i) {
 		if(filter.parseArgs(i, argv))
@@ -78,8 +80,6 @@ int main(int argc, char** argv) {
 		if(v == "-m") {
 			std::string type = argv[++i];
 			split(std::back_inserter(types), lowercase(type), ",");
-		} else if(v == "-l") {
-			memory = atoi(argv[++i]);
 		} else if(v == "-h") {
 			useHeader = false;
 		} else if(v == "-v") {
@@ -98,6 +98,8 @@ int main(int argc, char** argv) {
 			northing = atof(argv[++i]);
 		} else if(v == "-t") {
 			thin = atoi(argv[++i]);
+		} else if(v == "-l") {
+			limit = atoi(argv[++i]);
 		} else if(v == "-d") {
 			nodata = atof(argv[++i]);
 		} else if(v == "-o") {
@@ -122,7 +124,8 @@ int main(int argc, char** argv) {
 		r.setFilter(&filter);
 		r.setThin(thin);
 		r.setNoData(nodata);
-		r.rasterize(args[0], types, resX, resY, easting, northing, radius, srid, memory, useHeader, voids);
+		r.setMemLimit(limit);
+		r.rasterize(args[0], types, resX, resY, easting, northing, radius, srid, useHeader, voids);
 	} catch(const std::exception& ex) {
 		std::cerr << ex.what() << "\n";
 		usage();

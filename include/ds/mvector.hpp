@@ -13,6 +13,7 @@
 
 #include <cstdlib>
 #include <memory>
+#include <list>
 
 #include "geo.hpp"
 #include "util.hpp"
@@ -79,6 +80,17 @@ public:
 		return true;
 	}
 
+	bool push(const std::vector<T>& items) {
+		if(m_idx + items.size() >= m_count) {
+			while(m_idx + items.size() >= m_count)
+				m_count *=  2;
+			resize(m_count);
+		}
+		std::memcpy(m_data + m_idx, items.data(), items.size() + sizeof(T)) ;
+		m_idx += items.size();
+		return true;
+	}
+
 	bool insert(size_t idx, const T& item) {
 		if(idx >= m_count)
 			resize(m_count *  2);
@@ -94,6 +106,16 @@ public:
 			return true;
 		}
 		return false;
+	}
+
+	size_t get(size_t idx, std::vector<T>& items, size_t len) const {
+		if(idx > m_count)
+			return 0;
+		if(idx + len > m_count)
+			len = m_count - idx;
+		items.resize(len);
+		std::memcpy(items.data(), m_data + idx, len * sizeof(T));
+		return len;
 	}
 
 	T operator[](size_t idx) const {
@@ -143,6 +165,20 @@ public:
 		}
 	}
 
+	template <class Sort>
+	void sort(Sort sorter) {
+		sort(0, size(), sorter);
+	}
+
+	template <class Sort>
+	void sort(size_t s, size_t e, Sort sorter) {
+		if(s < e) {
+			size_t p = partition(s, e, sorter);
+			sort(s, p, sorter);
+			sort(p + 1, e, sorter);
+		}
+	}
+
 	size_t partition(size_t s, size_t e) {
 		T pivot, a, b;
 		get((s + e) / 2, pivot);
@@ -170,8 +206,31 @@ public:
 		}
 	}
 
+	template <class Sort>
+	size_t partition(size_t s, size_t e, Sort sorter) {
+		T pivot, a, b;
+		get((s + e) / 2, pivot);
+		--s;
+		++e;
+		while(true) {
+			do {
+				++s;
+				get(s, a);
+			} while(sorter(a, pivot));
+			do {
+				--e;
+				get(e, b);
+			} while(sorter(pivot, b));
+			if(s >= e)
+				return e;
+			insert(e, a);
+			insert(s, b);
+		}
+	}
+
 	~mvector() {
-		munmap(m_data, m_file->size);
+		if(m_file.get())
+			munmap(m_data, m_file->size);
 	}
 };
 

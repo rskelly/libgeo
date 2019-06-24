@@ -692,6 +692,10 @@ int geo::pc::Point::numReturns() const {
 	return m_numReturns;
 }
 
+bool geo::pc::Point::operator<(const Point& other) const {
+	return x() == other.x() ? y() < other.y() : x() < other.x();
+}
+
 geo::pc::Point::~Point() {
 }
 
@@ -738,7 +742,7 @@ void PCTreeIterator::reset() {
 }
 
 bool PCTreeIterator::next(geo::ds::mqtree<geo::pc::Point>& tree) {
-	tree.destroy();
+	tree.clear();
 	if(++m_idx >= m_cols * m_rows)
 		return false;
 	int col = m_idx % m_cols;
@@ -757,7 +761,6 @@ bool PCTreeIterator::next(geo::ds::mqtree<geo::pc::Point>& tree) {
 			}
 		}
 	}
-	tree.build();
 	return true;
 }
 

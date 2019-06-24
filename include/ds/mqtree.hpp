@@ -12,7 +12,7 @@
 #include <vector>
 #include <algorithm>
 #include <iterator>
-#include <list>
+#include <map>
 
 #include "geo.hpp"
 #include "util.hpp"
@@ -27,276 +27,23 @@ namespace {
 	template <class T>
 	class itemsort {
 	public:
-		T pt;
-		itemsort(T& pt) : pt(pt) {
+		int scale;
+		itemsort(int scale) : scale(scale) {
 		}
 
 		bool operator()(const T& a, const T& b) {
-			double d1 = std::pow(a[0] - pt[0], 2.0) + std::pow(a[1] - pt[1], 2.0);
-			double d2 = std::pow(b[0] - pt[0], 2.0) + std::pow(b[1] - pt[1], 2.0);
-			return d1 < d2;
+			return morton(a.x(), a.y(), scale) < morton(b.x(), b.y(), scale);
 		}
 	};
 
-	class index {
-	public:
-		size_t from;
-		size_t idx;
-		index(size_t from = 0, size_t idx = 0) :
-			from(from), idx(idx) {}
-
-		bool operator<(const index& other) const {
-			if(idx == other.idx) {
-				return from < other.from;
-			} else {
-				return idx < other.idx;
-			}
-		}
+	double NULL_BOUNDS[] = {
+			std::numeric_limits<double>::max(),
+			std::numeric_limits<double>::max(),
+			std::numeric_limits<double>::lowest(),
+			std::numeric_limits<double>::lowest()
 	};
-
-	template <class T>
-	class node {
-	private:
-		constexpr static int maxDepth = 10;
-		constexpr static int minSize = 256;
-
-		double bounds[4];
-		double midx, midy;
-		bool leaf;
-		int depth;
-		int dims;
-		size_t start;
-		size_t end;
-		mvector<T>* items;
-
-		node<T>* nodes[4] = { nullptr };
-		node<T>* parent;
-
-		inline int nindex(double x, double y) {
-			return ((x < midx) << 1) | (y < midy);
-		}
-
-		inline void nbounds(int idx, double b[4]) {
-			b[0] = idx & 2 ? bounds[0] : midx;
-			b[1] = idx & 1 ? bounds[1] : midy;
-			b[2] = idx & 2 ? midx : bounds[2];
-			b[3] = idx & 1 ? midy : bounds[3];
-		}
-
-		void build(double bbounds[4]) {
-
-			for(int i = 0; i < 4; ++i)
-				bounds[i] = bbounds[i];
-
-			if(depth == maxDepth || end - start <= minSize) {
-				leaf = true;
-				return;
-			}
-
-			midx = (bounds[2] + bounds[0]) / 2.0;
-			midy = (bounds[3] + bounds[1]) / 2.0;
-
-			size_t idxCounts[4] = {0};
-			{
-				T item;
-				if(start - end > 1000000) {
-					index idx;
-					mvector<index> indices(end - start);
-
-					// Collect the node indices and the current position in the list.
-					for(size_t i = start; i < end; ++i) {
-						items->get(i, item);
-						idx.from = i;
-						idx.idx = nindex(item[0], item[1]);
-						indices.push(idx);
-						idxCounts[idx.idx]++;
-					}
-
-					// Sort on node index.
-					indices.sort();
-
-					mvector<T> tmp(end - start);
-					for(size_t i = 0; i < indices.size(); ++i) {
-						items->get(indices[i].from, item);
-						tmp.push(item);
-					}
-					for(size_t i = 0; i < indices.size(); ++i) {
-						tmp.get(i, item);
-						items->insert(i + start, item);
-					}
-
-				} else {
-					size_t idx;
-					std::vector<index> indices;
-					indices.reserve(end - start);
-
-					// Collect the node indices and the current position in the list.
-					for(size_t i = start; i < end; ++i) {
-						items->get(i, item);
-						idx = nindex(item[0], item[1]);
-						indices.emplace_back(i, idx);
-						idxCounts[idx]++;
-					}
-
-					// Sort on node index.
-					std::sort(indices.begin(), indices.end());
-
-					std::vector<T> tmp(end - start);
-					for(size_t i = 0; i < indices.size(); ++i)
-						items->get(indices[i].from, tmp[i]);
-					for(size_t i = 0; i < indices.size(); ++i)
-						items->insert(i + start, tmp[i]);
-				}
-			}
-
-			size_t s = start, e;
-			double cbounds[4];
-			for(int i = 0; i < 4; ++i) {
-				if(idxCounts[i] > 0) {
-					e = s + idxCounts[i];
-					nbounds(i, cbounds);
-					nodes[i] = new node<T>(depth + 1, s, e, items, dims);
-					nodes[i]->parent = this;
-					nodes[i]->build(cbounds);
-					s = e;
-				}
-			}
-		}
-
-	public:
-
-		node(mvector<T>* items, int dims) :
-			node(0, 0, items->size(), items, dims) {}
-
-		node(int depth, size_t start, size_t end, mvector<T>* items, int dims) :
-			midx(0), midy(0), leaf(false), depth(depth), dims(dims),
-			start(start), end(end), items(items), parent(nullptr) {
-		}
-
-		bool intersects(double box[4]) {
-			return !(box[0] > bounds[2] || box[2] < bounds[0] || box[1] > bounds[3] || box[3] < bounds[1]);
-		}
-
-		bool contains(double x, double y) {
-			return x >= bounds[0] && x <= bounds[2] && y >= bounds[1] && y <= bounds[3];
-		}
-
-		void build() {
-			T item;
-			double bbounds[] =  { std::numeric_limits<double>::max(), std::numeric_limits<double>::max(), std::numeric_limits<double>::lowest(), std::numeric_limits<double>::lowest() };
-			for(size_t i = start; i < end; ++i) {
-				items->get(i, item);
-				if(item[0] < bbounds[0]) bbounds[0] = item[0];
-				if(item[0] > bbounds[2]) bbounds[2] = item[0];
-				if(item[1] < bbounds[1]) bbounds[1] = item[1];
-				if(item[1] > bbounds[3]) bbounds[3] = item[1];
-
-			}
-			double w = bbounds[2] - bbounds[0];
-			double h = bbounds[3] - bbounds[1];
-			if(w > h) {
-				double dif = (w - h) / 2;
-				bbounds[1] -= dif;
-				bbounds[3] += dif;
-			} else {
-				double dif = (h - w) / 2;
-				bbounds[0] -= dif;
-				bbounds[2] += dif;
-			}
-			build(bbounds);
-		}
-
-		size_t size() const {
-			return end - start;
-		}
-
-		template <class TIter>
-		size_t knn(const T& pt, size_t n, TIter iter) {
-
-			if(!contains(pt[0], pt[1])) return 0;
-
-			node<T>* tmp = this;
-			bool found;
-
-			do {
-				found = false;
-				for(int i = 0; i < 4; ++i) {
-					if(tmp->nodes[i] && tmp->nodes[i]->contains(pt[0], pt[1])) {
-						tmp = tmp->nodes[i];
-						found = true;
-						break;
-					}
-				}
-			} while(found);
-
-			if(tmp->parent)
-				tmp = tmp->parent;
-
-			std::list<T> lst;
-			T item;
-			for(size_t i = tmp->start; i < tmp->end; ++i) {
-				items->get(i, item);
-				lst.push_back(std::move(item));
-			}
-
-			size_t count = 0;
-			std::sort(lst.begin(), lst.end(), itemsort<T>(pt));
-			for(T& item : tmp) {
-				*iter = item;
-				++iter;
-				++count;
-				if(--n == 0)
-					break;
-			}
-
-			return count;
-		}
-
-		template <class TIter>
-		size_t search(const T& pt, double radius, TIter iter) {
-			double sbounds[] = {pt[0] - radius, pt[1] - radius, pt[0] + radius, pt[1] + radius};
-			return search(pt, radius, iter, sbounds);
-		}
-
-		template <class TIter>
-		size_t search(const T& pt, double radius, TIter iter, double sbounds[4]) {
-
-			if(!intersects(sbounds))
-				return 0;
-
-			size_t count = 0;
-
-			if(leaf) {
-				T item;
-				for(size_t i = start; i < end; ++i) {
-					items->get(i, item);
-					double d = std::pow(pt[0] - item[0], 2.0) + std::pow(pt[1] - item[1], 2.0);
-					if(d < radius * radius) {
-						*iter = item;
-						++iter;
-						++count;
-					}
-				}
-			} else {
-				for(int i = 0; i < 4; ++i) {
-					if(nodes[i])
-						count += nodes[i]->search(pt, radius, iter, sbounds);
-				}
-			}
-
-			return count;
-		}
-
-		~node() {
-			for(int i = 0; i < 4; ++i) {
-				if(nodes[i]) delete nodes[i];
-			}
-		}
-
-
-	};
-
 } // anon
+
 
 namespace geo {
 namespace ds {
@@ -312,127 +59,105 @@ namespace ds {
 template <class T>
 class mqtree {
 private:
+
 	mvector<T> m_items;
-	node<T>* m_root;
-	size_t m_dims;
+	std::map<size_t, size_t> m_index;
+	size_t m_minMort;
+	size_t m_maxMort;
+	int m_scale;
 
 public:
 
-	/**
-	 * Construct the KDTree with the given number of dimensions.
-	 */
-	mqtree(size_t dims = 3) :
-		m_root(nullptr),
-		m_dims(dims) {
+	mqtree<T>(int scale = 1) :
+		m_minMort(-1), m_maxMort(0), m_scale(scale) {
 	}
 
-	/**
-	 * Destroy the tree.
-	 *
-	 * \param destroyItems If true, also destroys the stored items.
-	 */
-	void destroy(bool destroyItems = true) {
-		delete m_root;
-		m_root = nullptr;
-		if(destroyItems)
-			m_items.clear();
+	mvector<T>& items() {
+		return m_items;
 	}
 
-	/**
-	 * Add an item to the tree.
-	 * @param item An item.
-	 */
+	void build() {
+		itemsort<T> sorter(m_scale);
+		m_items.sort(sorter);
+		m_index.clear();
+		m_minMort = -1;
+		m_maxMort = 0;
+		T item;
+		size_t mort, lastMort = -1;
+		for(size_t i = 0; i < m_items.size(); ++i) {
+			m_items.get(i, item);
+			mort = morton(item.x(), item.y(), m_scale);
+			if(mort != lastMort) {
+				m_index[mort] = i;
+				lastMort = mort;
+				if(mort < m_minMort) m_minMort = mort;
+				if(mort > m_maxMort) m_maxMort = mort;
+			}
+		}
+	}
+
 	void add(const T& item) {
 		m_items.push(item);
 	}
 
-	/**
-	 * Add the items to the tree.
-	 * @param begin The start iterator.
-	 * @param end The end iterator.
-	 */
-	template <class Iter>
-	void add(Iter begin, Iter end) {
-		while(begin != end) {
-			m_items.push(*(*begin));
-			++begin;
-		}
+	void add(std::vector<T>& items) {
+		m_items.push(items);
 	}
 
-	/**
-	 * Build the tree. This destroys the existing tree and
-	 * attempts to rebuild it using the existing list of items.
-	 * If there are no items, just destroys the existing tree
-	 * and does nothing.
-	 */
-	void build() {
-
-		// Clean up existing tree, etc.
-		destroy(false);
-
-		if(empty())
-			g_runerr("Not enough items.");
-
-		g_trace("Buildng...")
-		m_root = new node<T>(&m_items, m_dims);
-		m_root->build();
-		g_trace("Buiding... Done.")
+	void clear() {
+		m_items.clear();
+		m_index.clear();
 	}
 
-	/**
-	 * Returns the number of items in the tree.
-	 */
-	int size() const {
+	bool contains(double x, double y) {
+		return m_index.find(morton(x, y, m_scale)) != m_index.end();
+ 	}
+
+	size_t size() const {
 		return m_items.size();
 	}
 
-	bool empty() const {
-		return size() == 0;
-	}
-
-	/**
-	 * Returns a reference to the vector containing all
-	 * coordinates added to the tree.
-	 */
-	const mvector<T*>& items() const {
-		return m_items;
-	}
-
-	/**
-	 * Perform a k-nearest neighbour search on the items. Returns
-	 * the number of items that were found and appends the found items
-	 * and distances to the given iterators.
-	 * @param item The search item; of the same type as the tree items.
-	 * @param count The number of items to return.
-	 * @param titer A back_inserter for the found items.
-	 */
 	template <class TIter>
-	size_t knn(const T& item, size_t count, TIter titer) const {
-		return m_root->knn(item, count, titer);
+	size_t knn(const T& pt, size_t n, TIter iter) {
+
+		return 0;
 	}
 
-	/**
-	 * Search the tree by radius with an upper bound on the number of elements returned. If
-	 * The number of returned elements is equal to the bound, then there are probably
-	 * more points than were returned.
-	 * @param item The search point.
-	 * @param radius The search radius.
-	 * @param titer The output point iterator.
-	 */
+	inline double dist(const T& a, const T& b) {
+		return std::pow(a[0] - b[0], 2.0) + std::pow(a[1] - b[1], 2.0);
+	}
+
 	template <class TIter>
-	size_t search(const T& item, double radius, TIter titer = nullptr) const {
-		return m_root->search(item, radius, titer);
-	}
+	size_t search(const T& pt, double radius, TIter iter) {
 
-	int dims() const {
-		return m_dims;
+		size_t count = 0;
+
+		std::map<size_t, size_t>::iterator sit = m_index.upper_bound(morton(pt[0] - radius, pt[1] - radius, m_scale) - 1);
+		size_t start = sit->second;
+		std::map<size_t, size_t>::iterator eit = m_index.lower_bound(morton(pt[0] + radius, pt[1] + radius, m_scale) + 1);
+		if(eit == m_index.end())
+			--eit;
+		size_t end = eit->second;
+		if(end <= start)
+			end = start + 1;
+		static std::vector<T> items;
+		items.resize(end - start);
+		m_items.get(start, items, end - start);
+		for(const T& item : items) {
+			if(dist(item, pt) < radius * radius) {
+				*iter = item;
+				++iter;
+				++count;
+			}
+		}
+		return count;
 	}
 
 	~mqtree() {
-		destroy();
 	}
-};
 
+
+};
 
 }
 }

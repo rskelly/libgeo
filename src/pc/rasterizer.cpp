@@ -87,7 +87,8 @@ Computer* getComputer(const std::string& name) {
 Rasterizer::Rasterizer(const std::vector<std::string> filenames) :
 	m_filter(nullptr),
 	m_thin(0),
-	m_nodata(-9999) {
+	m_nodata(-9999),
+	m_limit(0) {
 	for(const std::string& filename : filenames)
 		m_files.emplace_back(filename);
 }
@@ -176,6 +177,10 @@ void Rasterizer::setNoData(double nodata) {
 	m_nodata = nodata;
 }
 
+void Rasterizer::setMemLimit(size_t limit) {
+	m_limit = limit;
+}
+
 void Rasterizer::setFilter(PCPointFilter* filter) {
 	m_filter = filter;
 }
@@ -190,7 +195,7 @@ Rasterizer::~Rasterizer() {
 
 void Rasterizer::rasterize(const std::string& filename, const std::vector<std::string>& types,
 		double resX, double resY, double easting, double northing, double radius, 
-		int srid, int memory, bool useHeader, bool voids) {
+		int srid, bool useHeader, bool voids) {
 
 	if(std::isnan(resX) || std::isnan(resY))
 		g_runerr("Resolution not valid");
@@ -249,8 +254,9 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	props.setBands(bandCount);
 	props.setNoData(m_nodata);
 
-	mqtree<geo::pc::Point> tree(2);
 	geo::pc::Point pt;
+
+	mqtree<geo::pc::Point> tree(1);
 
 	g_trace("Adding files to tree");
 	{
@@ -258,12 +264,14 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 			for(const std::string& fn : f.filenames())
 				filenames.push_back(fn);
 			f.init(useHeader);
-			while(f.next(pt))
+			while(f.next(pt)) {
 				tree.add(pt);
+			}
 		}
 	}
 
 	tree.build();
+
 
 	// The final output raster.
 	Grid<double> outrast(filename, props);
