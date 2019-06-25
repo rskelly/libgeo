@@ -28,6 +28,23 @@ namespace {
 		return x;
 	}
 
+	/**
+	 * Take the value and split its bits apart by the specified distance.
+	 * This is not fast, but it's adaptable.
+	 *
+	 * \param x The value to split.
+	 * \param dist The distance between the bits.
+	 * \return The split value.
+	 */
+	template <class T>
+	inline uint64_t bitsplit(T x, int dist) {
+		uint64_t out = 0;
+		int max = sizeof(T) * 8;
+		for(int i = 0; i < max; ++i)
+			out |= ((x >> i) & 1) << (i * dist);
+		return out;
+	}
+
 } // anon
 
 
@@ -308,7 +325,17 @@ void convertBuffer(GDALDataType type, std::vector<char>& rawBuf, std::vector<T>&
 	}
 }
 
-uint64_t morton(double x, double y, int scale);
+/***
+ * Calculate the 2-dimensional Morton coordinate of the point.
+ * The scale is a multiplier that should be 10^n. This converts
+ * floating-point coordinates to integers with reasonable precision.
+ * Integers are 32 bits. The morton code is 64 bits.
+ *
+ * \param x The x coordinate scaled to the full value of an unsigned int.
+ * \param y The y coordinatescaled to the full value of an unsigned int.
+ * \return The 1-dimensional Morton or z-order coordinate.
+ */
+uint64_t morton(uint32_t x, uint32_t y);
 
 class G_DLL_EXPORT Bounds {
 private:

@@ -208,12 +208,14 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	if(types.empty())
 		g_argerr("No methods given; defaulting to mean");
 
+	// Configure the computers.
 	m_computers.clear();
 	for(const std::string& name : types) {
 		m_computers.emplace_back(getComputer(name));
 		m_computers.back()->setRasterizer(this);
 	}
 
+	// Calculate the overall boundaries of the point cloud.
 	g_trace("Checking file bounds");
 	std::vector<std::string> filenames;
 	double bounds[4] = {G_DBL_MAX_POS, G_DBL_MAX_POS, G_DBL_MIN_POS, G_DBL_MIN_POS};
@@ -231,19 +233,25 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 		}
 	}
 
+	mqtree<geo::pc::Point> tree(bounds);
+
+	// "Fix" the bounds so they align with the resolution, and are oriented correctly.
 	g_trace("Fixing bounds ")
 	fixBounds(bounds, resX, resY, easting, northing);
 	g_trace(" bounds: " << bounds[0] << ", " << bounds[1] << "; " << bounds[2] << ", " << bounds[3])
 
+	// Compute the grid dimensions.
 	int cols = (int) std::ceil((bounds[2] - bounds[0]) / resX);
 	int rows = (int) std::ceil((bounds[3] - bounds[1]) / resY);
 	g_trace(" cols: " << cols << ", rows: " << rows)
 
+	// Work out the number of bands; each computer knows how many bands it will produce.
 	int bandCount = 1;
 	for(const std::unique_ptr<Computer>& comp : m_computers)
 		bandCount += comp->bandCount();
 	g_trace(" bands: " << bandCount)
 
+	// Configure the raster properties.
 	g_trace("Preparing raster")
 	GridProps props;
 	props.setTrans(easting, resX, northing, resY);
@@ -254,12 +262,10 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	props.setBands(bandCount);
 	props.setNoData(m_nodata);
 
-	geo::pc::Point pt;
-
-	mqtree<geo::pc::Point> tree(1);
-
+	// Add the points to the qtree. Note the scale must be chosen carefully.
 	g_trace("Adding files to tree");
 	{
+		geo::pc::Point pt;
 		for(PCFile& f: m_files) {
 			for(const std::string& fn : f.filenames())
 				filenames.push_back(fn);
@@ -269,98 +275,115 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 			}
 		}
 	}
-
 	tree.build();
 
 
-	// The final output raster.
+	// Prepare the final output raster.
 	Grid<double> outrast(filename, props);
 
-	CountComputer countComp;
-
 	g_trace("Running...")
+	{
+		// The first layer is just the point count.
+		CountComputer countComp;
+		size_t count = 0;
+		int band;
 
-	size_t count = 0;
-	int band;
+		// Temporary storage.
+		std::vector<geo::pc::Point> pts;
+		std::vector<geo::pc::Point> cpts;
+		std::vector<geo::pc::Point> filtered;
+		std::vector<double> out;
+		std::vector<double> dist;
+		geo::pc::Point spt;
 
-	std::vector<geo::pc::Point> pts;
-	std::vector<geo::pc::Point> cpts;
-	std::vector<geo::pc::Point> filtered;
-	std::vector<double> out;
-	std::vector<double> dist;
-	geo::pc::Point spt;
+		bool voidCells = false;
 
-	outrast.fill(props.nodata());
+		// Prepare insertion iterators.
+		auto citer = std::back_inserter(cpts);
+		auto diter = std::back_inserter(dist);
+		auto fiter = std::back_inserter(filtered);
 
-	bool voidCells = false;
+		// Fill the raster with nodata first.
+		outrast.fill(props.nodata());
 
-	do {
+		do {
 
-		// If this is a void filling loop, increase the radius.
-		if(voidCells)
-			radius *= 2;
+			// If this is a void filling loop, increase the radius.
+			if(voidCells)
+				radius *= 2;
 
-		for(int r = 0; r < rows; ++r) {
-			for(int c = 0; c < cols; ++c) {
+			for(int r = 0; r < rows; ++r) {
+				std::cout << "Row " << r << " of " << rows << "\n";
+				for(int c = 0; c < cols; ++c) {
 
-				spt.x(props.toX(c));
-				spt.y(props.toY(r));
+					// Prepare a query point based on the grid location.
+					spt.x(props.toX(c));
+					spt.y(props.toY(r));
 
-				// If this is a void filing loop, skip when the value is valid.
-				if(voidCells && outrast.get(c, r, 1) != props.nodata())
-					continue;
+					// If this is a void filing loop, skip when the value is valid.
+					if(voidCells && outrast.get(c, r, 1) != props.nodata())
+						continue;
 
-				if(tree.search(spt, radius, std::back_inserter(cpts))) {
+					// Search for points within the radius of the cell centre.
+					if(tree.search(spt, radius, citer, diter)) {
 
-					if(!cpts.empty()) {
-						count = m_filter->filter(cpts.begin(), cpts.end(), std::back_inserter(filtered));
+						// Filter the points according to the configured filter.
+						if(!cpts.empty()) {
+							count = m_filter->filter(cpts.begin(), cpts.end(), fiter);
 
-						if(m_thin > 0) {
-							// Thin the points to the desired density, if required.
-							if(filtered.size() < (size_t) m_thin) {
-								filtered.clear();
-								count = 0;
-							} else {
-								// Randomize, then take the first n points.
-								std::random_shuffle(filtered.begin(), filtered.end());
-								filtered.resize(m_thin);
-								count = m_thin;
+							if(m_thin > 0) {
+								// Thin the points to the desired density, if required.
+								if(filtered.size() < (size_t) m_thin) {
+									filtered.clear();
+									count = 0;
+								} else {
+									// Randomize, then take the first n points.
+									std::random_shuffle(filtered.begin(), filtered.end());
+									filtered.resize(m_thin);
+									count = m_thin;
+								}
 							}
 						}
-					}
 
-					band = 0;
+						band = 0;
 
-					// Write the point count.
-					outrast.set(c, r, count, band++);
+						// Write the point count.
+						outrast.set(c, r, count, band++);
 
-					if(count) {
-						for(size_t i = 0; i < m_computers.size(); ++i) {
-							out.clear();
-							// Calculate the values in the computer and append to the raster.
-							m_computers[i]->compute(spt.x(), spt.y(), cpts, filtered, radius, out);
-							for(double val : out)
-								outrast.set(c, r, std::isnan(val) ? NODATA : val, band++);
+						if(count) {
+							for(size_t i = 0; i < m_computers.size(); ++i) {
+								out.clear();
+								// Calculate the values in the computer and append to the raster.
+								m_computers[i]->compute(spt.x(), spt.y(), cpts, filtered, radius, out);
+								for(double val : out) {
+									if(!std::isnan(val))
+										outrast.set(c, r, val, band++);
+								}
+							}
 						}
-					}
-					filtered.clear();
-					out.clear();
-					cpts.clear();
-					pts.clear();
-				}
-			}
-		}
 
-		if(voids) {
-			voidCells = false;
-			for(int r = 0; !voidCells && r < rows; ++r) {
-				for(int c = 0; !voidCells && c < cols; ++c) {
-					if(outrast.get(c, r, 1) == props.nodata())
-						voidCells = true;
+						filtered.clear();
+						out.clear();
+						cpts.clear();
+						dist.clear();
+						pts.clear();
+					}
 				}
 			}
-		}
-	} while(voidCells);
+
+			// If void filling is enabled, check whether there are void cells and
+			// enable the loop.
+			if(voids) {
+				voidCells = false;
+				for(int r = 0; !voidCells && r < rows; ++r) {
+					for(int c = 0; !voidCells && c < cols; ++c) {
+						if(outrast.get(c, r, 1) == props.nodata())
+							voidCells = true;
+					}
+				}
+			}
+		} while(voidCells);
+	}
 
 	g_debug("Done")
 }

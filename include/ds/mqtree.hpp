@@ -24,17 +24,40 @@ namespace {
 
 	using namespace geo::ds;
 
+	inline uint32_t scale(double c, double min, double max) {
+		static uint32_t imax = -1;
+		uint32_t ax = (uint32_t) ((c - min) / (max - min) * imax);
+		return ax;
+	}
+
 	template <class T>
 	class itemsort {
+	private:
+		double m_bounds[4];
+		double m_w, m_h;
 	public:
-		int scale;
-		itemsort(int scale) : scale(scale) {
+		itemsort(double bounds[4]) {
+			for(int i = 0; i < 4; ++i)
+				m_bounds[i] = bounds[i];
+			m_w = m_bounds[2] - m_bounds[0];
+			m_h = m_bounds[3] - m_bounds[1];
 		}
 
 		bool operator()(const T& a, const T& b) {
-			return morton(a.x(), a.y(), scale) < morton(b.x(), b.y(), scale);
+			// Scale each coordinate so it's between 0 and maxint.
+			static uint32_t max = -1;
+			uint32_t ax = scale(a.x(), m_bounds[0], m_bounds[2]);
+			uint32_t ay = scale(a.y(), m_bounds[1], m_bounds[3]);
+			uint32_t bx = scale(b.x(), m_bounds[0], m_bounds[2]);
+			uint32_t by = scale(b.y(), m_bounds[1], m_bounds[3]);
+			return morton(ax, ay) < morton(bx, by);
 		}
 	};
+
+	template <class T>
+	inline double dist(const T& a, const T& b) {
+		return std::pow(a[0] - b[0], 2.0) + std::pow(a[1] - b[1], 2.0);
+	}
 
 	double NULL_BOUNDS[] = {
 			std::numeric_limits<double>::max(),
@@ -64,12 +87,17 @@ private:
 	std::map<size_t, size_t> m_index;
 	size_t m_minMort;
 	size_t m_maxMort;
-	int m_scale;
+	double m_bounds[4];
+	double m_w, m_h;
 
 public:
 
-	mqtree<T>(int scale = 1) :
-		m_minMort(-1), m_maxMort(0), m_scale(scale) {
+	mqtree<T>(double bounds[4]) :
+		m_minMort(-1), m_maxMort(0) {
+		for(int i = 0; i < 4; ++i)
+			m_bounds[i] = bounds[i];
+		m_w = m_bounds[2] - m_bounds[0];
+		m_h = m_bounds[3] - m_bounds[1];
 	}
 
 	mvector<T>& items() {
@@ -77,16 +105,19 @@ public:
 	}
 
 	void build() {
-		itemsort<T> sorter(m_scale);
+		itemsort<T> sorter(m_bounds);
 		m_items.sort(sorter);
 		m_index.clear();
 		m_minMort = -1;
 		m_maxMort = 0;
 		T item;
 		size_t mort, lastMort = -1;
+		uint32_t sx, sy;
 		for(size_t i = 0; i < m_items.size(); ++i) {
 			m_items.get(i, item);
-			mort = morton(item.x(), item.y(), m_scale);
+			sx = scale(item.x(), m_bounds[0], m_bounds[2]);
+			sy = scale(item.y(), m_bounds[1], m_bounds[3]);
+			mort = morton(sx, sy);
 			if(mort != lastMort) {
 				m_index[mort] = i;
 				lastMort = mort;
@@ -110,7 +141,10 @@ public:
 	}
 
 	bool contains(double x, double y) {
-		return m_index.find(morton(x, y, m_scale)) != m_index.end();
+		uint32_t a = scale(x, m_bounds[0], m_bounds[2]);
+		uint32_t b = scale(y, m_bounds[1], m_bounds[3]);
+		uint64_t mort = morton(a, b);
+		return mort >= m_minMort && mort <= m_maxMort;
  	}
 
 	size_t size() const {
@@ -123,33 +157,53 @@ public:
 		return 0;
 	}
 
-	inline double dist(const T& a, const T& b) {
-		return std::pow(a[0] - b[0], 2.0) + std::pow(a[1] - b[1], 2.0);
-	}
-
-	template <class TIter>
-	size_t search(const T& pt, double radius, TIter iter) {
+	template <class TIter, class DIter>
+	size_t search(const T& pt, double radius, TIter piter, DIter diter) {
 
 		size_t count = 0;
+		uint32_t x1 = scale(pt[0] - radius, m_bounds[0], m_bounds[2]);
+		uint32_t y1 = scale(pt[1] - radius, m_bounds[1], m_bounds[3]);
+		uint32_t x2 = scale(pt[0] + radius, m_bounds[0], m_bounds[2]);
+		uint32_t y2 = scale(pt[1] + radius, m_bounds[1], m_bounds[3]);
+		size_t m1 = morton(x1, y1);
+		size_t m2 = morton(x2, y2);
 
-		std::map<size_t, size_t>::iterator sit = m_index.upper_bound(morton(pt[0] - radius, pt[1] - radius, m_scale) - 1);
-		size_t start = sit->second;
-		std::map<size_t, size_t>::iterator eit = m_index.lower_bound(morton(pt[0] + radius, pt[1] + radius, m_scale) + 1);
+		// The orders might be reversed if it's like UTM and the coords are upside down.
+		if(m1 > m2) {
+			size_t tmp = m1;
+			m1 = m2;
+			m2 = tmp;
+		}
+
+		// Get the indices one before and one after the Morton code for thecoordinate.
+		auto sit = m_index.lower_bound(m1);
+		auto eit = m_index.upper_bound(m2);
+
+		// If the end iterator is at the end, backit up.
 		if(eit == m_index.end())
 			--eit;
+
+		// Get the start and end indices. If they overlap, create a gap of 1.
+		size_t start = sit->second;
 		size_t end = eit->second;
-		if(end <= start)
-			end = start + 1;
+
+		// Retrieve the items from the mvector.
 		static std::vector<T> items;
-		items.resize(end - start);
-		m_items.get(start, items, end - start);
+		items.resize(end - start + 1);
+		m_items.get(start, items, items.size());
+
+		// Check the distances from the query point and add to iterators.
+		double d;
 		for(const T& item : items) {
-			if(dist(item, pt) < radius * radius) {
-				*iter = item;
-				++iter;
+			if((d = dist(item, pt)) < radius * radius) {
+				*piter = item;
+				*diter = d;
+				++piter;
+				++diter;
 				++count;
 			}
 		}
+
 		return count;
 	}
 

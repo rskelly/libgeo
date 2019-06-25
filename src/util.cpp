@@ -274,9 +274,9 @@ TmpFile::~TmpFile() {
 	unlink(filename.c_str());
 }
 
-uint64_t geo::util::morton(double x, double y, int scale) {
-	uint32_t xa = splitBy3((uint32_t) (x * scale));
-	uint32_t ya = splitBy3((uint32_t) (y * scale));
+uint64_t geo::util::morton(uint32_t x, uint32_t y) {
+	uint32_t xa = bitsplit(x, 2);
+	uint32_t ya = bitsplit(y, 2);
 	return xa | (ya << 1);
 }
 
