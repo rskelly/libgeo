@@ -233,7 +233,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 		}
 	}
 
-	mqtree<geo::pc::Point> tree(bounds);
+	mqtree<geo::pc::Point> tree(1);
 
 	// "Fix" the bounds so they align with the resolution, and are oriented correctly.
 	g_trace("Fixing bounds ")
@@ -275,6 +275,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 			}
 		}
 	}
+	g_trace(" " << tree.size() << " points added to tree.");
 	tree.build();
 
 
@@ -312,9 +313,9 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 			if(voidCells)
 				radius *= 2;
 
-			for(int r = 0; r < rows; ++r) {
+			for(int r = 1; r < rows - 1; ++r) {
 				std::cout << "Row " << r << " of " << rows << "\n";
-				for(int c = 0; c < cols; ++c) {
+				for(int c = 1; c < cols - 1; ++c) {
 
 					// Prepare a query point based on the grid location.
 					spt.x(props.toX(c));

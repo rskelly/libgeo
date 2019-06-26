@@ -24,32 +24,21 @@ namespace {
 
 	using namespace geo::ds;
 
-	inline uint32_t scale(double c, double min, double max) {
-		static uint32_t imax = -1;
-		uint32_t ax = (uint32_t) ((c - min) / (max - min) * imax);
-		return ax;
-	}
-
 	template <class T>
 	class itemsort {
 	private:
-		double m_bounds[4];
-		double m_w, m_h;
+		int m_scale;
 	public:
-		itemsort(double bounds[4]) {
-			for(int i = 0; i < 4; ++i)
-				m_bounds[i] = bounds[i];
-			m_w = m_bounds[2] - m_bounds[0];
-			m_h = m_bounds[3] - m_bounds[1];
+		itemsort(int scale) : m_scale(scale) {
 		}
 
 		bool operator()(const T& a, const T& b) {
 			// Scale each coordinate so it's between 0 and maxint.
 			static uint32_t max = -1;
-			uint32_t ax = scale(a.x(), m_bounds[0], m_bounds[2]);
-			uint32_t ay = scale(a.y(), m_bounds[1], m_bounds[3]);
-			uint32_t bx = scale(b.x(), m_bounds[0], m_bounds[2]);
-			uint32_t by = scale(b.y(), m_bounds[1], m_bounds[3]);
+			uint32_t ax = (uint32_t) (a.x() / m_scale);
+			uint32_t ay = (uint32_t) (a.y() / m_scale);
+			uint32_t bx = (uint32_t) (b.x() / m_scale);
+			uint32_t by = (uint32_t) (b.y() / m_scale);
 			return morton(ax, ay) < morton(bx, by);
 		}
 	};
@@ -66,7 +55,6 @@ namespace {
 			std::numeric_limits<double>::lowest()
 	};
 } // anon
-
 
 namespace geo {
 namespace ds {
@@ -87,17 +75,12 @@ private:
 	std::map<size_t, size_t> m_index;
 	size_t m_minMort;
 	size_t m_maxMort;
-	double m_bounds[4];
-	double m_w, m_h;
+	int m_scale;
 
 public:
 
-	mqtree<T>(double bounds[4]) :
-		m_minMort(-1), m_maxMort(0) {
-		for(int i = 0; i < 4; ++i)
-			m_bounds[i] = bounds[i];
-		m_w = m_bounds[2] - m_bounds[0];
-		m_h = m_bounds[3] - m_bounds[1];
+	mqtree<T>(int scale) :
+		m_minMort(-1), m_maxMort(0), m_scale(scale) {
 	}
 
 	mvector<T>& items() {
@@ -105,8 +88,11 @@ public:
 	}
 
 	void build() {
-		itemsort<T> sorter(m_bounds);
+		g_trace("Building tree...")
+		g_trace("Sorting points...")
+		itemsort<T> sorter(m_scale);
 		m_items.sort(sorter);
+		g_trace('Sorted.')
 		m_index.clear();
 		m_minMort = -1;
 		m_maxMort = 0;
@@ -115,8 +101,8 @@ public:
 		uint32_t sx, sy;
 		for(size_t i = 0; i < m_items.size(); ++i) {
 			m_items.get(i, item);
-			sx = scale(item.x(), m_bounds[0], m_bounds[2]);
-			sy = scale(item.y(), m_bounds[1], m_bounds[3]);
+			sx = (uint32_t) (item.x() * m_scale);
+			sy = (uint32_t) (item.y() * m_scale);
 			mort = morton(sx, sy);
 			if(mort != lastMort) {
 				m_index[mort] = i;
@@ -125,6 +111,7 @@ public:
 				if(mort > m_maxMort) m_maxMort = mort;
 			}
 		}
+		g_trace("Finished building tree.")
 	}
 
 	void add(const T& item) {
@@ -141,8 +128,8 @@ public:
 	}
 
 	bool contains(double x, double y) {
-		uint32_t a = scale(x, m_bounds[0], m_bounds[2]);
-		uint32_t b = scale(y, m_bounds[1], m_bounds[3]);
+		uint32_t a = (uint32_t) (x / m_scale);
+		uint32_t b = (uint32_t) (y / m_scale);
 		uint64_t mort = morton(a, b);
 		return mort >= m_minMort && mort <= m_maxMort;
  	}
@@ -161,10 +148,10 @@ public:
 	size_t search(const T& pt, double radius, TIter piter, DIter diter) {
 
 		size_t count = 0;
-		uint32_t x1 = scale(pt[0] - radius, m_bounds[0], m_bounds[2]);
-		uint32_t y1 = scale(pt[1] - radius, m_bounds[1], m_bounds[3]);
-		uint32_t x2 = scale(pt[0] + radius, m_bounds[0], m_bounds[2]);
-		uint32_t y2 = scale(pt[1] + radius, m_bounds[1], m_bounds[3]);
+		uint32_t x1 = (uint32_t) ((pt[0] - radius) / m_scale);
+		uint32_t y1 = (uint32_t) ((pt[1] - radius) / m_scale);
+		uint32_t x2 = (uint32_t) ((pt[0] + radius) / m_scale) + 1;
+		uint32_t y2 = (uint32_t) ((pt[1] + radius) / m_scale) + 1;
 		size_t m1 = morton(x1, y1);
 		size_t m2 = morton(x2, y2);
 

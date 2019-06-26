@@ -20,6 +20,20 @@
 
 using namespace geo::util;
 
+namespace {
+
+template <class T>
+class Sorter {
+public:
+	bool operator()(const T& a, const T& b) const {
+		return a < b;
+	}
+};
+
+}
+
+#define MEM_LIMIT 1024*1024*10
+
 namespace geo {
 namespace ds {
 
@@ -30,6 +44,71 @@ private:
 	std::unique_ptr<TmpFile> m_file;
 	size_t m_idx;
 	size_t m_count;
+
+	template <class Sort>
+	void sort(size_t s, size_t e, Sort sorter) {
+		std::cout << (e - s) << "\n";
+		if(s < e) {
+			size_t p = partition(s, e, sorter);
+			if((p - s) > 1)
+				sort(s, p, sorter);
+			if((e - p + 1) > 1)
+				sort(p + 1, e, sorter);
+		}
+	}
+
+	template <class Sort>
+	size_t partition(size_t s, size_t e, Sort sorter) {
+		// If the chunk size is less than the configured limit,
+		// sort in memory.
+		if(e - s <= MEM_LIMIT / sizeof(T)) {
+			T pivot, a, b;
+			size_t o = s; // offset.
+			bool swapped = false;
+			std::vector<T> buf(e - s + 1);
+			get(s, buf, buf.size());
+			pivot = buf[buf.size() / 2];
+			--s;
+			++e;
+			while(true) {
+				do {
+					++s;
+					a = buf[s - o];
+				} while(sorter(a, pivot));
+				do {
+					--e;
+					b = buf[e - o];
+				} while(sorter(pivot, b));
+				if(s >= e) {
+					if(swapped)
+						insert(o, buf, buf.size());
+					return e;
+				}
+				buf[e - o] = a;
+				buf[s - o] = b;
+				swapped = true;
+			}
+		} else {
+			T pivot, a, b;
+			get((s + e) / 2, pivot);
+			--s;
+			++e;
+			while(true) {
+				do {
+					++s;
+					get(s, a);
+				} while(sorter(a, pivot));
+				do {
+					--e;
+					get(e, b);
+				} while(sorter(pivot, b));
+				if(s >= e)
+					return e;
+				insert(e, a);
+				insert(s, b);
+			}
+		}
+	}
 
 public:
 	mvector(size_t size = 1) :
@@ -80,9 +159,9 @@ public:
 		return true;
 	}
 
-	bool push(const std::vector<T>& items) {
-		if(m_idx + items.size() >= m_count) {
-			while(m_idx + items.size() >= m_count)
+	bool push(const std::vector<T>& items, size_t len) {
+		if(m_idx + len >= m_count) {
+			while(m_idx + len >= m_count)
 				m_count *=  2;
 			resize(m_count);
 		}
@@ -95,6 +174,18 @@ public:
 		if(idx >= m_count)
 			resize(m_count *  2);
 		std::memcpy(m_data + idx, &item, sizeof(T)) ;
+		if(idx > m_idx)
+			m_idx = idx;
+		return true;
+	}
+
+	bool insert(size_t idx, const std::vector<T>& item, size_t len) {
+		if(idx + len >= m_count) {
+			while(idx + len >= m_count)
+				m_count *=  2;
+			resize(m_count);
+		}
+		std::memcpy(m_data + idx, item.data(), len * sizeof(T)) ;
 		if(idx > m_idx)
 			m_idx = idx;
 		return true;
@@ -146,86 +237,15 @@ public:
 	}
 
 	void sort() {
-
-		std::list<std::pair<size_t, size_t>> q;
-		size_t p = partition(0, size());
-		q.emplace_back(0, p);
-		q.emplace_back(p + 1, size());
-
-		while(!q.empty()) {
-
-			std::pair<size_t, size_t> v = q.front();
-			q.pop_front();
-
-			if(v.first < v.second) {
-				size_t p = partition(v.first, v.second);
-				q.emplace_back(v.first, p);
-				q.emplace_back(p + 1, v.second);
-			}
-		}
+		Sorter<T> sorter;
+		sort(sorter);
 	}
 
 	template <class Sort>
 	void sort(Sort sorter) {
+		g_trace("Sorting mvector...")
 		sort(0, size(), sorter);
-	}
-
-	template <class Sort>
-	void sort(size_t s, size_t e, Sort sorter) {
-		if(s < e) {
-			size_t p = partition(s, e, sorter);
-			sort(s, p, sorter);
-			sort(p + 1, e, sorter);
-		}
-	}
-
-	size_t partition(size_t s, size_t e) {
-		T pivot, a, b;
-		get((s + e) / 2, pivot);
-		while(true) {
-			bool roll = false;
-			do {
-				get(s, a);
-				++s;
-			} while(a < pivot);
-			do {
-				get(e, b);
-				if(e == 0) {
-					roll = true;
-					break;
-				}
-				--e;
-			} while(pivot < b);
-			--s;
-			if(!roll)
-				++e;
-			if(s >= e)
-				return e;
-			insert(e, a);
-			insert(s, b);
-		}
-	}
-
-	template <class Sort>
-	size_t partition(size_t s, size_t e, Sort sorter) {
-		T pivot, a, b;
-		get((s + e) / 2, pivot);
-		--s;
-		++e;
-		while(true) {
-			do {
-				++s;
-				get(s, a);
-			} while(sorter(a, pivot));
-			do {
-				--e;
-				get(e, b);
-			} while(sorter(pivot, b));
-			if(s >= e)
-				return e;
-			insert(e, a);
-			insert(s, b);
-		}
+		g_trace("Sorted.")
 	}
 
 	~mvector() {
