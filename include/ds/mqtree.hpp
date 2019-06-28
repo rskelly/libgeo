@@ -72,7 +72,7 @@ class mqtree {
 private:
 
 	mvector<T> m_items;
-	std::map<size_t, size_t> m_index;
+	mvector<size_t> m_index;
 	size_t m_minMort;
 	size_t m_maxMort;
 	int m_scale;
@@ -93,24 +93,35 @@ public:
 		itemsort<T> sorter(m_scale);
 		m_items.sort(sorter);
 		g_trace('Sorted.')
-		m_index.clear();
+
+		g_trace("Building index...")
 		m_minMort = -1;
 		m_maxMort = 0;
 		T item;
 		size_t mort, lastMort = -1;
 		uint32_t sx, sy;
+		std::vector<size_t> items;
+		items.reserve(MEM_LIMIT / sizeof(size_t));
 		for(size_t i = 0; i < m_items.size(); ++i) {
 			m_items.get(i, item);
-			sx = (uint32_t) (item.x() * m_scale);
-			sy = (uint32_t) (item.y() * m_scale);
+			sx = (uint32_t) (item.x() / m_scale);
+			sy = (uint32_t) (item.y() / m_scale);
 			mort = morton(sx, sy);
 			if(mort != lastMort) {
-				m_index[mort] = i;
+				items.push_back(mort);
+				items.push_back(i);
 				lastMort = mort;
 				if(mort < m_minMort) m_minMort = mort;
 				if(mort > m_maxMort) m_maxMort = mort;
+				if(items.size() >= MEM_LIMIT / sizeof(size_t)) {
+					m_index.push(items, items.size());
+					items.clear();
+				}
 			}
 		}
+		if(!items.empty())
+			m_index.push(items, items.size());
+		g_trace("Index built.")
 		g_trace("Finished building tree.")
 	}
 
@@ -144,14 +155,68 @@ public:
 		return 0;
 	}
 
+	size_t findMortIdxHigh(size_t mort, size_t start = -1, size_t end = -1) {
+		if(start == (size_t) -1) {
+			start = 0;
+			end = m_items.size();
+		}
+		start -= start % 2;
+		end -= end % 2;
+		size_t tmp, mtmp;
+		if(end - start <= 2) {
+			m_index.get(end, mtmp);
+			m_index.get(end + 1, tmp);
+			return tmp;
+		} else {
+			size_t mid = (start + end) / 2;
+			m_index.get(mid, tmp);
+			if(tmp == mort) {
+				m_index.get(mid + 1, tmp);
+				return tmp;
+			} else if(tmp > mort) {
+				return findMortIdxHigh(mort, start, mid);
+			} else {
+				return findMortIdxHigh(mort, mid + 2, end);
+			}
+		}
+	}
+
+	size_t findMortIdxLow(size_t mort, size_t start = -1, size_t end = -1) {
+		if(start == (size_t) -1) {
+			start = 0;
+			end = m_items.size();
+		}
+		start -= start % 2;
+		end -= end % 2;
+		size_t tmp, mtmp;
+		if(end - start <= 2) {
+			m_index.get(start, mtmp);
+			m_index.get(start + 1, tmp);
+			return tmp;
+		} else {
+			size_t mid = (start + end) / 2;
+			mid -= mid % 2;
+			m_index.get(mid, tmp);
+			if(tmp == mort) {
+				m_index.get(mid + 1, tmp);
+				return tmp;
+			} else if(tmp > mort) {
+				return findMortIdxLow(mort, start, mid);
+			} else {
+				return findMortIdxLow(mort, mid + 2, end);
+			}
+		}
+	}
+
+
 	template <class TIter, class DIter>
 	size_t search(const T& pt, double radius, TIter piter, DIter diter) {
 
 		size_t count = 0;
 		uint32_t x1 = (uint32_t) ((pt[0] - radius) / m_scale);
 		uint32_t y1 = (uint32_t) ((pt[1] - radius) / m_scale);
-		uint32_t x2 = (uint32_t) ((pt[0] + radius) / m_scale) + 1;
-		uint32_t y2 = (uint32_t) ((pt[1] + radius) / m_scale) + 1;
+		uint32_t x2 = (uint32_t) ((pt[0] + radius) / m_scale);
+		uint32_t y2 = (uint32_t) ((pt[1] + radius) / m_scale);
 		size_t m1 = morton(x1, y1);
 		size_t m2 = morton(x2, y2);
 
@@ -162,6 +227,9 @@ public:
 			m2 = tmp;
 		}
 
+		size_t start = findMortIdxLow(m1);
+		size_t end = findMortIdxHigh(m2);
+		/*
 		// Get the indices one before and one after the Morton code for thecoordinate.
 		auto sit = m_index.lower_bound(m1);
 		auto eit = m_index.upper_bound(m2);
@@ -173,6 +241,7 @@ public:
 		// Get the start and end indices. If they overlap, create a gap of 1.
 		size_t start = sit->second;
 		size_t end = eit->second;
+		*/
 
 		// Retrieve the items from the mvector.
 		static std::vector<T> items;
