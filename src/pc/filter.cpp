@@ -260,25 +260,31 @@ void PCPointFilter::addZRangeFilter(double min, double max) {
 double PCPointFilter::minZRange() const {
 	PointZRangeFilter* zf;
 	double z = std::numeric_limits<double>::max();
+	bool found = false;
 	for(PointFilter* f : filters) {
 		if((zf = dynamic_cast<PointZRangeFilter*>(f)) != nullptr) {
-			if(z > zf->minZ)
+			if(z > zf->minZ) {
 				z = zf->minZ;
+				found = true;
+			}
 		}
 	}
-	return z;
+	return found ? z : 0; // NOTE: Compromise -- if there's no filter, it's zero. This ensures that when no filter is set all >0 points are kept (with maxZRange).
 }
 
 double PCPointFilter::maxZRange() const {
 	PointZRangeFilter* zf;
 	double z = std::numeric_limits<double>::lowest();
+	bool found = false;
 	for(PointFilter* f : filters) {
 		if((zf = dynamic_cast<PointZRangeFilter*>(f)) != nullptr) {
-			if(z < zf->maxZ)
+			if(z < zf->maxZ) {
 				z = zf->maxZ;
+				found = true;
+			}
 		}
 	}
-	return z;
+	return found ? z : std::numeric_limits<double>::max(); // NOTE: Compromise -- if there's no filter, it's zero. This ensures that when no filter is set all >0 points are kept (with maxZRange).
 }
 
 void PCPointFilter::addScanAngleFilter(double min, double max) {
