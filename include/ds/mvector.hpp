@@ -47,27 +47,24 @@ private:
 
 	template <class Sort>
 	void sort(size_t s, size_t e, Sort sorter) {
-		std::cout << (e - s) << "\n";
 		if(s < e) {
 			size_t p = partition(s, e, sorter);
-			if((p - s) > 1)
-				sort(s, p, sorter);
-			if((e - p + 1) > 1)
-				sort(p + 1, e, sorter);
+			sort(s, p, sorter);
+			sort(p + 1, e, sorter);
 		}
 	}
 
 	template <class Sort>
 	size_t partition(size_t s, size_t e, Sort sorter) {
-		// If the chunk size is less than the configured limit,
-		// sort in memory.
+		// If the chunk size is less than the configured limit,  sort in memory.
 		if(e - s <= MEM_LIMIT / sizeof(T)) {
 			T pivot, a, b;
 			size_t o = s; // offset.
 			bool swapped = false;
 			std::vector<T> buf(e - s + 1);
-			get(s, buf, buf.size());
-			pivot = buf[buf.size() / 2];
+			if(!get(s, buf, buf.size()))
+				g_runerr("Invalid index: " << s)
+			pivot = buf[(e - s) / 2];
 			--s;
 			++e;
 			while(true) {
@@ -90,17 +87,20 @@ private:
 			}
 		} else {
 			T pivot, a, b;
-			get((s + e) / 2, pivot);
+			if(!get((s + e) / 2, pivot))
+				g_runerr("Invalid index: " << (s + e) / 2)
 			--s;
 			++e;
 			while(true) {
 				do {
 					++s;
-					get(s, a);
+					if(!get(s, a))
+						g_runerr("Invalid index: " << s)
 				} while(sorter(a, pivot));
 				do {
 					--e;
-					get(e, b);
+					if(!get(e, b))
+						g_runerr("Invalid index: " << e)
 				} while(sorter(pivot, b));
 				if(s >= e)
 					return e;
@@ -165,7 +165,7 @@ public:
 				m_count *=  2;
 			resize(m_count);
 		}
-		std::memcpy(m_data + m_idx, items.data(), items.size() + sizeof(T)) ;
+		std::memcpy(m_data + m_idx, items.data(), len * sizeof(T)) ;
 		m_idx += items.size();
 		return true;
 	}
@@ -192,7 +192,7 @@ public:
 	}
 
 	bool get(size_t idx, T& item) const {
-		if(idx < m_count) {
+		if(idx < m_idx) {
 			std::memcpy(&item, m_data + idx, sizeof(T));
 			return true;
 		}
@@ -200,10 +200,10 @@ public:
 	}
 
 	size_t get(size_t idx, std::vector<T>& items, size_t len) const {
-		if(idx > m_count)
+		if(idx > m_idx)
 			return 0;
-		if(idx + len > m_count)
-			len = m_count - idx;
+		if(idx + len > m_idx)
+			len = m_idx - idx;
 		items.resize(len);
 		std::memcpy(items.data(), m_data + idx, len * sizeof(T));
 		return len;
@@ -244,7 +244,7 @@ public:
 	template <class Sort>
 	void sort(Sort sorter) {
 		g_trace("Sorting mvector...")
-		sort(0, size(), sorter);
+		sort(0, size() - 1, sorter);
 		g_trace("Sorted.")
 	}
 
