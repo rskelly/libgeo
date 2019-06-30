@@ -244,19 +244,40 @@ public:
 		*/
 
 		// Retrieve the items from the mvector.
-		static std::vector<T> items;
-		items.resize(end - start + 1);
-		m_items.get(start, items, items.size());
+		if(end - start < 10000) {
+			std::vector<T> items(end - start + 1);
+			if(!m_items.get(start, items, items.size()))
+				return 0;
 
-		// Check the distances from the query point and add to iterators.
-		double d;
-		for(const T& item : items) {
-			if((d = dist(item, pt)) < radius * radius) {
-				*piter = item;
-				*diter = d;
-				++piter;
-				++diter;
-				++count;
+			// Check the distances from the query point and add to iterators.
+			double d;
+			for(const T& item : items) {
+				if((d = dist(item, pt)) < radius * radius) {
+					*piter = item;
+					*diter = d;
+					++piter;
+					++diter;
+					++count;
+				}
+			}
+		} else {
+			size_t bufSize = 10000;
+			std::vector<T> items(bufSize);
+			for(size_t i = start; i <= end; i += bufSize) {
+				size_t len = std::min(bufSize, end - i + 1);
+				len = m_items.get(i, items, len);
+				// Check the distances from the query point and add to iterators.
+				double d;
+				for(size_t j = 0; j < len; ++j) {
+					const T& item = items[j];
+					if((d = dist(item, pt)) < radius * radius) {
+						*piter = item;
+						*diter = d;
+						++piter;
+						++diter;
+						++count;
+					}
+				}
 			}
 		}
 
