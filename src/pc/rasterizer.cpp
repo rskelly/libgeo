@@ -200,6 +200,9 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	if(std::isnan(resX) || std::isnan(resY))
 		g_runerr("Resolution not valid");
 
+	double initrad = radius;
+	radius = -1;
+
 	if(radius < 0 || std::isnan(radius)) {
 		radius = std::sqrt(std::pow(resX / 2, 2) * 2);
 		g_warn("Invalid radius; using " << radius);
@@ -307,6 +310,10 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 		// Fill the raster with nodata first.
 		outrast.fill(props.nodata());
 
+		std::vector<geo::pc::Point> tmp;
+		double aresX = std::abs(resX) / 2;
+		double aresY = std::abs(resY) / 2;
+
 		do {
 
 			// If this is a void filling loop, increase the radius.
@@ -327,6 +334,17 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 
 					// Search for points within the radius of the cell centre.
 					if(tree.search(spt, radius, citer, diter)) {
+
+						// If the radius was 0, filter the points to the cell bounds.
+						if(initrad == 0) {
+							tmp.swap(cpts);
+							cpts.clear();
+							for(geo::pc::Point& pt : tmp) {
+								if(pt.x() < spt.x() - aresX || pt.x() > spt.x() + aresX || pt.y() < spt.y() - aresY || pt.y() > spt.y() + aresY)
+									continue;
+								cpts.push_back(std::move(pt));
+							}
+						}
 
 						// Filter the points according to the configured filter.
 						if(!cpts.empty()) {

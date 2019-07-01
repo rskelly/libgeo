@@ -244,7 +244,8 @@ public:
 		*/
 
 		// Retrieve the items from the mvector.
-		if(end - start < 10000) {
+		size_t maxSize = (1024 * 1024 * 10) / sizeof(T);
+		if(end - start < maxSize) {
 			std::vector<T> items(end - start + 1);
 			if(!m_items.get(start, items, items.size()))
 				return 0;
@@ -261,10 +262,9 @@ public:
 				}
 			}
 		} else {
-			size_t bufSize = 10000;
-			std::vector<T> items(bufSize);
-			for(size_t i = start; i <= end; i += bufSize) {
-				size_t len = std::min(bufSize, end - i + 1);
+			std::vector<T> items(maxSize);
+			for(size_t i = start; i <= end; i += maxSize) {
+				size_t len = std::min(maxSize, end - i + 1);
 				len = m_items.get(i, items, len);
 				// Check the distances from the query point and add to iterators.
 				double d;
