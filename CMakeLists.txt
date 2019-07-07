@@ -123,7 +123,7 @@ if(${BUILD_APPS})
 	# target_link_libraries (polygonize geoutil geogrid ${Boost_LIBRARIES})
 
 	add_executable (pc2grid src/apps/pc2grid.cpp)
-	target_link_libraries (pc2grid geoann geoutil geogrid geopc geoann ${GEOS_LIBRARY})
+	target_link_libraries (pc2grid geoutil geogrid geopc ${GEOS_LIBRARY})
 
 	# add_executable (pc2tile src/apps/pc2tile.cpp)
 	# target_link_libraries (pc2tile geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY} ${GEOS_LIBRARY})
@@ -173,3 +173,9 @@ if(${BUILD_APPS})
 	
 endif()
 
+if(${BUILD_TESTS})
+
+	add_executable (libgeo_test src/tests/test.cpp)
+	target_link_libraries (libgeo_test geoutil geogrid geopc)
+
+endif()

@@ -326,6 +326,8 @@ void convertBuffer(GDALDataType type, std::vector<char>& rawBuf, std::vector<T>&
  */
 uint64_t morton(uint32_t x, uint32_t y);
 
+double random(double min, double max);
+
 class G_DLL_EXPORT Bounds {
 private:
     double m_minx, m_miny;

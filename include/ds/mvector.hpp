@@ -40,10 +40,12 @@ namespace ds {
 template <class T>
 class mvector {
 private:
-	T* m_data;
-	std::unique_ptr<TmpFile> m_file;
-	size_t m_idx;
-	size_t m_count;
+	T* m_data;							///<! Pointer to data, either file-backed or vector-backed.
+	std::unique_ptr<TmpFile> m_file;	///<! The file used for file-backed storage.
+	std::vector<T> m_vdata;				///<! A vector for storing items before the threshold is reached.
+	size_t m_idx;						///<! The first index after the last stored item (AKA: the item count).
+	size_t m_count;						///<! The number of items for which space is reserved. Not the number of items stored.
+	size_t m_limit;						///<! The threshold (bytes) above which file-backed storage is used. Zero to force file-backed.
 
 	template <class Sort>
 	void sort(size_t s, size_t e, Sort sorter) {
@@ -110,14 +112,7 @@ private:
 		}
 	}
 
-public:
-	mvector(size_t size = 1) :
-		m_data(nullptr), m_idx(0), m_count(0) {
-		resize(size);
-	}
-
-	void resize(size_t count) {
-		size_t size = count * sizeof(T);
+	void remap(size_t size) {
 		size_t oldSize = 0;
 		if(!m_file.get()) {
 			m_file.reset(new TmpFile(size));
@@ -132,11 +127,66 @@ public:
 		} else {
 			m_data = (T*) mremap(m_data, oldSize, size, MREMAP_MAYMOVE, 0);
 		}
+	}
+
+public:
+
+	/**
+	 * Construct an mvector.
+	 *
+	 * \param size The number of initial elements.
+	 * \param limit The threshold (bytes) after which file-backed memory is used. Set to zero to force file-backed mode.
+	 */
+	mvector(size_t size = 1, size_t limit = 0) :
+		m_data(nullptr), m_idx(0), m_count(0), m_limit(limit) {
+	}
+
+	void setMemLimit(size_t limit) {
+		m_limit = limit;
+	}
+
+	/**
+	 * Resize the vector to accomodate the given number of elements.
+	 *
+	 * \param count The number of elements.
+	 */
+	void resize(size_t count) {
+		if(count == 0)
+			count = 128;
+		size_t size = count * sizeof(T);
+		if(m_limit && size < m_limit) {
+			// If the limit is set, but we're under it, resize the vector and reassign the pointer.
+			g_trace("Resizing in-memory storage to " << size);
+			m_vdata.resize(count);
+			m_data = (T*) m_vdata.data();
+		} else {
+			// If we're over the limit, remap.
+			g_trace("Resizing file-backed storage to " << size);
+			m_data = nullptr;
+			remap(size);
+			if(!m_vdata.empty()) {
+				// If there's vdata, write it and clear the array.
+				g_trace("Copying in-memory contents to file-backed storage.");
+				std::memcpy(m_data, m_vdata.data(), m_idx * sizeof(T));
+				m_vdata.resize(0);
+				m_vdata.shrink_to_fit();
+			}
+		}
 		m_count = count;
 	}
 
+	/**
+	 * Swap contents with another mvector.
+	 *
+	 * \param other The other vector.
+	 */
 	void swap(mvector& other) {
-		m_file.swap(other.m_file);
+
+		if(!m_vdata.empty()) {
+			m_vdata.swap(other.m_vdata);
+		} else {
+			m_file.swap(other.m_file);
+		}
 
 		T* data = m_data;
 		m_data = other.m_data;
@@ -161,6 +211,8 @@ public:
 
 	bool push(const std::vector<T>& items, size_t len) {
 		if(m_idx + len >= m_count) {
+			if(m_count == 0)
+				m_count = 1;
 			while(m_idx + len >= m_count)
 				m_count *=  2;
 			resize(m_count);
@@ -181,6 +233,8 @@ public:
 
 	bool insert(size_t idx, const std::vector<T>& item, size_t len) {
 		if(idx + len >= m_count) {
+			if(m_count == 0)
+				m_count = 1;
 			while(idx + len >= m_count)
 				m_count *=  2;
 			resize(m_count);
@@ -244,7 +298,12 @@ public:
 	template <class Sort>
 	void sort(Sort sorter) {
 		g_trace("Sorting mvector...")
-		sort(0, size() - 1, sorter);
+		if(!m_vdata.empty()) {
+			// The vector has been sized with resize() so there may be bogus elements at the end. Use the idx, not the internal size.
+			std::sort(m_vdata.begin(), std::next(m_vdata.begin(), m_idx), sorter);
+		} else {
+			sort(0, size() - 1, sorter);
+		}
 		g_trace("Sorted.")
 	}
 

@@ -9,6 +9,7 @@
 #include <sys/stat.h>
 #include <stdlib.h>
 
+#include <cstdlib>
 #include <cstdio>
 #include <algorithm>
 #include <sstream>
@@ -274,10 +275,20 @@ TmpFile::~TmpFile() {
 	unlink(filename.c_str());
 }
 
+constexpr uint32_t MAX_UINT32 = 32768;
+
 uint64_t geo::util::morton(uint32_t x, uint32_t y) {
+	if(x >= MAX_UINT32)
+		g_runerr("x coordinate is too large for bit shuffling: " << x)
+	if(y >= MAX_UINT32)
+		g_runerr("y coordinate is too large for bit shuffling: " << y)
 	uint32_t xa = bitsplit(x, 2);
 	uint32_t ya = bitsplit(y, 2);
 	return xa | (ya << 1);
+}
+
+double geo::util::random(double min, double max) {
+	return min + ((double) rand() / RAND_MAX) * (max - min);
 }
 
 Bounds::Bounds() :

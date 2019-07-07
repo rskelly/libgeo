@@ -749,11 +749,11 @@ public:
  */
 class Rasterizer {
 private:
-	std::vector<PCFile> m_files;		///< A list of PCFile instances.
+	std::vector<PCFile> m_files;		///<! A list of PCFile instances.
 	PCPointFilter* m_filter;
 	int m_thin;
 	double m_nodata;
-	size_t m_limit;
+	size_t m_limit;						///<! The memory threshold (bytes) that triggers the use of file-backed storage. Otherwise RAM is used.
 
 	// Used by finalizer.
 	std::vector<std::unique_ptr<Computer> > m_computers;

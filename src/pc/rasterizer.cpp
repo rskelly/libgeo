@@ -236,12 +236,13 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 		}
 	}
 
-	mqtree<geo::pc::Point> tree(1);
-
 	// "Fix" the bounds so they align with the resolution, and are oriented correctly.
 	g_trace("Fixing bounds ")
 	fixBounds(bounds, resX, resY, easting, northing);
 	g_trace(" bounds: " << bounds[0] << ", " << bounds[1] << "; " << bounds[2] << ", " << bounds[3])
+
+	int scale = 10;
+	mqtree<geo::pc::Point> tree(scale, m_limit, std::min(bounds[0], bounds[2]), std::min(bounds[1], bounds[3]));
 
 	// Compute the grid dimensions.
 	int cols = (int) std::ceil((bounds[2] - bounds[0]) / resX);
@@ -304,7 +305,6 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 
 		// Prepare insertion iterators.
 		auto citer = std::back_inserter(cpts);
-		auto diter = std::back_inserter(dist);
 		auto fiter = std::back_inserter(filtered);
 
 		// Fill the raster with nodata first.
@@ -333,7 +333,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 						continue;
 
 					// Search for points within the radius of the cell centre.
-					if(tree.search(spt, radius, citer, diter)) {
+					if(tree.search(spt, radius, citer)) {
 
 						// If the radius was 0, filter the points to the cell bounds.
 						if(initrad == 0) {
@@ -367,6 +367,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 						band = 0;
 
 						// Write the point count.
+						// morton((spt.x() - bounds[0]) * scale, (spt.y() - bounds[1]) * scale), /*
 						outrast.set(c, r, count, band++);
 
 						if(count) {
