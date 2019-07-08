@@ -32,7 +32,7 @@ public:
 
 }
 
-#define MEM_LIMIT 1024*1024*10
+#define MEM_LIMIT 1024*1024*1024
 
 namespace geo {
 namespace ds {
@@ -46,6 +46,7 @@ private:
 	size_t m_idx;						///<! The first index after the last stored item (AKA: the item count).
 	size_t m_count;						///<! The number of items for which space is reserved. Not the number of items stored.
 	size_t m_limit;						///<! The threshold (bytes) above which file-backed storage is used. Zero to force file-backed.
+	size_t m_sortLimit;					///<! The threshold (bytes) below which points are sorted in memory.
 
 	template <class Sort>
 	void sort(size_t s, size_t e, Sort sorter) {
@@ -59,7 +60,7 @@ private:
 	template <class Sort>
 	size_t partition(size_t s, size_t e, Sort sorter) {
 		// If the chunk size is less than the configured limit,  sort in memory.
-		if(e - s <= MEM_LIMIT / sizeof(T)) {
+		if(e - s <= m_sortLimit / sizeof(T)) {
 			T pivot, a, b;
 			size_t o = s; // offset.
 			bool swapped = false;
@@ -137,9 +138,10 @@ public:
 	 *
 	 * \param size The number of initial elements.
 	 * \param limit The threshold (bytes) after which file-backed memory is used. Set to zero to force file-backed mode.
+	 * \param sortLimit The threshold (bytes) below which points are sorted in memory.
 	 */
-	mvector(size_t size = 1, size_t limit = 0) :
-		m_data(nullptr), m_idx(0), m_count(0), m_limit(limit) {
+	mvector(size_t size = 1, size_t limit = 0, size_t sortLimit = MEM_LIMIT) :
+		m_data(nullptr), m_idx(0), m_count(0), m_limit(limit), m_sortLimit(sortLimit) {
 	}
 
 	void setMemLimit(size_t limit) {
