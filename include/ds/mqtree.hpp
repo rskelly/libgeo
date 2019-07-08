@@ -33,7 +33,7 @@ namespace {
 	template <class T>
 	class itemsort {
 	private:
-		int m_scale;				///<! The scale for converting floating-point coordinates to ints.
+		double m_scale;				///<! The scale for converting floating-point coordinates to ints.
 		double m_minx, m_miny;		///<! The minimum x and y coordinate values, for shifting.
 
 	public:
@@ -44,7 +44,7 @@ namespace {
 		 * \param miny The minimum y coordinate.
 		 * \param scale A scale value for coorinates.
 		 */
-		itemsort(double minx, double miny, int scale) :
+		itemsort(double minx, double miny, double scale) :
 			m_minx(minx), m_miny(miny), m_scale(scale) {
 			if(scale <= 0)
 				g_runerr("Scale must be larger than zero: " << scale)
@@ -95,7 +95,7 @@ private:
 	mvector<size_t> m_index;		///<! An index that relates the Morton index to the first position in the items vector where points with that index are found.
 	size_t m_minMort, m_maxMort;	///<! The minimum and maximum Morton indices found in the structure.
 	double m_minx, m_miny;			///<! The minimum x and y coordinates. Used for shifting coordinates.
-	int m_scale;					///<! The scale for converting floating-point coordinates to ints while preserving a fixed amount of precision.
+	double m_scale;					///<! The scale for converting floating-point coordinates to ints while preserving a fixed amount of precision.
 	bool m_needsBuild;				///<! If true, the tree must be rebuilt before querying.
 
 	/**
@@ -157,7 +157,7 @@ public:
 	 * \param minx The minimum x coordinate.
 	 * \param miny The minimum y coordinate.
 	 */
-	mqtree<T>(int scale, size_t limit = 0, double minx = 0, double miny = 0) :
+	mqtree<T>(double scale, size_t limit = 0, double minx = 0, double miny = 0) :
 		m_minMort(-1), m_maxMort(0),
 		m_minx(minx), m_miny(miny),
 		m_scale(scale),

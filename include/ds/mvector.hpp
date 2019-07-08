@@ -8,8 +8,8 @@
 #ifndef INCLUDE_DS_MVECTOR_HPP_
 #define INCLUDE_DS_MVECTOR_HPP_
 
-
 #include <sys/mman.h>
+#include <fcntl.h>
 
 #include <cstdlib>
 #include <memory>
@@ -116,6 +116,7 @@ private:
 		size_t oldSize = 0;
 		if(!m_file.get()) {
 			m_file.reset(new TmpFile(size));
+			posix_fadvise(m_file->fd, 0, 0, POSIX_FADV_SEQUENTIAL); // This is really a guess.
 		} else if(size > m_file->size) {
 			oldSize = m_file->size;
 			m_file->resize(size);
@@ -297,14 +298,17 @@ public:
 
 	template <class Sort>
 	void sort(Sort sorter) {
+		size_t t = microtime();
 		g_trace("Sorting mvector...")
 		if(!m_vdata.empty()) {
 			// The vector has been sized with resize() so there may be bogus elements at the end. Use the idx, not the internal size.
 			std::sort(m_vdata.begin(), std::next(m_vdata.begin(), m_idx), sorter);
 		} else {
+			posix_fadvise(m_file->fd, 0, 0, POSIX_FADV_RANDOM); // This is really a guess.
 			sort(0, size() - 1, sorter);
+			posix_fadvise(m_file->fd, 0, 0, POSIX_FADV_SEQUENTIAL); // This is really a guess.
 		}
-		g_trace("Sorted.")
+		g_trace("Sorted (" << microtime() - t << ").")
 	}
 
 	~mvector() {

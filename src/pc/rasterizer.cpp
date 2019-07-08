@@ -29,6 +29,16 @@ using namespace geo::ds;
 using namespace geo::pc::compute;
 using namespace geo::pc::sort;
 
+namespace {
+
+	void checkScale(double* bounds, double scale) {
+		if((int) ((bounds[2] - bounds[0]) * scale) >= (1 << 15))
+			g_runerr("Scale value is too high: " << scale);
+		if((int) ((bounds[3] - bounds[1]) * scale) >= (1 << 15))
+			g_runerr("Scale value is too high: " << scale);
+	}
+}
+
 const std::unordered_map<std::string, std::string> computerNames = {
 		{"min", "The minimum value"},
 		{"max", "The maximum value"},
@@ -88,7 +98,8 @@ Rasterizer::Rasterizer(const std::vector<std::string> filenames) :
 	m_filter(nullptr),
 	m_thin(0),
 	m_nodata(-9999),
-	m_limit(0) {
+	m_limit(0),
+	m_scale(1) {
 	for(const std::string& filename : filenames)
 		m_files.emplace_back(filename);
 }
@@ -181,6 +192,10 @@ void Rasterizer::setMemLimit(size_t limit) {
 	m_limit = limit;
 }
 
+void Rasterizer::setScale(double scale) {
+	m_scale = scale;
+}
+
 void Rasterizer::setFilter(PCPointFilter* filter) {
 	m_filter = filter;
 }
@@ -236,13 +251,14 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 		}
 	}
 
+	checkScale(bounds, m_scale);
+
 	// "Fix" the bounds so they align with the resolution, and are oriented correctly.
 	g_trace("Fixing bounds ")
 	fixBounds(bounds, resX, resY, easting, northing);
 	g_trace(" bounds: " << bounds[0] << ", " << bounds[1] << "; " << bounds[2] << ", " << bounds[3])
 
-	int scale = 10;
-	mqtree<geo::pc::Point> tree(scale, m_limit, std::min(bounds[0], bounds[2]), std::min(bounds[1], bounds[3]));
+	mqtree<geo::pc::Point> tree(m_scale, m_limit, std::min(bounds[0], bounds[2]), std::min(bounds[1], bounds[3]));
 
 	// Compute the grid dimensions.
 	int cols = (int) std::ceil((bounds[2] - bounds[0]) / resX);

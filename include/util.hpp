@@ -328,6 +328,13 @@ uint64_t morton(uint32_t x, uint32_t y);
 
 double random(double min, double max);
 
+/**
+ * Return the clock time in microseconds.
+ *
+ * \return The clock time in microseconds.
+ */
+uint64_t microtime();
+
 class G_DLL_EXPORT Bounds {
 private:
     double m_minx, m_miny;

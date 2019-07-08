@@ -7,6 +7,7 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <stdlib.h>
 
 #include <cstdlib>
@@ -289,6 +290,12 @@ uint64_t geo::util::morton(uint32_t x, uint32_t y) {
 
 double geo::util::random(double min, double max) {
 	return min + ((double) rand() / RAND_MAX) * (max - min);
+}
+
+uint64_t geo::util::microtime() {
+	struct timeval t;
+	gettimeofday(&t, NULL);
+	return (uint64_t) t.tv_sec * 1000000 + t.tv_usec;
 }
 
 Bounds::Bounds() :

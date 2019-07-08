@@ -41,7 +41,9 @@ void usage() {
 			<< " -o               Fill voids. Does this by doubling the search radius iteratively.\n"
 			<< "                  the point count in this cells remains at zero.\n"
 			<< " -l <bytes>       The limit of memory devoted to point data that will trigger the use\n"
-			<< "                  of file-backed memory. This will be slow but less likely to crash.\n";
+			<< "                  of file-backed memory. This will be slow but less likely to crash.\n"
+			<< " -c <scale>       A scale value to scale coordinates for storage in the quadtree.\n"
+			<< "                  must be non-zero, usually a multiple or fraction of 10. Default 1.\n";
 
 	PCPointFilter::printHelp(std::cerr);
 
@@ -72,6 +74,7 @@ int main(int argc, char** argv) {
 	double nodata = -9999;
 	bool voids = false;
 	size_t limit = 0;
+	double scale = 1;
 
 	for(int i = 1; i < argc; ++i) {
 		if(filter.parseArgs(i, argv))
@@ -102,6 +105,8 @@ int main(int argc, char** argv) {
 			limit = atoi(argv[++i]);
 		} else if(v == "-d") {
 			nodata = atof(argv[++i]);
+		} else if(v == "-c") {
+			scale = atof(argv[++i]);
 		} else if(v == "-o") {
 			voids = true;
 		} else {
@@ -125,6 +130,7 @@ int main(int argc, char** argv) {
 		r.setThin(thin);
 		r.setNoData(nodata);
 		r.setMemLimit(limit);
+		r.setScale(scale);
 		r.rasterize(args[0], types, resX, resY, easting, northing, radius, srid, useHeader, voids);
 	} catch(const std::exception& ex) {
 		std::cerr << ex.what() << "\n";
