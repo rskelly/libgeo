@@ -283,8 +283,8 @@ uint64_t geo::util::morton(uint32_t x, uint32_t y) {
 		g_runerr("x coordinate is too large for bit shuffling: " << x)
 	if(y >= MAX_UINT32)
 		g_runerr("y coordinate is too large for bit shuffling: " << y)
-	uint32_t xa = bitsplit(x, 2);
-	uint32_t ya = bitsplit(y, 2);
+	uint32_t xa = bitsplit2(x);
+	uint32_t ya = bitsplit2(y);
 	return xa | (ya << 1);
 }
 

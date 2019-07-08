@@ -18,20 +18,22 @@
 namespace {
 
 	/**
-	 * Take the value and split its bits apart by the specified distance.
+	 * Take the value and split its bits apart by 2.
 	 * This is not fast, but it's adaptable.
 	 *
 	 * \param x The value to split.
-	 * \param dist The distance between the bits.
 	 * \return The split value.
 	 */
 	template <class T>
-	inline uint64_t bitsplit(T x, int dist) {
-		uint64_t out = 0;
-		int max = sizeof(T) * 8;
-		for(int i = 0; i < max / dist; ++i)
-			out |= ((x >> i) & 1) << (i * dist);
-		return out;
+	inline uint64_t bitsplit2(T x) {
+		// https://lemire.me/blog/2018/01/09/how-fast-can-you-bit-interleave-32-bit-integers-simd-edition/
+	    uint64_t word = (uint32_t) x;
+	    word = (word ^ (word << 16)) & 0x0000ffff0000ffff;
+	    word = (word ^ (word << 8 )) & 0x00ff00ff00ff00ff;
+	    word = (word ^ (word << 4 )) & 0x0f0f0f0f0f0f0f0f;
+	    word = (word ^ (word << 2 )) & 0x3333333333333333;
+	    word = (word ^ (word << 1 )) & 0x5555555555555555;
+	    return word;
 	}
 
 } // anon

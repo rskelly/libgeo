@@ -71,7 +71,7 @@ namespace {
 	 */
 	template <class T>
 	inline double dist(const T& a, const T& b) {
-		return std::pow(a[0] - b[0], 2.0) + std::pow(a[1] - b[1], 2.0);
+		return g_sq(a[0] - b[0]) + g_sq(a[1] - b[1]);
 	}
 
 } // anon
@@ -310,6 +310,8 @@ public:
 		if(m_needsBuild)
 			build();
 
+		static std::vector<T> items;
+
 		uint32_t x1 = toX(pt.x() - radius);
 		uint32_t y1 = toY(pt.y() - radius);
 		uint32_t x2 = toX(pt.x() + radius);
@@ -331,7 +333,7 @@ public:
 		// Retrieve the items from the mvector.
 		size_t maxSize = (1024 * 1024 * 10) / sizeof(T);
 		if(end - start < maxSize) {
-			std::vector<T> items(end - start + 1);
+			items.resize(end - start + 1);
 			if(!m_items.get(start, items, items.size()))
 				return 0;
 
@@ -345,7 +347,7 @@ public:
 				}
 			}
 		} else {
-			std::vector<T> items(maxSize);
+			items.resize(maxSize);
 			for(size_t i = start; i <= end; i += maxSize) {
 				size_t len = std::min(maxSize, end - i + 1);
 				len = m_items.get(i, items, len);

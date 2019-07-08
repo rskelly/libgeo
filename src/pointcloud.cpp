@@ -627,13 +627,11 @@ int geo::pc::Point::classId() const {
 }
 
 double geo::pc::Point::operator[](int idx) const {
-	switch(idx % 2) {
-	case 0:
+	if(idx % 2 == 0) {
 		return m_x;
-	case 1:
+	} else {
 		return m_y;
 	}
-	return 0;
 }
 
 double geo::pc::Point::x() const {
