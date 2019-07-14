@@ -157,7 +157,7 @@ std::string geo::util::parent(const std::string& path) {
 
 std::string geo::util::join(const std::string& a, const std::string& b) {
 	std::string _a, _b;
-	for(size_t i = a.size() - 1; i >= 0; --i) {
+	for(size_t i = a.size() - 1; i < std::string::npos; --i) {
 		if(a[i] != pathsep) {
 			_a = a.substr(0, i);
 			break;
