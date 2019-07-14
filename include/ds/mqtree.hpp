@@ -5,8 +5,8 @@
  *      Author: rob
  */
 
-#ifndef INCLUDE_DS_KDTREE_HPP_
-#define INCLUDE_DS_KDTREE_HPP_
+#ifndef INCLUDE_DS_MQTREE_HPP_
+#define INCLUDE_DS_MQTREE_HPP_
 
 #include <cstdlib>
 #include <vector>
@@ -378,4 +378,4 @@ public:
 
 
 
-#endif /* INCLUDE_DS_KDTREE_HPP_ */
+#endif /* INCLUDE_DS_MQTREE_HPP_ */
