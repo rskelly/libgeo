@@ -183,10 +183,6 @@ std::string geo::util::basename(const std::string& path) {
 
 	size_t a = _p.find_last_of(pathsep);
 	size_t b = _p.find_last_of('.');
-	if(a == std::string::npos)
-		a = 0;
-	if(b < a)
-		b = std::string::npos;
 	return _p.substr(a + 1, b - a - 1);
 }
 
