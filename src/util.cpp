@@ -159,13 +159,13 @@ std::string geo::util::join(const std::string& a, const std::string& b) {
 	std::string _a, _b;
 	for(size_t i = a.size() - 1; i < std::string::npos; --i) {
 		if(a[i] != pathsep) {
-			_a = a.substr(0, i);
+			_a = a.substr(0, i + 1);
 			break;
 		}
 	}
 	for(size_t i = 0; i < b.size(); ++i) {
 		if(b[i] != pathsep) {
-			_b = b.substr(0, i);
+			_b = b.substr(i);
 			break;
 		}
 	}
@@ -187,7 +187,7 @@ std::string geo::util::basename(const std::string& path) {
 		a = 0;
 	if(b < a)
 		b = std::string::npos;
-	return _p.substr(a, b);
+	return _p.substr(a + 1, b - a - 1);
 }
 
 std::string geo::util::extension(const std::string& path) {
