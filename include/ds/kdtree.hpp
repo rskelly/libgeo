@@ -33,13 +33,14 @@ namespace ds {
  * which is the modulus of the given index.
  */
 template <class T>
-class KDTree {
+class kdtree {
 private:
 	std::vector<T*> m_items;
 	std::vector<ANNpoint> m_pts;
 	std::vector<ANNcoord> m_coords;
 	ANNkd_tree* m_tree;
 	size_t m_dims;
+	bool m_destroy;						///<! If true, deletes the items on destruction.
 	//mutable std::mutex m_mtx;
 
 public:
@@ -47,9 +48,10 @@ public:
 	/**
 	 * Construct the KDTree with the given number of dimensions.
 	 */
-	KDTree(size_t dims = 3) :
+	kdtree(size_t dims = 3, bool destroy = false) :
 		m_tree(nullptr),
-		m_dims(dims) {
+		m_dims(dims),
+		m_destroy(destroy) {
 	}
 
 	/**
@@ -61,8 +63,10 @@ public:
 			delete m_tree;
 			m_tree = nullptr;
 		}
-		for(T* item : m_items)
-			delete item;
+		if(m_destroy) {
+			for(T* item : m_items)
+				delete item;
+		}
 		m_items.clear();
 		m_pts.clear();
 	}
@@ -201,7 +205,7 @@ public:
 	 * @param eps The error bound.
 	 */
 	template <class TIter, class DIter>
-	int radSearch(const T& item, double radius, int count, TIter titer = nullptr, DIter diter = nullptr, double eps = EPS) const {
+	int search(const T& item, double radius, int count, TIter titer, DIter diter, double eps = EPS) const {
 		//std::lock_guard<std::mutex> lk(m_mtx);
 
 		if(!m_tree) {
@@ -252,7 +256,7 @@ public:
 		return m_dims;
 	}
 
-	~KDTree() {
+	~kdtree() {
 		destroy();
 	}
 };

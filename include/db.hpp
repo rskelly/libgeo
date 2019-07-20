@@ -1,15 +1,7 @@
 #ifndef __DB_HPP__
 #define __DB_HPP__
+
 #include <map>
-
-#include "geo.hpp"
-#include "util.hpp"
-
-#include <ogr_core.h>
-#include <ogr_feature.h>
-#include <gdal_priv.h>
-#include <ogrsf_frmts.h>
-
 #include <string>
 #include <sstream>
 #include <map>
@@ -18,6 +10,14 @@
 #include <vector>
 #include <set>
 #include <unordered_map>
+
+#include <ogr_core.h>
+#include <ogr_feature.h>
+#include <gdal_priv.h>
+#include <ogrsf_frmts.h>
+
+#include "geo.hpp"
+#include "util.hpp"
 
 using namespace geo::util;
 

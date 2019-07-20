@@ -14,6 +14,15 @@ using namespace geo::pc::compute;
 
 namespace {
 
+	int comb(int n, int k) {
+		if(k > n || n < 0 || k < 0)
+			return 0;
+		int v = 1;
+		for(int j = 0; j < std::min(k, n - k); ++j)
+			v = (v * (n - j)) / (j + 1);
+		return v;
+	}
+
 	int hlrgLHQ(const std::vector<geo::pc::Point>& pts, int bands, std::vector<double>& out) {
 
 		out.push_back(pts[0].value());
@@ -59,45 +68,56 @@ namespace {
 
 	int hlrgLMoments(const std::vector<geo::pc::Point>& pts, std::vector<double>& out) {
 
+		// Stolen from here: https://pypi.org/project/lmoments/0.1.0/#files
+
 		size_t n = pts.size();
 
-		double l1 = 0;
-		double l2 = 0;
-		double l3 = 0;
-		double l4 = 0;
+		std::vector<double> com1; com1.reserve(n);
+		std::vector<double> com2; com2.reserve(n);
+		std::vector<double> com3; com3.reserve(n);
+		std::vector<double> com4; com4.reserve(n);
+		std::vector<double> com5; com5.reserve(n);
+		std::vector<double> com6; com6.reserve(n);
 
-		for(size_t i = 0; i < n; ++i) {
-			double v = i + 1;
-			double cl1 = v - 1;
-			double cl2 = cl1 * (v - 2) / 2.0;
-			double cl3 = cl2 * (v - 3) / 3.0;
-			double cr1 = n - v;
-			double cr2 = cr1 * (n - v - 1) / 2.0;
-			double cr3 = cr2 * (n - v - 2) / 3.0;
-			double z = pts[i].value();
-			l1 +=  z;
-			l2 += (cl1 - cr1) * z;
-			l3 += (cl2 - 2 * cl1 * cr1 + cr2) * z;
-			l4 += (cl3 - 3 * cl2 * cr1 + 3 * cl1 * cr2 - cr3) * z;
+		for(size_t i = 1; i < n + 1; ++i) {
+			com1.push_back(comb(i - 1, 1));
+			com2.push_back(comb(n - i, 1));
+			com3.push_back(comb(i - 1, 2));
+			com4.push_back(comb(n - i, 2));
+			com5.push_back(comb(i - 1, 3));
+			com6.push_back(comb(n - i, 3));
 		}
 
-		double c2 = n * (n - 1) / 2.0;
-		double c3 = c2 * (n - 2) / 3.0;
-		double c4 = c3 * (n - 3) / 4.0;
-		l1 /= n;
-		l2 /= c2 / 2.0;
-		l3 /= c3 / 3.0;
-		l4 /= c4 / 4.0;
+		double sum1 = 0, sum2 = 0, sum3 = 0, sum4 = 0;
 
-		double lmean = l1;
-		double lcov = l2 / l1;
-		double lskew = l3 / l2;
-		double lkurt = l4 / l2; // TODO: Should be l3?
+		for(const geo::pc::Point& p : pts)
+			sum1 += p.z();
 
-		out.push_back(lmean);
-		out.push_back(lcov);
-		out.push_back(lskew);
-		out.push_back(lkurt);
+		double co1 = 1.0 / comb(n, 1);
+		double co2 = 0.5 * 1.0 / comb(n, 2);
+		double co3 = 1.0 / 3.0 * 1.0 / comb(n, 3);
+		double co4 = 1.0 / 4.0 * 1.0 / comb(n, 5);
+		double v;
+
+		for(size_t i = 0; i < n; ++i) {
+			v = pts[i].value();
+			double tmp2 = com1[i] - com2[i];
+			double tmp3 = com3[i] - 2 * com1[i] * com2[i] + com4[i];
+			double tmp4 = com5[i] - 3 * com3[i] * com2[i] + 3 * com1[i] * com4[i] - com6[i];
+			sum2 += tmp2 * v;
+			sum3 += tmp3 * v;
+			sum4 += tmp4 * v;
+		}
+
+		double l1 = co1 * sum1;
+		double l2 = co2 * sum2;
+		double l3 = co3 * sum3 / l2;
+		double l4 = co4 * sum4 / l2;
+
+		out.push_back(l1);
+		out.push_back(l2);
+		out.push_back(l3);
+		out.push_back(l4);
 
 		return 4;
 	}

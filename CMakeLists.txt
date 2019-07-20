@@ -7,7 +7,9 @@ enable_language(CXX)
 set (CMAKE_CXX_STANDARD 11)
 set (CMAKE_CXX_STANDARD_REQUIRED ON)
 set (CMAKE_CXX_EXTENSIONS OFF)
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -D_GLIBCXX_PARALLEL")
+set (CMAKE_CXX_FLAGS "-Wall -Wextra") # -D_GLIBCXX_PARALLEL")
+set (CMAKE_CXX_FLAGS_DEBUG "-g -O0")
+set (CMAKE_CXX_FLAGS_RELEASE "-O3")
 set (CMAKE_POSITION_INDEPENDENT_CODE ON)
 set (CMAKE_INCLUDE_DIRECTORIES_BEFORE ON)
 
@@ -24,8 +26,6 @@ set (Boost_USE_MULTITHREADED ON)
 set (Boost_NO_SYSTEM_PATHS OFF)
 
 if (${APPLE})
-	set (CMAKE_C_COMPILER /usr/local/bin/clang-omp CACHE STRING "C compiler" FORCE)
-	set (CMAKE_CXX_COMPILER /usr/local/bin/clang-omp++ CACHE STRING "C++ compiler" FORCE)
 	set (CMAKE_LIBRARY_CREATE_CXX_FLAGS "${CMAKE_LIBRARY_CREATE_CXX_FLAGS} -undefined dynamic_lookup")
 elseif(${WIN32})
 	set (DEV_DIR "C:\\dev")
@@ -35,7 +35,7 @@ elseif(${WIN32})
 	set (GIS_DIR "${DEV_DIR}\\gisinternals")
 	set (GEOS_LIBRARYDIR "${GIS_DIR}\\lib;${GIS_DIR}\\bin") #set (GEOS_LIBRARYDIR "${DEV_DIR}\\geos\\lib;${DEV_DIR}\\geos\\bin")
 	set (GEOS_INCLUDEDIR "${GIS_DIR}\\include") #set (GEOS_INCLUDEDIR "${DEV_DIR}\\geos\\include")
-	set (EIGEN_INCLUDEDIR "${DEV_DIR}\\eigen3")
+	set (EIGEN3_INCLUDE_DIR "${DEV_DIR}\\eigen3")
 	set (GDAL_INCLUDE_DIR "${GIS_DIR}\\include")
 	set (GDAL_LIBRARYDIR "${GIS_DIR}\\lib;${GIS_DIR}\\bin")
 	set (GIS_INCLUDE_DIR "${GIS_DIR}\\include")
@@ -48,28 +48,30 @@ elseif(${WIN32})
 else()
 	set (CMAKE_CXX_COMPILER_LAUNCHER ccache)
 	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-pragmas -fopenmp")
-	set (EIGEN_INCLUDEDIR "/usr/include/eigen3")
-	set (JSON_INCLUDEDIR "/usr/include/jsoncpp")
 endif()
 
 set (THREADS_PREFER_PTHREAD_FLAG ON)
 
 find_package (Threads REQUIRED)
-find_package (Boost 1.58 COMPONENTS system filesystem date_time REQUIRED)
 find_package (GDAL 2 REQUIRED)
 find_package (CGAL REQUIRED)
-find_package (PDAL)
+find_package (PDAL REQUIRED)
+find_package (OpenSSL REQUIRED)
+find_package (Eigen3 REQUIRED)
+find_package (Boost 1.58 COMPONENTS system filesystem date_time REQUIRED)
 
 find_library (LIBLAS_LIBRARY las)
 find_library (JSONCPP_LIBRARY jsoncpp)
 find_library (CRYPTO_LIBRARY crypto libeay32 PATHS ${GIS_LIBRARYDIR})
-find_library (GEOS_LIBRARY geos PATHS ${GEOS_LIBRARYDIR})
+find_library (GEOS_LIBRARY geos_c PATHS ${GEOS_LIBRARYDIR})
 find_library (PROJ_LIBRARY proj)
+
 
 # Configure directories###################################################################################
 
 include_directories(BEFORE SYSTEM ./include ./ann/include 
-	${GEOS_INCLUDEDIR} ${GIS_INCLUDEDIR} ${EIGEN_INCLUDEDIR} ${JSON_INCLUDEDIR}
+	${OPENSSL_INCLUDE_DIR}  
+	${GEOS_INCLUDEDIR} ${GIS_INCLUDEDIR} ${EIGEN3_INCLUDE_DIR} ${JSON_INCLUDEDIR}
 	${GDAL_INCLUDE_DIR} ${Boost_INCLUDE_DIRS})
 	 
 link_directories(./build/lib ./build/bin ${GDAL_LIBRARYDIR} 
@@ -90,17 +92,15 @@ set_target_properties (geodbobj PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_library (geodb SHARED $<TARGET_OBJECTS:geodbobj>)
 target_link_libraries (geodb geoutil ${GDAL_LIBRARY})
 
-set (georastersrc src/geo.cpp src/raster.cpp src/rast/polygonize.cpp)
-add_library (georasterobj OBJECT ${georastersrc})
-set_target_properties (georasterobj PROPERTIES POSITION_INDEPENDENT_CODE ON)
-add_library (georaster SHARED $<TARGET_OBJECTS:georasterobj>)
-target_link_libraries (georaster geoutil geodb Threads::Threads ${GEOS_LIBRARY} ${GDAL_LIBRARY})
+set (geogridsrc src/geo.cpp src/grid.cpp)
+add_library (geogridobj OBJECT ${geogridsrc})
+set_target_properties (geogridobj PROPERTIES POSITION_INDEPENDENT_CODE ON)
+add_library (geogrid SHARED $<TARGET_OBJECTS:geogridobj>)
+target_link_libraries (geogrid geoutil geodb Threads::Threads ${GEOS_LIBRARY} ${GDAL_LIBRARY})
 
-message(STATUS ${CGAL_LIBRARY})
 file(GLOB PC_COMPUTERS src/pc/computers/*.cpp)
-add_library (geopc SHARED src/geo.cpp src/pointcloud.cpp src/pc/normalizer.cpp src/pc/rasterizer_extsort.cpp 
-	src/pc/filter.cpp ${PC_COMPUTERS})
-target_link_libraries (geopc geoutil georaster geoann ${LIBLAS_LIBRARY} CGAL CGAL_Core)
+add_library (geopc SHARED src/geo.cpp src/pointcloud.cpp src/pc/normalizer.cpp src/pc/rasterizer.cpp src/pc/filter.cpp ${PC_COMPUTERS})
+target_link_libraries (geopc geoutil geogrid geoann ${LIBLAS_LIBRARY} CGAL CGAL_Core gmp)
 
 set (geoannsrc src/geo.cpp ann/src/ANN.cpp ann/src/brute.cpp 
 	ann/src/kd_tree.cpp ann/src/kd_util.cpp 
@@ -117,15 +117,15 @@ target_link_libraries (geoann geoutil)
 
 if(${BUILD_APPS})
 
-	enable_language (Fortran)
-	file (GLOB FSRC src/fitpack/*.f)
-	add_library (fitpack_mod SHARED ${FSRC}) 
+	#enable_language (Fortran)
+	#file (GLOB FSRC src/fitpack/*.f)
+	#add_library (fitpack_mod SHARED ${FSRC}) 
 
 	# add_executable (polygonize src/apps/polygonize.cpp)
-	# target_link_libraries (polygonize geoutil georaster ${Boost_LIBRARIES})
+	# target_link_libraries (polygonize geoutil geogrid ${Boost_LIBRARIES})
 
 	add_executable (pc2grid src/apps/pc2grid.cpp)
-	target_link_libraries (pc2grid geoann geoutil georaster geopc geoann ${GEOS_LIBRARY})
+	target_link_libraries (pc2grid geoutil geogrid geopc ${GEOS_LIBRARY})
 
 	# add_executable (pc2tile src/apps/pc2tile.cpp)
 	# target_link_libraries (pc2tile geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY} ${GEOS_LIBRARY})
@@ -142,11 +142,11 @@ if(${BUILD_APPS})
 	# add_executable (geoinfo src/apps/geoinfo.cpp)
 	# target_link_libraries (geoinfo geoutil ${GDAL_LIBRARY} ${LIBLAS_LIBRARY} ${JSONCPP_LIBRARY})
 
-	add_executable (voidfill src/apps/voidfill.cpp)
-	target_link_libraries (voidfill geoutil georaster ${GDAL_LIBRARY})
+	#add_executable (voidfill src/apps/voidfill.cpp)
+	#target_link_libraries (voidfill geoutil geogrid ${GDAL_LIBRARY})
 
 	# add_executable (datumshift src/apps/datumshift.cpp)
-	# target_link_libraries (datumshift geoutil georaster ${GDAL_LIBRARY} ${PROJ_LIBRARY})
+	# target_link_libraries (datumshift geoutil geogrid ${GDAL_LIBRARY} ${PROJ_LIBRARY})
 
 	# add_executable (extmergesort src/apps/externalmergesort.cpp)
 	# target_link_libraries (extmergesort geoutil geopc ${LIBLAS_LIBRARY})
@@ -157,21 +157,27 @@ if(${BUILD_APPS})
 	# add_executable (groundassign src/apps/groundassign.cpp)
 	# target_link_libraries (groundassign ${LIBLAS_LIBRARY})
 
-	add_executable (rastermatch src/apps/rastermatch.cpp)
-	target_link_libraries (rastermatch geoutil geoann georaster ${GEOS_LIBRARY} ${GDAL_LIBRARY})
+	#add_executable (rastermatch src/apps/rastermatch.cpp)
+	#target_link_libraries (rastermatch geoutil geoann geogrid ${GEOS_LIBRARY} ${GDAL_LIBRARY})
 
-	add_executable (raster_test src/raster.cpp)
-	target_link_libraries (raster_test geoutil geoann georaster ${GEOS_LIBRARY} ${GDAL_LIBRARY})
+	#add_executable (raster_test src/raster.cpp)
+	#target_link_libraries (raster_test geoutil geoann geogrid ${GEOS_LIBRARY} ${GDAL_LIBRARY})
 
-	add_executable (cloudmatch src/apps/cloudmatch.cpp)
-	target_link_libraries (cloudmatch geoann ${Boost_LIBRARIES} ${GDAL_LIBRARY} ${PDAL_LIBRARIES} fitpack_mod)
+	#add_executable (cloudmatch src/apps/cloudmatch.cpp)
+	#target_link_libraries (cloudmatch geoann ${Boost_LIBRARIES} ${GDAL_LIBRARY} ${PDAL_LIBRARIES} fitpack_mod)
 
 	# add_executable (rbf src/tests/rbf.cpp)
 	# target_link_libraries (rbf)
 
-	# install(TARGETS pc2grid pc2tile rastermatch geopc georaster geoinfo geoutil geoann RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
+	# install(TARGETS pc2grid pc2tile rastermatch geopc geogrid geoinfo geoutil geoann RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
 	
-	install(TARGETS cloudmatch pc2grid pcnorm geoann geopc georaster geoutil geodb RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
+	install(TARGETS pc2grid pcnorm geoann geopc geogrid geoutil geodb RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
 	
 endif()
 
+if(${BUILD_TESTS})
+
+	add_executable (libgeo_test src/tests/test.cpp)
+	target_link_libraries (libgeo_test geoutil geogrid geopc)
+
+endif()

@@ -8,7 +8,7 @@
 #ifndef INCLUDE_PC_MEMGRID_HPP_
 #define INCLUDE_PC_MEMGRID_HPP_
 
-#include "util.hpp"
+#include <util_old.hpp>
 #include "pointcloud.hpp"
 
 namespace geo {

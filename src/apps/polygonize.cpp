@@ -5,7 +5,7 @@
  *      Author: rob
  */
 
-#include "raster.hpp"
+#include <grid.hpp>
 
 void usage() {
 	std::cerr << "Usage: polygonize <input raster> <output vector> [field name (dn)]\n"
@@ -22,7 +22,7 @@ void usage() {
 
 int main(int argc, char** argv) {
 
-	using namespace geo::raster;
+	using namespace geo::grid;
 
 	if(argc < 3) {
 		usage();
@@ -73,8 +73,8 @@ int main(int argc, char** argv) {
 		threads = 1;
 	}
 
-	Raster test(args[0]);
-	test.polygonize(args[1], args[2], driver, srid, band, holes, dangles, nullptr, nullptr, mask, threads);
+	Grid<float> test(args[0]);
+	test.polygonize(args[1], args[2], "id", driver, 2956, band);
 
 	return 0;
 }

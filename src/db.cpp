@@ -1,7 +1,8 @@
 #include <unordered_set>
+
 #include "db.hpp"
-#include "util.hpp"
 #include "geo.hpp"
+#include "util.hpp"
 
 using namespace geo::db;
 using namespace geo::util;
@@ -110,8 +111,8 @@ DB::DB(const std::string& file, const std::string& layer, const std::string& dri
 	}
 
 	// If replace and file exists, delete the existing file.
-    if(replace && Util::exists(file))
-        Util::rm(file);
+    if(replace && isfile(file))
+        rem(file);
 
     GDALDriver* drv = GetGDALDriverManager()->GetDriverByName(m_driver.c_str());
     if(!drv)
@@ -216,8 +217,8 @@ DB::DB(const std::string& file, const std::string& layer, const std::string& dri
 	}
 
 	// If replace and file exists, delete the existing file.
-    if(replace && Util::exists(file))
-        Util::rm(file);
+    if(replace && isfile(file))
+        rem(file);
 
     GDALDriver* drv = GetGDALDriverManager()->GetDriverByName(m_driver.c_str());
     if(!drv)
@@ -362,7 +363,7 @@ void DB::close(bool remove) {
 		GDALClose(m_ds);
 		m_ds = nullptr;
 		if(remove)
-			Util::rm(m_file);
+			rem(m_file);
 	}
 }
 
@@ -382,9 +383,9 @@ std::map<std::string, std::set<std::string> > DB::extensions() {
 				const char *ext = drv->GetMetadataItem(GDAL_DMD_EXTENSION);
 				if(ext != nullptr ) {
 					std::list<std::string> lst;
-					Util::splitString(std::back_inserter(lst), std::string(ext));
+					split(std::back_inserter(lst), std::string(ext));
 					for(const std::string& item : lst)
-						extensions[desc].insert("." + Util::lower(item));
+						extensions[desc].insert("." + lowercase(item));
 				}
 			}
 		}
@@ -426,7 +427,7 @@ std::map<std::string, std::string> DB::drivers(const std::vector<std::string>& f
 }
 
 std::string DB::getDriverForFilename(const std::string& filename) {
-	std::string ext = Util::extension(filename);
+	std::string ext = extension(filename);
 	std::map<std::string, std::set<std::string> > drivers = extensions();
 	std::string result;
 	for(const auto& it : drivers) {
@@ -462,8 +463,8 @@ std::string nameJoin(std::unordered_set<std::string>& names) {
 void DB::convert(const std::string& filename, const std::string& driver) {
 
 	// If replace and file exists, delete the existing file.
-    if(Util::exists(filename))
-        Util::rm(filename);
+    if(isfile(filename))
+        rem(filename);
 
     GDALAllRegister();
 

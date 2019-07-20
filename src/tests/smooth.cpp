@@ -5,7 +5,7 @@
  *      Author: rob
  */
 
-#include "raster.hpp"
+#include <grid.hpp>
 
 int main(int argc, char** argv) {
 

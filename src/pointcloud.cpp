@@ -1,3 +1,4 @@
+
 #define _USE_MATH_DEFINES
 
 #include <fstream>
@@ -21,12 +22,12 @@
 #include <liblas/liblas.hpp>
 
 #include "util.hpp"
-#include "raster.hpp"
+#include "grid.hpp"
 #include "pointcloud.hpp"
-#include "ds/kdtree.hpp"
+#include <ds/mqtree.hpp>
 #include "pc_computer.hpp"
 
-using namespace geo::raster;
+using namespace geo::grid;
 using namespace geo::util;
 using namespace geo::pc;
 
@@ -343,7 +344,7 @@ PCWriter::~PCWriter() {
 	delete m_header;
 	if(!m_totalReturns || m_dod) {
 		for(const std::string& f : m_filenames)
-			Util::rm(f);
+			rem(f);
 	}
 }
 
@@ -465,7 +466,7 @@ void Tiler::tile(const std::string& outdir, double size, double buffer, int srid
 							double x = file.x() + c * size0;
 							double y = file.y() + r * size0;
 							ss << "tile_" << (int) x << "_" << (int) y << "_" << size0;
-							std::string outfile = Util::pathJoin(outdir, ss.str());
+							std::string outfile = join(outdir, ss.str());
 							writers.emplace_back(new PCWriter(outfile, ihdr, x, y, size0, buffer));
 						}
 					}
@@ -508,7 +509,7 @@ void Tiler::tile(const std::string& outdir, double size, double buffer, int srid
 						double x = allBounds[0] + c * size0;
 						double y = allBounds[1] + r * size0;
 						ss << "tile_" << (int) x << "_" << (int) y << "_" << size0;
-						std::string outfile = Util::pathJoin(outdir, ss.str());
+						std::string outfile = join(outdir, ss.str());
 						writers.emplace_back(new PCWriter(outfile, ihdr, x, y, size0, buffer));
 					}
 				}
@@ -626,13 +627,11 @@ int geo::pc::Point::classId() const {
 }
 
 double geo::pc::Point::operator[](int idx) const {
-	switch(idx % 2) {
-	case 0:
+	if(idx % 2 == 0) {
 		return m_x;
-	case 1:
+	} else {
 		return m_y;
 	}
-	return 0;
 }
 
 double geo::pc::Point::x() const {
@@ -645,6 +644,18 @@ double geo::pc::Point::y() const {
 
 double geo::pc::Point::z() const {
 	return m_z;
+}
+
+void geo::pc::Point::x(double x) {
+	m_x = x;
+}
+
+void geo::pc::Point::y(double y) {
+	m_y = y;
+}
+
+void geo::pc::Point::z(double z) {
+	m_z = z;
 }
 
 double geo::pc::Point::value() const {
@@ -677,6 +688,10 @@ int geo::pc::Point::returnNum() const {
 
 int geo::pc::Point::numReturns() const {
 	return m_numReturns;
+}
+
+bool geo::pc::Point::operator<(const Point& other) const {
+	return x() == other.x() ? y() < other.y() : x() < other.x();
 }
 
 geo::pc::Point::~Point() {
@@ -724,8 +739,8 @@ void PCTreeIterator::reset() {
 	m_idx = -1;
 }
 
-bool PCTreeIterator::next(geo::ds::KDTree<geo::pc::Point>& tree) {
-	tree.destroy();
+bool PCTreeIterator::next(geo::ds::mqtree<geo::pc::Point>& tree) {
+	tree.clear();
 	if(++m_idx >= m_cols * m_rows)
 		return false;
 	int col = m_idx % m_cols;
@@ -740,11 +755,10 @@ bool PCTreeIterator::next(geo::ds::KDTree<geo::pc::Point>& tree) {
 				double x = pt.x();
 				double y = pt.y();
 				if(x >= tileBounds[0] && x <= tileBounds[2] && y >= tileBounds[1] && y <= tileBounds[2])
-					tree.add(new geo::pc::Point(pt));
+					tree.add(pt);
 			}
 		}
 	}
-	tree.build();
 	return true;
 }
 

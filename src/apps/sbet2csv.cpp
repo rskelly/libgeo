@@ -6,10 +6,10 @@
  */
 
 
+#include <grid.hpp>
 #include <proj_api.h>
 #include <fstream>
 
-#include "raster.hpp"
 #include "pc_trajectory.hpp"
 
 using namespace geo::raster;

@@ -14,7 +14,7 @@
 #include <geos/geom/PrecisionModel.h>
 #include <geos/simplify/TopologyPreservingSimplifier.h>
 
-#include "raster.hpp"
+#include <grid.hpp>
 
 using namespace geo::raster;
 

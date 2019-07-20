@@ -5,9 +5,9 @@
  *      Author: rob
  */
 
+#include <grid.hpp>
 #include <proj_api.h>
 
-#include "raster.hpp"
 
 using namespace geo::raster;
 

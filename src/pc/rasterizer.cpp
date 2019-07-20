@@ -16,16 +16,28 @@
 #include <thread>
 #include <algorithm>
 
-#include "util.hpp"
-#include "raster.hpp"
 #include "pointcloud.hpp"
 #include "pc_computer.hpp"
 #include "externalmergesort.hpp"
+#include "grid.hpp"
+#include "ds/kdtree.hpp"
+#include "util.hpp"
 
-using namespace geo::raster;
+using namespace geo::grid;
 using namespace geo::pc;
+using namespace geo::ds;
 using namespace geo::pc::compute;
 using namespace geo::pc::sort;
+
+namespace {
+
+	void checkScale(double* bounds, double scale) {
+		if((int) ((bounds[2] - bounds[0]) * scale) >= (1 << 15))
+			g_runerr("Scale value is too high: " << scale);
+		if((int) ((bounds[3] - bounds[1]) * scale) >= (1 << 15))
+			g_runerr("Scale value is too high: " << scale);
+	}
+}
 
 const std::unordered_map<std::string, std::string> computerNames = {
 		{"min", "The minimum value"},
@@ -84,7 +96,10 @@ Computer* getComputer(const std::string& name) {
 
 Rasterizer::Rasterizer(const std::vector<std::string> filenames) :
 	m_filter(nullptr),
-	m_thin(0) {
+	m_thin(0),
+	m_nodata(-9999),
+	m_limit(0),
+	m_scale(1) {
 	for(const std::string& filename : filenames)
 		m_files.emplace_back(filename);
 }
@@ -169,6 +184,18 @@ void Rasterizer::setThin(int thin) {
 	m_thin = thin;
 }
 
+void Rasterizer::setNoData(double nodata) {
+	m_nodata = nodata;
+}
+
+void Rasterizer::setMemLimit(size_t limit) {
+	m_limit = limit;
+}
+
+void Rasterizer::setScale(double scale) {
+	m_scale = scale;
+}
+
 void Rasterizer::setFilter(PCPointFilter* filter) {
 	m_filter = filter;
 }
@@ -183,10 +210,13 @@ Rasterizer::~Rasterizer() {
 
 void Rasterizer::rasterize(const std::string& filename, const std::vector<std::string>& types,
 		double resX, double resY, double easting, double northing, double radius, 
-		int srid, int memory, bool useHeader) {
+		int srid, bool useHeader, bool voids) {
 
 	if(std::isnan(resX) || std::isnan(resY))
 		g_runerr("Resolution not valid");
+
+	double initrad = radius;
+	radius = -1;
 
 	if(radius < 0 || std::isnan(radius)) {
 		radius = std::sqrt(std::pow(resX / 2, 2) * 2);
@@ -196,12 +226,14 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	if(types.empty())
 		g_argerr("No methods given; defaulting to mean");
 
+	// Configure the computers.
 	m_computers.clear();
 	for(const std::string& name : types) {
 		m_computers.emplace_back(getComputer(name));
 		m_computers.back()->setRasterizer(this);
 	}
 
+	// Calculate the overall boundaries of the point cloud.
 	g_trace("Checking file bounds");
 	std::vector<std::string> filenames;
 	double bounds[4] = {G_DBL_MAX_POS, G_DBL_MAX_POS, G_DBL_MIN_POS, G_DBL_MIN_POS};
@@ -219,165 +251,176 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 		}
 	}
 
+	checkScale(bounds, m_scale);
+
+	// "Fix" the bounds so they align with the resolution, and are oriented correctly.
 	g_trace("Fixing bounds ")
 	fixBounds(bounds, resX, resY, easting, northing);
 	g_trace(" bounds: " << bounds[0] << ", " << bounds[1] << "; " << bounds[2] << ", " << bounds[3])
 
+	mqtree<geo::pc::Point> tree(m_scale, m_limit, std::min(bounds[0], bounds[2]), std::min(bounds[1], bounds[3]));
+
+	// Compute the grid dimensions.
 	int cols = (int) std::ceil((bounds[2] - bounds[0]) / resX);
 	int rows = (int) std::ceil((bounds[3] - bounds[1]) / resY);
 	g_trace(" cols: " << cols << ", rows: " << rows)
 
+	// Work out the number of bands; each computer knows how many bands it will produce.
 	int bandCount = 1;
 	for(const std::unique_ptr<Computer>& comp : m_computers)
 		bandCount += comp->bandCount();
 	g_trace(" bands: " << bandCount)
 
+	// Configure the raster properties.
 	g_trace("Preparing raster")
 	GridProps props;
 	props.setTrans(easting, resX, northing, resY);
 	props.setSize(cols, rows);
-	props.setNoData(NODATA);
 	props.setDataType(DataType::Float32);
 	props.setSrid(srid);
 	props.setWritable(true);
 	props.setBands(bandCount);
+	props.setNoData(m_nodata);
 
-	// The final output raster.
-	Raster outrast(filename, props);
-
-	// Single-row grid for the buffers.
-	GridProps rowProps(props);
-	rowProps.setSize(cols, 1);
-
-	m_rasters.clear();
-	m_rasters.resize(bandCount); // Constructs the default MemRasters.
-	for(int i = 0; i < bandCount; ++i)
-		m_rasters[i].init(rowProps, false);
-
-	g_trace("Sorting...")
-	ExternalMergeSort es(filename, filenames, "/tmp");
-	CountComputer countComp;
-
-	es.setTransformer(new PointTransformer(easting, northing, resX, resY));
-	es.setLoader(new LASPointLoader());
-	es.sort(true);
-
-	g_trace("Running...")
-	// The last finalized row.
-	int lastR = 0;
-	// The squared radius for distance comparisons without sqrt.
-	double radiusSq = radius * radius;
-	// Radius in pixel coords.
-	int rad = (int) std::ceil(radius / std::max(std::abs(resX), std::abs(resY)));
-	// Dictionary of cells/points.
-	std::unordered_map<size_t, std::vector<geo::pc::Point> > cells;
-
-	size_t count = 0;
-	size_t numPoints = es.numPoints();
-
-	geo::pc::Point pt;
-	while(es.next(pt)) {
-
-		if(++count % 1000000 == 0)
-			std::cerr << count << " of " << numPoints << "\n";
-
-		double px = pt.x();
-		double py = pt.y();
-		int col = props.toCol(px);
-		int row = props.toRow(py);
-		size_t idx = row * cols + col;
-
-		if(rad) {
-			for(int r = std::max(0, row - rad); r < std::min(rows, row + rad + 1); ++r) {
-				for(int c = std::max(0, col - rad); c < std::min(cols, col + rad + 1); ++c) {
-					double cx = props.toCentroidX(c);
-					double cy = props.toCentroidY(r);
-					if(std::pow(px - cx, 2) + std::pow(py - cy, 2) <= radiusSq)
-						cells[r * cols + c].emplace_back(pt);
-				}
+	// Add the points to the qtree. Note the scale must be chosen carefully.
+	g_trace("Adding files to tree");
+	{
+		geo::pc::Point pt;
+		for(PCFile& f: m_files) {
+			for(const std::string& fn : f.filenames())
+				filenames.push_back(fn);
+			f.init(useHeader);
+			while(f.next(pt)) {
+				tree.add(pt);
 			}
-		} else {
-			cells[idx].emplace_back(pt);
-		}
-
-		if(row - rad > lastR) {
-			// If the row counter is at least rad greater than the last finalized row, finalize the rows.
-			for(int r = lastR; r < row - rad; ++r)
-				finalize(r, radius, cells, outrast);
-			lastR = row - rad;
 		}
 	}
+	g_trace(" " << tree.size() << " points added to tree.");
+	tree.build();
 
-	g_debug("Finalizing the rest " << cells.size())
-	for(int r = lastR; r < rows; ++r)
-		finalize(r, radius, cells, outrast);
 
-	m_rasters.clear();
+	// Prepare the final output raster.
+	Grid<double> outrast(filename, props);
+
+	g_trace("Running...")
+	{
+		// The first layer is just the point count.
+		CountComputer countComp;
+		size_t count = 0;
+		int band;
+
+		// Temporary storage.
+		std::vector<geo::pc::Point> pts;
+		std::vector<geo::pc::Point> cpts;
+		std::vector<geo::pc::Point> filtered;
+		std::vector<double> out;
+		std::vector<double> dist;
+		geo::pc::Point spt;
+
+		bool voidCells = false;
+
+		// Prepare insertion iterators.
+		auto citer = std::back_inserter(cpts);
+		auto fiter = std::back_inserter(filtered);
+
+		// Fill the raster with nodata first.
+		outrast.fill(props.nodata());
+
+		std::vector<geo::pc::Point> tmp;
+		double aresX = std::abs(resX) / 2;
+		double aresY = std::abs(resY) / 2;
+
+		do {
+
+			// If this is a void filling loop, increase the radius.
+			if(voidCells)
+				radius *= 2;
+
+			for(int r = 1; r < rows - 1; ++r) {
+				std::cout << "Row " << r << " of " << rows << "\n";
+				for(int c = 1; c < cols - 1; ++c) {
+
+					// Prepare a query point based on the grid location.
+					spt.x(props.toX(c));
+					spt.y(props.toY(r));
+
+					// If this is a void filing loop, skip when the value is valid.
+					if(voidCells && outrast.get(c, r, 1) != props.nodata())
+						continue;
+
+					// Search for points within the radius of the cell centre.
+					if(tree.search(spt, radius, citer)) {
+
+						// If the radius was 0, filter the points to the cell bounds.
+						if(initrad == 0) {
+							tmp.swap(cpts);
+							cpts.clear();
+							for(geo::pc::Point& pt : tmp) {
+								if(pt.x() < spt.x() - aresX || pt.x() > spt.x() + aresX || pt.y() < spt.y() - aresY || pt.y() > spt.y() + aresY)
+									continue;
+								cpts.push_back(std::move(pt));
+							}
+						}
+
+						// Filter the points according to the configured filter.
+						if(!cpts.empty()) {
+							count = m_filter->filter(cpts.begin(), cpts.end(), fiter);
+
+							if(m_thin > 0) {
+								// Thin the points to the desired density, if required.
+								if(filtered.size() < (size_t) m_thin) {
+									filtered.clear();
+									count = 0;
+								} else {
+									// Randomize, then take the first n points.
+									std::random_shuffle(filtered.begin(), filtered.end());
+									filtered.resize(m_thin);
+									count = m_thin;
+								}
+							}
+						}
+
+						band = 0;
+
+						// Write the point count.
+						// morton((spt.x() - bounds[0]) * scale, (spt.y() - bounds[1]) * scale), /*
+						outrast.set(c, r, count, band++);
+
+						if(count) {
+							for(size_t i = 0; i < m_computers.size(); ++i) {
+								out.clear();
+								// Calculate the values in the computer and append to the raster.
+								m_computers[i]->compute(spt.x(), spt.y(), cpts, filtered, radius, out);
+								for(double val : out) {
+									if(!std::isnan(val))
+										outrast.set(c, r, val, band++);
+								}
+							}
+						}
+
+						filtered.clear();
+						out.clear();
+						cpts.clear();
+						dist.clear();
+						pts.clear();
+					}
+				}
+			}
+
+			// If void filling is enabled, check whether there are void cells and
+			// enable the loop.
+			if(voids) {
+				voidCells = false;
+				for(int r = 0; !voidCells && r < rows; ++r) {
+					for(int c = 0; !voidCells && c < cols; ++c) {
+						if(outrast.get(c, r, 1) == props.nodata())
+							voidCells = true;
+					}
+				}
+			}
+		} while(voidCells);
+	}
 
 	g_debug("Done")
 }
 
-void Rasterizer::finalize(int row, double radius,
-		std::unordered_map<size_t, std::vector<geo::pc::Point> >& cells, 
-		Raster& outrast) {
-
-	const GridProps& props = outrast.props();
-	double y = props.toCentroidY(row);
-	int cols = props.cols();
-
-	std::list<size_t> remove;
-
-	for(int col = 0; col < cols; ++col) {
-		
-		size_t idx = row * cols + col;
-		std::vector<geo::pc::Point>& points = cells[idx];
-
-		double x = props.toCentroidX(col);
-		size_t count = points.size();
-		size_t band = 0;
-
-		remove.push_back(idx);
-		
-		if(count) {
-			count = m_filter->filter(points.begin(), points.end(), std::back_inserter(m_filtered));
-		
-			if(m_thin > 0) {
-				// Thin the points to the desired density, if required.
-				if(m_filtered.size() < (size_t) m_thin) {
-					m_filtered.clear();
-					count = 0;
-				} else {
-					std::random_shuffle(m_filtered.begin(), m_filtered.end());
-					m_filtered.resize(m_thin);
-					count = m_thin;
-				}
-			}
-		}
-
-		m_rasters[band++].setFloat(col, 0, count, 1);
-		
-		if(count) {
-			for(size_t i = 0; i < m_computers.size(); ++i) {
-				m_out.clear();
-				m_computers[i]->compute(x, y, points, m_filtered, radius, m_out);
-				for(double val : m_out)
-					m_rasters[band++].setFloat(col, 0, std::isnan(val) ? NODATA : val, 1);
-			}
-		} else {
-			for(size_t i = 0; i < m_computers.size(); ++i) {
-				for(int j = 0; j < m_computers[i]->bandCount(); ++j)
-					m_rasters[band++].setFloat(col, 0, NODATA, 1);
-			}
-		}
-		m_filtered.clear();
-		m_out.clear();
-	}
-
-	// Remove processed cells.
-	for(const size_t& i : remove)
-		cells.erase(i);
-
-	for(size_t i = 0; i < m_rasters.size(); ++i)
-		m_rasters[i].writeTo(outrast, cols, 1, 0, 0, 0, row, 1, i + 1);
-
-}

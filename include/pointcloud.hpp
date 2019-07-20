@@ -8,6 +8,8 @@
  *  Author: rob
  */
 
+#include <ds/mqtree.hpp>
+#include <grid.hpp>
 #include <fstream>
 #include <vector>
 #include <unordered_map>
@@ -22,8 +24,6 @@
 #include <liblas/liblas.hpp>
 
 #include "util.hpp"
-#include "raster.hpp"
-#include "ds/kdtree.hpp"
 
 #define NODATA -9999.0
 #define D_MAX std::numeric_limits<double>::max()
@@ -510,6 +510,10 @@ public:
 	 */
 	double z() const;
 
+	void x(double x);
+	void y(double y);
+	void z(double z);
+
 	/**
 	 * Return the intensity.
 	 * \return The intensity.
@@ -541,6 +545,12 @@ public:
 	 * The source of the value may be changed.
 	 */
 	double value() const;
+
+	/**
+	 * Intended to be used for z-ordering (space-filling) to facilitate
+	 * the construction of quad trees.
+	 */
+	bool operator<(const Point& other) const;
 
 	/**
 	 * Destroy the point.
@@ -739,19 +749,22 @@ public:
  */
 class Rasterizer {
 private:
-	std::vector<PCFile> m_files;		///< A list of PCFile instances.
+	std::vector<PCFile> m_files;		///<! A list of PCFile instances.
 	PCPointFilter* m_filter;
 	int m_thin;
+	double m_nodata;
+	size_t m_limit;						///<! The memory threshold (bytes) that triggers the use of file-backed storage. Otherwise RAM is used.
+	double m_scale;
 
 	// Used by finalizer.
 	std::vector<std::unique_ptr<Computer> > m_computers;
-	std::vector<geo::raster::MemRaster> m_rasters;
+	std::vector<geo::grid::Grid<double>> m_rasters;
 	std::vector<geo::pc::Point> m_filtered;
 	std::vector<double> m_out;
 
 	void finalize(int row, double radius,
 			std::unordered_map<size_t, std::vector<geo::pc::Point> >& cells,
-			geo::raster::Raster& outrast);
+			geo::grid::Grid<double>& outrast);
 
 public:
 
@@ -778,12 +791,11 @@ public:
 	 * \param northing 	The minimum corner coordinate of the raster.
 	 * \param radius 	The size of the neighbourhood around each cell centre.
 	 * \param srid 		The spatial reference ID of the output.
-	 * \param memory    The number of bytes to consume in RAM before changing to disk-backed storage.
 	 * \param useHeader True to trust the LAS file headers for things like bounds. Otherwise, read the points.
-
+	 * \param voids     If true, fill voids in the raster by expanding the radius iteratively.
 	 */
 	void rasterize(const std::string& filename, const std::vector<std::string>& types, double resX, double resY,
-		double easting, double northing, double radius, int srid, int memory, bool useHeader);
+		double easting, double northing, double radius, int srid, bool useHeader, bool voids);
 
 	/**
 	 * Esitmate the point density (per cell) given the source files, resolution and search radius.
@@ -801,6 +813,28 @@ public:
 	 * \param thin The number of points in each cell.
 	 */
 	void setThin(int thin);
+
+	/**
+	 * Set the nodata value. Default is -9999.
+	 *
+	 * \param nodata The nodata value.
+	 */
+	void setNoData(double nodata);
+
+	/**
+	 * The memory usage limit of data items which will trigger the use
+	 * of file-backed memory.
+	 *
+	 * \param limit The memory limit (bytes).
+	 */
+	void setMemLimit(size_t limit);
+
+	/**
+	 * Set the scale. Converts coordinates to integers, retaining a fixed amount of precision.
+	 *
+	 * \param scale The scale.
+	 */
+	void setScale(double scale);
 
 	/**
 	 * Set a point filter to use for filtering points. Removes the old filter.
@@ -860,7 +894,7 @@ public:
 
 	void reset();
 
-	bool next(geo::ds::KDTree<geo::pc::Point>& tree);
+	bool next(geo::ds::mqtree<geo::pc::Point>& tree);
 
 };
 

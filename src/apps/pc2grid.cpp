@@ -10,8 +10,6 @@
 #include <unordered_set>
 #include <iostream>
 
-#include <pointcloud.hpp>
-
 #include "pointcloud.hpp"
 
 using namespace geo::pc;
@@ -38,7 +36,14 @@ void usage() {
 			<< "                  good bounds (etc.) info\n"
 			<< " -t <min>         Normalize the point density in each cell. Any cell with more than this\n"
 			<< "                  number of points will be randomly thinned. Any cell with less will be\n"
-			<< "                  reduced to zero. This occurs after filtering.\n";
+			<< "                  reduced to zero. This occurs after filtering.\n"
+			<< " -d <nodata>      A nodata value. The default is -9999.0\n"
+			<< " -o               Fill voids. Does this by doubling the search radius iteratively.\n"
+			<< "                  the point count in this cells remains at zero.\n"
+			<< " -l <bytes>       The limit of memory devoted to point data that will trigger the use\n"
+			<< "                  of file-backed memory. This will be slow but less likely to crash.\n"
+			<< " -c <scale>       A scale value to scale coordinates for storage in the quadtree.\n"
+			<< "                  must be non-zero, usually a multiple or fraction of 10. Default 1.\n";
 
 	PCPointFilter::printHelp(std::cerr);
 
@@ -60,13 +65,16 @@ int main(int argc, char** argv) {
 	double easting = std::nan("");
 	double northing = std::nan("");
 	double radius = std::nan("");
-	int memory = 0;
 	uint16_t srid = 0;
 	bool useHeader = true;
 	std::vector<std::string> types;
 	std::vector<std::string> args;
 	PCPointFilter filter;
 	int thin = 0;
+	double nodata = -9999;
+	bool voids = false;
+	size_t limit = 0;
+	double scale = 1;
 
 	for(int i = 1; i < argc; ++i) {
 		if(filter.parseArgs(i, argv))
@@ -74,9 +82,7 @@ int main(int argc, char** argv) {
 		std::string v = argv[i];
 		if(v == "-m") {
 			std::string type = argv[++i];
-			Util::splitString(std::back_inserter(types), Util::lower(type), ",");
-		} else if(v == "-l") {
-			memory = atoi(argv[++i]);
+			split(std::back_inserter(types), lowercase(type), ",");
 		} else if(v == "-h") {
 			useHeader = false;
 		} else if(v == "-v") {
@@ -95,6 +101,14 @@ int main(int argc, char** argv) {
 			northing = atof(argv[++i]);
 		} else if(v == "-t") {
 			thin = atoi(argv[++i]);
+		} else if(v == "-l") {
+			limit = atoi(argv[++i]);
+		} else if(v == "-d") {
+			nodata = atof(argv[++i]);
+		} else if(v == "-c") {
+			scale = atof(argv[++i]);
+		} else if(v == "-o") {
+			voids = true;
 		} else {
 			args.push_back(argv[i]);
 		}
@@ -114,7 +128,10 @@ int main(int argc, char** argv) {
 		Rasterizer r(infiles);
 		r.setFilter(&filter);
 		r.setThin(thin);
-		r.rasterize(args[0], types, resX, resY, easting, northing, radius, srid, memory, useHeader);
+		r.setNoData(nodata);
+		r.setMemLimit(limit);
+		r.setScale(scale);
+		r.rasterize(args[0], types, resX, resY, easting, northing, radius, srid, useHeader, voids);
 	} catch(const std::exception& ex) {
 		std::cerr << ex.what() << "\n";
 		usage();

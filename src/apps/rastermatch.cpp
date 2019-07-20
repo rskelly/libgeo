@@ -4,12 +4,12 @@
  *  Created on: Feb 21, 2019
  *      Author: rob
  */
+#include <grid.hpp>
 #include <vector>
 #include <sstream>
 #include <thread>
 #include <iostream>
 
-#include "raster.hpp"
 
 using namespace geo::raster;
 

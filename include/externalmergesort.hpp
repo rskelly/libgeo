@@ -16,8 +16,8 @@
 
 #include <liblas/liblas.hpp>
 
-#include "pointcloud.hpp"
 #include "util.hpp"
+#include "pointcloud.hpp"
 #include "geo.hpp"
 
 using namespace geo::util;
@@ -314,7 +314,7 @@ private:
 	 * Return the next available name for a chunk file.
 	 */
 	std::string nextChunkFile() {
-		return Util::pathJoin(m_tmpDir, "chunk_" + std::to_string(++m_chunk) + ".tmp");
+		return join(m_tmpDir, "chunk_" + std::to_string(++m_chunk) + ".tmp");
 	}
 
 	/**
@@ -449,7 +449,7 @@ private:
 				newChunks.push_back(mergeChunks(tmp));
 			}
 			for(const std::string& file : m_chunkFiles)
-				Util::rm(file);
+				rem(file);
 			// Replace the chunk files list with the new chunks list.
 			m_chunkFiles.assign(newChunks.begin(), newChunks.end());
 		}
@@ -556,7 +556,7 @@ public:
 	 * any intermediate state.
 	 */
 	void sort(bool force) {
-		if(!Util::exists(m_outputFile) || force) {
+		if(!isfile(m_outputFile) || force) {
 			if(!m_loader)
 				g_runerr("No point loader has been configured.")
 			if(!m_trans)

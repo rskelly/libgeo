@@ -1,5 +1,6 @@
 #ifndef __QTREE_HPP__
 #define __QTREE_HPP__
+
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -8,15 +9,11 @@
 #include <condition_variable>
 #include <fstream>
 
-#include "geos/geom/Geometry.h"
-#include "geos/geom/Envelope.h"
-#include "geos/geom/Point.h"
-#include "geos/geom/GeometryFactory.h"
+#include <geos_c.h>
 
 #include "util.hpp"
 
 using namespace geo::util;
-using namespace geos::geom;
 
 namespace geo {
 	namespace ds {
@@ -356,28 +353,48 @@ namespace geo {
 			 * @return The number of found items.
 			 */
 			template <class U>
-			size_t search(const Geometry& geom, U output) {
+			size_t search(const GEOSGeometry* geom, U output) {
 				size_t count = 0;
 				// Create an envelope from the geometry.
-				Envelope* env = (Envelope*) geom.getEnvelope();
+				GEOSGeometry* env = GEOSEnvelope(geom);
+				const GEOSCoordSequence* eseq = GEOSGeom_getCoordSeq(env);
 				// Make sure the geom intersects with the tree.
-				Bounds bounds(env->getMinX(), env->getMinY(), env->getMaxX(), env->getMaxY());
+				double minx, miny, maxx,maxy;
+				GEOSCoordSeq_getX(eseq, 0, &minx);
+				GEOSCoordSeq_getX(eseq, 0, &miny);
+				GEOSCoordSeq_getX(eseq, 2, &maxx);
+				GEOSCoordSeq_getX(eseq, 2, &maxy);
+				if(minx > maxx) {
+					double tmp = maxx;
+					maxx = minx;
+					minx = tmp;
+				}
+				if(miny > maxy) {
+					double tmp = maxy;
+					maxy = miny;
+					miny = tmp;
+				}
+				Bounds bounds(minx, miny, maxx, maxy);
 				if(m_bounds.intersects(bounds)) {
 					std::list<T*> result;
 					// Find all nodes with relevant items.
 					findIntersecting(bounds, result);
-					GeometryFactory gf;
 					// Find all items that are inside the geometry.
 					for(T* item : result) {
-						geos::geom::Point* pt = gf.createPoint(Coordinate(item->x(), item->y()));
-						if(geom.contains(pt)) {
+						GEOSCoordSequence* seq = GEOSCoordSeq_create(1, 2);
+						GEOSCoordSeq_setX(seq, 0, item->x());
+						GEOSCoordSeq_setY(seq, 0, item->y());
+						GEOSGeometry* pt = GEOSGeom_createPoint(seq);//gf.createPoint(Coordinate(item->x(), item->y()));
+						if(GEOSContains(geom, pt) == 1) {
 							*output = item;
 							++output;
 							++count;
 						}
+						GEOSGeom_destroy(pt);
 						delete pt;
 					}
 				}
+				GEOSGeom_destroy(env);
 				return count;
 			}
 
