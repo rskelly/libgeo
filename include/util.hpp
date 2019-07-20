@@ -81,8 +81,6 @@ enum class Interleave {
 	BIP
 };
 
-
-
 /**
  * Normalization methods.
  */
