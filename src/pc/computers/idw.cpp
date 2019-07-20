@@ -24,7 +24,7 @@ int IDWComputer::compute(double x, double y, const std::vector<geo::pc::Point>& 
 	}
 }
 
-int IDWComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out) {
+int IDWComputer::compute(double x, double y, const std::vector<geo::pc::Point>&, const std::vector<geo::pc::Point>& filtered, double, std::vector<double>& out) {
 	if(!filtered.empty()) {
 		double result = 0;
 		double div = 0;

@@ -23,7 +23,7 @@ int MeanComputer::compute(double x, double y, const std::vector<geo::pc::Point>&
 	}
 }
 
-int MeanComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out) {
+int MeanComputer::compute(double, double, const std::vector<geo::pc::Point>&, const std::vector<geo::pc::Point>& filtered, double, std::vector<double>& out) {
 	if(!filtered.empty()) {
 		double sum = 0;
 		for(const geo::pc::Point& pt : filtered)
@@ -119,7 +119,7 @@ int MaxComputer::compute(double x, double y, const std::vector<geo::pc::Point>& 
 	}
 }
 
-int MaxComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out) {
+int MaxComputer::compute(double, double, const std::vector<geo::pc::Point>&, const std::vector<geo::pc::Point>& filtered, double, std::vector<double>& out) {
 	if(!filtered.empty()) {
 		double max = DBL_MIN;
 		for(const geo::pc::Point& pt : filtered) {
@@ -147,7 +147,7 @@ int MinComputer::compute(double x, double y, const std::vector<geo::pc::Point>& 
 	}
 }
 
-int MinComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out) {
+int MinComputer::compute(double, double, const std::vector<geo::pc::Point>&, const std::vector<geo::pc::Point>& filtered, double, std::vector<double>& out) {
 	if(!filtered.empty()) {
 		double min = DBL_MAX;
 		for(const geo::pc::Point& pt : filtered) {
@@ -175,7 +175,7 @@ int CountComputer::compute(double x, double y, const std::vector<geo::pc::Point>
 	}
 }
 
-int CountComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out) {
+int CountComputer::compute(double, double, const std::vector<geo::pc::Point>&, const std::vector<geo::pc::Point>& filtered, double, std::vector<double>& out) {
 	out.push_back(filtered.size());
 	return 1;
 }

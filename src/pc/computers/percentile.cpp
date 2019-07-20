@@ -32,7 +32,7 @@ int PercentileComputer::compute(double x, double y, const std::vector<geo::pc::P
 	}
 }
 
-int PercentileComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out) {
+int PercentileComputer::compute(double, double, const std::vector<geo::pc::Point>&, const std::vector<geo::pc::Point>& filtered, double, std::vector<double>& out) {
 	if(!filtered.empty()) {
 		std::vector<geo::pc::Point> _pts(filtered);
 		std::sort(_pts.begin(), _pts.end(), pointSort);

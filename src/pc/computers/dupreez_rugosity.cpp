@@ -44,7 +44,7 @@ double computePArea(double x1, double y1, double z1, double x2, double y2,
 /**
  * Compute the area of a face.
  */
-double computeFArea(const Face &face) {
+double computeFArea(const Face& face) {
 	Point_3 p1 = face.vertex(0)->point();
 	Point_3 p2 = face.vertex(1)->point();
 	Point_3 p3 = face.vertex(2)->point();
@@ -52,12 +52,12 @@ double computeFArea(const Face &face) {
 			p3.y(), p3.z());
 }
 
-double toPlane(const Point_3 &p, const Plane_3 &plane, const Point_3 &centroid) {
+double toPlane(const Point_3& p, const Plane_3& plane, const Point_3&) {
 	return (p.x() * plane.a() + p.y() * plane.b() + plane.d()) / -plane.c();
 }
 
-double polyArea(const std::list<Point_3> &hull, const Plane_3 &plane,
-		const Point_3 &centroid) {
+double polyArea(const std::list<Point_3>& hull, const Plane_3& plane,
+		const Point_3& centroid) {
 	double area = 0.0;
 	auto it0 = hull.begin();
 	auto it1 = hull.begin();
@@ -85,7 +85,7 @@ int RugosityComputer::compute(double x, double y, const std::vector<geo::pc::Poi
 	}
 }
 
-int RugosityComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out) {
+int RugosityComputer::compute(double, double, const std::vector<geo::pc::Point>&, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out) {
 
 	if(filtered.size() >= 3) {
 

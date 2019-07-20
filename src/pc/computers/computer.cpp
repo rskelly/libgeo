@@ -35,7 +35,7 @@ int DensityComputer::compute(double x, double y, const std::vector<geo::pc::Poin
 	}
 }
 
-int DensityComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out) {
+int DensityComputer::compute(double, double, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out) {
 	if(!filtered.empty()) {
 		double area = radius * radius * M_PI;
 		out.push_back(pts.size() / area);

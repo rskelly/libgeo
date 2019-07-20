@@ -366,7 +366,7 @@ Tiler::Tiler(const std::vector<std::string> filenames) {
 		files.emplace_back(filename);
 }
 
-void Tiler::tile(const std::string& outdir, double size, double buffer, int srid,
+void Tiler::tile(const std::string& outdir, double size, double buffer, int,
 	double easting, double northing, int maxFileHandles) {
 
 	if(buffer < 0)
