@@ -441,7 +441,7 @@ void DB::clear() {
 	g_runerr("Not implemented.");
 }
 
-void DB::setCacheSize(size_t size) {
+void DB::setCacheSize(size_t) {
 	g_runerr("Not implemented.");
 }
 
@@ -558,7 +558,7 @@ uint64_t DB::getGeomCount() const {
 	return static_cast<uint64_t>(m_layer->GetFeatureCount(1));
 }
 
-void DB::execute(const std::string& sql) {
+void DB::execute(const std::string&) {
 	g_runerr("Not implemented.");
 }
 
