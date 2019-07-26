@@ -10,9 +10,6 @@
 
 #include <sys/mman.h>
 
-//#include <queue>
-//#include <stdexcept>
-//#include <map>
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
@@ -45,13 +42,13 @@ namespace geo {
 namespace grid {
 
 
-/**
- * Return the interleave type from the string representation.
- *
- * \param[in] str The interleave name.
- * \return The Interleave type.
- */
-Interleave interleaveFromString(const std::string& str);
+	/**
+	 * \brief Return the interleave type from the string representation.
+	 *
+	 * \param[in] str The interleave name.
+	 * \return The Interleave type.
+	 */
+	Interleave interleaveFromString(const std::string& str);
 
 } // grid
 } // geo
@@ -67,7 +64,7 @@ namespace {
 	std::condition_variable poly_cv;	///<! For waiting on the queue.
 
 	/**
-	 * Get the size (in bytes) of the given DataType.
+	 * \brief Get the size (in bytes) of the given DataType.
 	 *
 	 * \param type The DataType.
 	 * \return The number of bytes required to represent the type.
@@ -75,7 +72,7 @@ namespace {
 	int getTypeSize(DataType type);
 
 	/**
-	 * Return the GDAL datatype corresponding to the DataType.
+	 * \brief Return the GDAL datatype corresponding to the DataType.
 	 *
 	 * \param type A DataType.
 	 * \return The GDAL datatype corresponding to the given DataType.
@@ -83,7 +80,7 @@ namespace {
 	GDALDataType dataType2GDT(DataType type);
 
 	/**
-	 * Return the DataType corresponding to the given GDAL datatype.
+	 * \brief Return the DataType corresponding to the given GDAL datatype.
 	 *
 	 * \param type A GDAL datatype.
 	 * \return A DataType corresponding to the GDAL datatype.
@@ -91,7 +88,7 @@ namespace {
 	DataType gdt2DataType(GDALDataType type);
 
 	/**
-	 * Update the polygonization row status.
+	 * \brief Update the polygonization row status.
 	 *
 	 * \param r The current row.
 	 * \param rows The total number of rows.
@@ -100,7 +97,7 @@ namespace {
 	std::string polyRowStatus(int r, int rows);
 
 	/**
-	 * Make a dataset to contain the polygons.
+	 * \brief Make a dataset to contain the polygons.
 	 *
 	 * \param filename The output filename of the dataset.
 	 * \param driver The output driver.
@@ -116,7 +113,7 @@ namespace {
 				GDALDataset** ds, OGRLayer** layer);
 
 	/**
-	 * Make and return a rectangular geometry with the given corners
+	 * \brief Make and return a rectangular geometry with the given corners
 	 * and number of dimensions.
 	 *
 	 * \param x0 The minimum corner x.
@@ -133,7 +130,7 @@ namespace {
 				bool removeHoles, bool removeDangles, bool* running, bool* cancel);
 
 	/**
-	 * Fix the given coordinates so that the source does not extend
+	 * \brief Fix the given coordinates so that the source does not extend
 	 * past the destination and vice versa, etc.
 	 *
 	 * \param[inout] srcCol The source column.
@@ -151,7 +148,7 @@ namespace {
 			int& cols, int& rows, int srcCols, int srcRows, int dstCols, int dstRows);
 
 	/**
-	 * Return the key for the minimum value in the given map.
+	 * \brief Return the key for the minimum value in the given map.
 	 *
 	 * \return The key for the minimum value in the given map.
 	 */
@@ -167,6 +164,24 @@ namespace {
 		return key;
 	}
 
+	/**
+	 * \brief Writes an ordered path to the iterator from the map of cells.
+	 *
+	 * \param start The start index into the map.
+	 * \param parents The map of cell relationships.
+	 * \param inserter The insert iterator.
+	 */
+	template <class V>
+	void writeAStarPath(size_t start, std::unordered_map<size_t, size_t>& parents, V inserter) {
+		*inserter = start;
+		++inserter;
+		while(parents.find(start) != parents.end()) {
+			start = parents[start];
+			*inserter = start;
+			++inserter;
+		}
+	}
+
 } // anon
 
 
@@ -175,7 +190,7 @@ namespace geo {
 namespace grid {
 
 /**
- * A class containing the properties of a raster.
+ * \brief A class containing the properties of a raster.
  */
 class G_DLL_EXPORT GridProps {
 private:
@@ -197,7 +212,7 @@ private:
 public:
 
 	/**
-	 * Construct an empty GridProps.
+	 * \brief Construct an empty GridProps.
 	 */
 	GridProps() :
 		m_cols(0), m_rows(0),
@@ -213,7 +228,7 @@ public:
 	}
 
 	/**
-	 * Return the internal index of the pixel in the mapped data region
+	 * \brief Return the internal index of the pixel in the mapped data region
 	 * depending on the interleave method.
 	 *
 	 * \param col The column.
@@ -237,7 +252,7 @@ public:
 	}
 
 	/**
-	 * Return the geographic bounds of the raster.
+	 * \brief Return the geographic bounds of the raster.
 	 *
 	 * \return The geographic bounds of the raster.
 	 */
@@ -250,7 +265,7 @@ public:
 	}
 
 	/**
-	 * Set the geographic bounds of the raster.
+	 * \brief Set the geographic bounds of the raster.
 	 *
 	 * \param bounds The geographic bounds of the raster.
 	 */
@@ -262,7 +277,7 @@ public:
 	}
 
 	/**
-	 * Use compression for tiff files.
+	 * \brief Use compression for tiff files.
 	 *
 	 * \param compress True to use compression for tiff files.
 	 */
@@ -271,7 +286,7 @@ public:
 	};
 
 	/**
-	 * Use compression for tiff files.
+	 * \brief Use compression for tiff files.
 	 *
 	 * \return True to use compression for tiff files.
 	 */
@@ -280,7 +295,7 @@ public:
 	}
 
 	/**
-	 * Use Big Tiff setting.
+	 * \brief Use Big Tiff setting.
 	 *
 	 * \param bigTuff True to use Big Tiff setting.
 	 */
@@ -289,7 +304,7 @@ public:
 	}
 
 	/**
-	 * Use Big Tiff setting.
+	 * \brief Use Big Tiff setting.
 	 *
 	 * \return True to use Big Tiff setting.
 	 */
@@ -298,7 +313,7 @@ public:
 	}
 
 	/**
-	 * Populate an (at least) 4-element double array with the bounding
+	 * \brief Populate an (at least) 4-element double array with the bounding
 	 * box of this object.
 	 *
 	 * \param bounds A four-element double array.
@@ -306,7 +321,7 @@ public:
 	void bounds(double* bounds) const;
 
 	/**
-	 * Return the interleave method.
+	 * \brief Return the interleave method.
 	 *
 	 * \return The interleave method.
 	 */
@@ -315,7 +330,7 @@ public:
 	}
 
 	/**
-	 * Set the interleave method.
+	 * \brief Set the interleave method.
 	 *
 	 * \param interleave The interleave method.
 	 */
@@ -324,7 +339,7 @@ public:
 	}
 
 	/**
-	 * Return the name of the GDAL driver used by the raster.
+	 * \brief Return the name of the GDAL driver used by the raster.
 	 * Only relevant for file-based rasters.
 	 *
 	 * \return The name of the GDAL driver.
@@ -334,7 +349,7 @@ public:
 	}
 
 	/**
-	 * Set the name of the GDAL driver used by the raster.
+	 * \brief Set the name of the GDAL driver used by the raster.
 	 * Only relevant for file-based rasters.
 	 *
 	 * \param name The name of the driver.
@@ -344,7 +359,7 @@ public:
 	}
 
 	/**
-	 * Returns the no data value.
+	 * \brief Returns the no data value.
 	 *
 	 * \return The no data value.
 	 */
@@ -353,7 +368,7 @@ public:
 	}
 
 	/**
-	 * Set the no data value.
+	 * \brief Set the no data value.
 	 *
 	 * \param nodata The no data value.
 	 */
@@ -363,7 +378,7 @@ public:
 	}
 
 	/**
-	 * Returns true if the no data value has been set.
+	 * \brief Returns true if the no data value has been set.
 	 *
 	 * \return True if the no data value has been set.
 	 */
@@ -372,14 +387,14 @@ public:
 	}
 
 	/**
-	 * Remove the no data value.
+	 * \brief Remove the no data value.
 	 */
 	void unsetNodata() {
 		m_nodataSet = false;
 	}
 
 	/**
-	 * Return the number of columns.
+	 * \brief Return the number of columns.
 	 *
 	 * \return The number of columns.
 	 */
@@ -388,7 +403,7 @@ public:
 	}
 
 	/*
-	 * Return the number of rows.
+	 * \brief Return the number of rows.
 	 *
 	 * \param The number of rows.
 	 */
@@ -397,7 +412,7 @@ public:
 	}
 
 	/**
-	 * Returns true if the cell is in the raster.
+	 * \brief Returns true if the cell is in the raster.
 	 *
 	 * \param col The column.
 	 * \param row The row.
@@ -408,7 +423,7 @@ public:
 	}
 
 	/**
-	 * Returns true if the cell is in the raster.
+	 * \brief Returns true if the cell is in the raster.
 	 *
 	 * \param x The geographic x or longitude coordinate.
 	 * \param y The geographic y or latitude coordinate.
@@ -419,7 +434,7 @@ public:
 	}
 
 	/**
-	 * Returns the row for a given y-coordinate.
+	 * \brief Returns the row for a given y-coordinate.
 	 *
 	 * \param y The geographic y or latitude coordinate.
 	 * \return The row index.
@@ -429,7 +444,7 @@ public:
 	}
 
 	/**
-	 * Returns the column for a given x-coordinate.
+	 * \brief Returns the column for a given x-coordinate.
 	 *
 	 * \param x The geographic x or longitude coordinate.
 	 * \return The column index.
@@ -439,7 +454,7 @@ public:
 	}
 
 	/**
-	 * Returns the x-coordinate for the cell centroid of a given column.
+	 * \brief Returns the x-coordinate for the cell centroid of a given column.
 	 *
 	 * \param col The column.
 	 * \return The x-coordinate at the centre of the column.
@@ -449,7 +464,7 @@ public:
 	}
 
 	/**
-	 * Returns the y-coordinate for the cell centorid of a given row.
+	 * \brief Returns the y-coordinate for the cell centorid of a given row.
 	 *
 	 * \param row The row.
 	 * \return The y-coordinate at the centre of the row.
@@ -459,7 +474,7 @@ public:
 	}
 
 	/**
-	 * Returns the number of pixels a single band in the raster.
+	 * \brief Returns the number of pixels a single band in the raster.
 	 *
 	 * \return The number of pixels in the raster.
 	 */
@@ -468,7 +483,7 @@ public:
 	}
 
 	/**
-	 * Set the data type of the raster.
+	 * \brief Set the data type of the raster.
 	 *
 	 * \param type The data type.
 	 */
@@ -477,7 +492,7 @@ public:
 	}
 
 	/**
-	 * Get the data type of the raster.
+	 * \brief Get the data type of the raster.
 	 *
 	 * \return The data type.
 	 */
@@ -486,7 +501,7 @@ public:
 	}
 
 	/**
-	 * Set the size of the raster in columns, rows.
+	 * \brief Set the size of the raster in columns, rows.
 	 *
 	 * \param col The column.
 	 * \param row The row.
@@ -497,7 +512,7 @@ public:
 	}
 
 	/**
-	 * Set the horizontal and vertical (optional) SRID.
+	 * \brief Set the horizontal and vertical (optional) SRID.
 	 *
 	 * \param hsrid The horizontal SRID.
 	 * \param vsrid The vertical SRID.
@@ -508,7 +523,7 @@ public:
 	}
 
 	/**
-	 * Get the vertical SRID.
+	 * \brief Get the vertical SRID.
 	 *
 	 * \return The vertical SRID.
 	 */
@@ -517,7 +532,7 @@ public:
 	}
 
 	/**
-	 * Get the horizontal SRID.
+	 * \brief Get the horizontal SRID.
 	 *
 	 * \return The horizontal SRID.
 	 */
@@ -527,7 +542,7 @@ public:
 
 
 	/**
-	 * Set the WKT projection.
+	 * \brief Set the WKT projection.
 	 *
 	 * \param The projection string (proj or WKT format).
 	 */
@@ -537,7 +552,7 @@ public:
 
 
 	/**
-	 * Get the WKT projection (proj or WKT format).
+	 * \brief Get the WKT projection (proj or WKT format).
 	 *
 	 * \return The WKT projection.
 	 */
@@ -555,7 +570,7 @@ public:
 	}
 
 	/**
-	 * Set the geo transform properties.
+	 * \brief Set the geo transform properties.
 	 *
 	 * \param trans The six-element transformation matrix.
 	 */
@@ -566,7 +581,7 @@ public:
 	}
 
 	/**
-	 * Set the geo transform properties. The third and fifth elements are set to zero.
+	 * \brief Set the geo transform properties. The third and fifth elements are set to zero.
 	 *
 	 * \param tlx The top left x-coordinate.
 	 * \param resX The horizontal resolution.
@@ -579,7 +594,7 @@ public:
 	}
 
 	/**
-	 * Gets the geo transform properties by setting them in the given array.
+	 * \brief Gets the geo transform properties by setting them in the given array.
 	 *
 	 * \param trans The six-element transformation matrix.
 	 */
@@ -589,7 +604,7 @@ public:
 	}
 
 	/**
-	 * Set the vertical and horizontal resolution.
+	 * \brief Set the vertical and horizontal resolution.
 	 *
 	 * \param resolutionX The horizontal resolution.
 	 * \param resolutionY The vertical resolution (negative for UTM (etc.) projections).
@@ -600,7 +615,7 @@ public:
 	}
 
 	/**
-	 * Get the horizontal resolution.
+	 * \brief Get the horizontal resolution.
 	 *
 	 * \return The horizontal resolution.
 	 */
@@ -609,7 +624,7 @@ public:
 	}
 
 	/**
-	 * Get the vertical resolution.
+	 * \brief Get the vertical resolution.
 	 *
 	 * \return The vertical resolution.
 	 */
@@ -618,7 +633,7 @@ public:
 	}
 
 	/**
-	 * Return the top-left horizontal coordinate of the raster.
+	 * \brief Return the top-left horizontal coordinate of the raster.
 	 *
 	 * \return The top-left horizontal coordinate of the raster.
 	 */
@@ -627,7 +642,7 @@ public:
 	}
 
 	/**
-	 * Return the top-left vertical coordinate of the raster.
+	 * \brief Return the top-left vertical coordinate of the raster.
 	 *
 	 * \return The top-left vertical coordinate of the raster.
 	 */
@@ -636,7 +651,7 @@ public:
 	}
 
 	/**
-	 * Set the number of bands.
+	 * \brief Set the number of bands.
 	 *
 	 * \param bands The number of bands.
 	 */
@@ -645,7 +660,7 @@ public:
 	}
 
 	/**
-	 * Get the number of bands.
+	 * \brief Get the number of bands.
 	 *
 	 * \return The number of bands.
 	 */
@@ -654,7 +669,7 @@ public:
 	}
 
 	/**
-	 * Set the writable state of the raster. If the raster is not writable,
+	 * \brief Set the writable state of the raster. If the raster is not writable,
 	 * attempting to write to it will throw an exception.
 	 *
 	 * \param writable True, if the raster should be writable.
@@ -664,7 +679,7 @@ public:
 	}
 
 	/**
-	 * Get the writable state of the raster.
+	 * \brief Get the writable state of the raster.
 	 *
 	 * \param The writable state of the raster.
 	 */
@@ -673,7 +688,7 @@ public:
 	}
 
 	/**
-	 * Return the GDAL datatype of the raster.
+	 * \brief Return the GDAL datatype of the raster.
 	 *
 	 * \return The GDAL datatype of the raster.
 	 */
@@ -682,7 +697,7 @@ public:
 	}
 
 	/**
-	 * Set the filename of the raster.
+	 * \brief Set the filename of the raster.
 	 *
 	 * \param filename The filename of the raster.
 	 */
@@ -691,7 +706,7 @@ public:
 	}
 
 	/**
-	 * Return the filename for this raster.
+	 * \brief Return the filename for this raster.
 	 *
 	 * \return The filename for this raster.
 	 */
@@ -702,7 +717,7 @@ public:
 };
 
 /**
- * A class to contain statistics of the raster.
+ * \brief A class to contain statistics of the raster.
  */
 class G_DLL_EXPORT GridStats {
 public:
@@ -716,7 +731,7 @@ public:
 };
 
 /**
- * A simple class to represent a single grid cell.
+ * \brief A simple class to represent a single grid cell.
  */
 class G_DLL_EXPORT Cell {
 public:
@@ -728,7 +743,7 @@ public:
 };
 
 /**
- * Used by Grid::floodFill to determine whether a pixel should be filled.
+ * \brief Used by Grid::floodFill to determine whether a pixel should be filled.
  * Subclasses will implement clever ways to detect fillable
  * pixels.
  */
@@ -737,21 +752,21 @@ class G_DLL_EXPORT FillOperator {
 public:
 
 	/**
-	 * Return the properties of the source raster.
+	 * \brief Return the properties of the source raster.
 	 *
 	 * \return The properties of the source raster.
 	 */
 	virtual const GridProps& srcProps() const = 0;
 
 	/**
-	 * Return the properties of the destination raster.
+	 * \brief Return the properties of the destination raster.
 	 *
 	 * \return The properties of the destination raster.
 	 */
 	virtual const GridProps& dstProps() const = 0;
 
 	/**
-	 * Return true if if the current pixel should be filled.
+	 * \brief Return true if if the current pixel should be filled.
 	 *
 	 * \param col The column.
 	 * \param row The row.
@@ -760,7 +775,7 @@ public:
 	virtual bool shouldFill(int col, int row) const = 0;
 
 	/**
-	 * Fill the current column.
+	 * \brief Fill the current column.
 	 *
 	 * \param col The column.
 	 * \param row The row.
@@ -775,7 +790,7 @@ template <class T, class U>
 class G_DLL_EXPORT TargetFillOperator;
 
 /**
- * Grid (raster).
+ * \brief Grid (raster).
  */
 template <class T>
 class G_DLL_EXPORT Grid {
@@ -783,12 +798,15 @@ private:
 	GDALDataset *m_ds;          				///<! GDAL data set pointer.
 	GDALDataType m_type;        				///<! GDALDataType -- limits the possible template types.
 	GridProps m_props;							///<! Properties of the raster.
-	std::unique_ptr<TmpFile> m_mapFile;
-	bool m_mapped;
-	size_t m_size;
-	T* m_data;
+	std::unique_ptr<TmpFile> m_mapFile;			///<! Temporary file used for file-backed mapped memory.
+	bool m_mapped;								///<! If true, file-backed mapped memory is in use.
+	size_t m_size;								///<! The size of the total raster in bytes.
+	T* m_data;									///<! Pointer to the raster data.
 	bool m_dirty;								///<! True if the current block has been written to and must be flushed.
 
+	/**
+	 * \brief Initialize file-backed mapped memory.
+	 */
 	void initMapped() {
 		if(m_data)
 			destroy();
@@ -800,6 +818,9 @@ private:
 		m_mapped = true;
 	}
 
+	/**
+	 * \brief Initialize raster memory in physical RAM.
+	 */
 	void initMem() {
 		if(m_data)
 			destroy();
@@ -809,6 +830,11 @@ private:
 			g_runerr("Failed to allocate " << m_size << " bytes for grid.");
 	}
 
+	/**
+	 * \brief Return the raster DataType given the template parameter.
+	 *
+	 * \return The raster DataType given the template parameter.
+	 */
 	DataType type() const {
 		if(std::is_same<T, double>::value) {
 			return DataType::Float64;
@@ -831,6 +857,11 @@ private:
 		}
 	}
 
+	/**
+	 * \brief Return the GDAL raster data type given the template parameter.
+	 *
+	 * \return The GDAL raster data type given the template parameter.
+	 */
 	GDALDataType gdalType() const {
 		if(std::is_same<T, double>::value) {
 			return GDT_Float64;
@@ -853,6 +884,11 @@ private:
 		}
 	}
 
+	/**
+	 * \brief Return true if the raster is a floating-point raster.
+	 *
+	 * \return True if the raster is a floating-point raster.
+	 */
 	bool isFloat() const {
 		DataType t = type();
 		return t == DataType::Float32 || t == DataType::Float64;
@@ -860,6 +896,9 @@ private:
 
 public:
 
+	/**
+	 * \brief Construct an empty Grid.
+	 */
 	Grid() :
 		m_ds(nullptr),
 		m_mapped(false),
@@ -869,8 +908,7 @@ public:
 		m_type(GDT_Unknown) {}
 
 	/**
-	 * Create an anonymous grid of the given size with the given
-	 * properties.
+	 * \brief Create an anonymous grid of the given size with the given properties.
 	 *
 	 * \param props The properties of the grid.
 	 * \param mapped If true, the grid is created in a mapped memory segment.
@@ -879,6 +917,12 @@ public:
 		init(props, mapped);
 	}
 
+	/**
+	 * \brief Initialize the Grid.
+	 *
+	 * \param props The properties of the grid.
+	 * \param mapped If true, the grid is created in a mapped memory segment.
+	 */
 	void init(const GridProps& props, bool mapped = false) {
 		m_props = props;
 		if(mapped) {
@@ -889,7 +933,7 @@ public:
 	}
 
 	/**
-	 * Create a new raster with the given properties. The raster will be created.
+	 * \brief Create a new raster with the given properties. The raster will be created.
 	 *
 	 * \param filename The path to the file.
 	 * \param props A GridProps instance containing a descriptor for the raster.
@@ -899,7 +943,7 @@ public:
 	}
 
 	/**
-	 * Initialize the raster by loading it and setting up the grid properties.
+	 * \brief Initialize the raster by loading it and setting up the grid properties.
 	 *
 	 * \param filename The path to the file.
 	 * \param props A GridProps instance containing a descriptor for the raster.
@@ -989,8 +1033,7 @@ public:
 
 
 	/**
-	 * Open the given extant raster. Set the writable argument to true
-	 * to enable writing.
+	 * \brief Open the given extant raster. Set the writable argument to true to enable writing.
 	 *
 	 * \param filename The path to the file.
 	 * \param writable True if the file is to be writable.
@@ -1002,8 +1045,7 @@ public:
 	}
 
 	/**
-	 * Initalize with an extant raster. Set the writable argument to true
-	 * to enable writing.
+	 * \brief Initalize with an extant raster. Set the writable argument to true to enable writing.
 	 *
 	 * \param filename The path to the file.
 	 * \param writable True if the file is to be writable.
@@ -1051,7 +1093,7 @@ public:
 	}
 
 	/**
-	 * Return a map containing the raster driver short name and extension.
+	 * \brief Return a map containing the raster driver short name and extension.
 	 *
 	 * \return A map containing the raster driver short name and extension.
 	 */
@@ -1080,7 +1122,7 @@ public:
 	}
 
 	/**
-	 * Return a map containing the raster driver short name and long name.
+	 * \brief Return a map containing the raster driver short name and long name.
 	 *
 	 * \return A map containing the raster driver short name and long name.
 	 */
@@ -1090,8 +1132,9 @@ public:
 	}
 
 	/**
-	 * Return a map containing the raster driver short name and long name. Use filter
-	 * to filter the returns on short name.
+	 * \brief Return a map containing the raster driver short name and long name.
+	 *
+	 * Use filter to filter the returns on short name.
 	 *
 	 * \param filter A vector containing the short names of drivers to include.
 	 * \return A map containing the raster driver short name and long name.
@@ -1127,8 +1170,7 @@ public:
 
 
 	/**
-	 * Get the name of the driver that would be used to open a file
-	 * with the given path.
+	 * \brief Get the name of the driver that would be used to open a file with the given path.
 	 *
 	 * \param filename The path to an existing raster.
 	 * \return The name of the griver used to open the file.
@@ -1145,8 +1187,7 @@ public:
 	}
 
 	/**
-	 * Creates a virtual raster using the given files and writes it to a file
-	 * with the given name.
+	 * \brief Creates a virtual raster using the given files and writes it to a file with the given name.
 	 *
 	 * \param files A list of files to include in the raster.
 	 * \param outfile The path to the virtual raster.
@@ -1155,8 +1196,7 @@ public:
 	static void createVirtualRaster(const std::vector<std::string>& files, const std::string& outfile, double nodata);
 
 	/**
-	 * Creates a virtual raster using the given files and writes it to a file
-	 * with the given name.
+	 * \brief Creates a virtual raster using the given files and writes it to a file with the given name.
 	 *
 	 * \param begin An iterator into a list of files to include in the raster.
 	 * \param files The end iterator of the list of files to include in the raster.
@@ -1170,8 +1210,7 @@ public:
 	}
 
 	/**
-	 * Compute the table of Gaussian weights given the size of
-	 * the table and the standard deviation.
+	 * \brief Compute the table of Gaussian weights given the size of the table and the standard deviation.
 	 *
 	 * \param weights The list of weights.
 	 * \param size The size of the weights list.
@@ -1194,8 +1233,7 @@ public:
 	}
 
 	/**
-	 * Attempts to return the data type of the raster
-	 * with the given filename.
+	 * \brief Attempts to return the data type of the raster with the given filename.
 	 *
 	 * \param filename The path to an existing raster.
 	 * \return The data type.
@@ -1205,7 +1243,7 @@ public:
 	}
 
 	/**
-	 * Return the GDAL data set pointer.
+	 * \brief Return the GDAL data set pointer.
 	 *
 	 * \return The GDAL data set pointer.
 	 */
@@ -1214,8 +1252,7 @@ public:
 	}
 
 	/**
-	 * Copies the image data from an entire row into the buffer
-	 * which must be pre-allocated.
+	 * \brief Copies the image data from an entire row into the buffer which must be pre-allocated.
 	 *
 	 * \param row The row index.
 	 * \param band The band number.
@@ -1229,8 +1266,7 @@ public:
 	}
 
 	/**
-	 * Copies the image data from an entire row into the buffer
-	 * which must be pre-allocated.
+	 * \brief Copies the image data from an entire row into the buffer which must be pre-allocated.
 	 *
 	 * \param row The row index.
 	 * \param band The band number.
@@ -1244,8 +1280,7 @@ public:
 	}
 
 	/**
-	 * Copies the image data from an entire column into the buffer
-	 * which must be pre-allocated.
+	 * \brief Copies the image data from an entire column into the buffer which must be pre-allocated.
 	 *
 	 * \param column The column index.
 	 * \param band The band number.
@@ -1259,8 +1294,7 @@ public:
 	}
 
 	/**
-	 * Copies the image data from an entire column into the buffer
-	 * which must be pre-allocated.
+	 * \brief Copies the image data from an entire column into the buffer which must be pre-allocated.
 	 *
 	 * \param col The column index.
 	 * \param band The band number.
@@ -1274,9 +1308,9 @@ public:
 	}
 
 	/**
-	 * Copies the image data from an entire pixel into the buffer
-	 * which must be pre-allocated. The buffer represents
-	 * the band stack for that pixel.
+	 * \brief Copies the image data from an entire pixel into the buffer which must be pre-allocated.
+	 *
+	 * The buffer represents the band stack for that pixel.
 	 *
 	 * \param col The column index.
 	 * \param row The row index.
@@ -1290,8 +1324,7 @@ public:
 	}
 
 	/**
-	 * Copies the image data from an entire column into the buffer
-	 * which must be pre-allocated.
+	 * \brief Copies the image data from an entire column into the buffer which must be pre-allocated.
 	 *
 	 * \param band The band index.
 	 * \param band The band number.
@@ -1305,7 +1338,7 @@ public:
 	}
 
 	/**
-	 * Return the properties of this Grid.
+	 * \brief Return the properties of this Grid.
 	 *
 	 * \return The properties of this Grid.
 	 */
@@ -1314,7 +1347,7 @@ public:
 	}
 
 	/**
-	 * Compute and return the statistics for the band.
+	 * \brief Compute and return the statistics for the band.
 	 *
 	 * \param band The raster band.
 	 * \return A GridStats instance containing computed statistics.
@@ -1353,7 +1386,7 @@ public:
 	}
 
 	/**
-	 * Fill the entire dataset with the given value.
+	 * \brief Fill the entire dataset with the given value.
 	 *
 	 * \param value The value to fill the raster with.
 	 * \param band The band to fill.
@@ -1380,7 +1413,7 @@ public:
 	}
 
 	/**
-	 * Fill the entire dataset with the given value.
+	 * \brief Fill the entire dataset with the given value.
 	 *
 	 * \param value The value to fill the raster with.
 	 * \param band The band to fill.
@@ -1390,7 +1423,7 @@ public:
 	}
 
 	/**
-	 * Fill all bands with the given value.
+	 * \brief Fill all bands with the given value.
 	 *
 	 * \param value The fill value.
 	 */
@@ -1402,7 +1435,7 @@ public:
 	}
 
 	/**
-	 * Return a the value held at the given position in the grid.
+	 * \brief Return a the value held at the given position in the grid.
 	 *
 	 * \param col The column.
 	 * \param row The row.
@@ -1425,7 +1458,7 @@ public:
 	}
 
 	/**
-	 * Set the value held at  the given index in the grid.
+	 * \brief Set the value held at the given index in the grid.
 	 *
 	 * \param col The column.
 	 * \param row The row.
@@ -1445,6 +1478,14 @@ public:
 
 	}
 
+	/**
+	 * \brief Set the value held at the given geographic position in the grid.
+	 *
+	 * \param x The x-coordinate.
+	 * \param y The y-coordinate.
+	 * \param value The value to set.
+	 * \param band The band.
+	 */
 	template <class U>
 	void set(double x, double y, U value, int band) {
 
@@ -1453,7 +1494,7 @@ public:
 	}
 
 	/**
-	 * Return a the value held at the given position in the grid.
+	 * \brief Return a the value held at the given position in the grid.
 	 *
 	 * \param col The column.
 	 * \param row The row.
@@ -1467,7 +1508,7 @@ public:
 	}
 
 	/**
-	 * Return a the value held at the given position in the grid.
+	 * \brief Return a the value held at the given position in the grid.
 	 *
 	 * \param x The x coordinate.
 	 * \param y The y coordinate.
@@ -1481,7 +1522,7 @@ public:
 	}
 
 	/**
-	 * Set the value held at  the given index in the grid.
+	 * \brief Set the value held at  the given index in the grid.
 	 *
 	 * \param col The column.
 	 * \param row The row.
@@ -1495,7 +1536,7 @@ public:
 	}
 
 	/**
-	 * Set the value held at  the given index in the grid.
+	 * \brief Set the value held at  the given index in the grid.
 	 *
 	 * \param x The x coordinate.
 	 * \param y The y coordinate.
@@ -1509,7 +1550,7 @@ public:
 	}
 
 	/**
-	 * Write data from the current Grid instance to the given grid.
+	 * \brief Write data from the current Grid instance to the given grid.
 	 *
 	 * \param grd The target grid.
 	 * \param cols The number of columns to write.
@@ -1542,7 +1583,10 @@ public:
 	}
 
 	/**
-	 * Return the pixel values as a vector, for the given band.
+	 * \brief Return the pixel values as a vector, for the given band.
+	 *
+	 * \param band The band.
+	 * \return The pixel values as a vector, for the given band.
 	 */
 	std::vector<T> asVector(int band) {
 
@@ -1561,7 +1605,7 @@ public:
 	}
 
 	/**
-	 * Normalize the grid so that one standard deviation is +-1.
+	 * \brief Normalize the grid so that one standard deviation is +-1.
 	 *
 	 * \param band The target band.
 	 */
@@ -1585,8 +1629,7 @@ public:
 	}
 
 	/**
-	 * Normalize the grid so that the max value is equal to 1, and the
-	 * minimum is zero.
+	 * \brief Normalize the grid so that the max value is equal to 1, and the minimum is zero.
 	 *
 	 * \param band The target band.
 	 */
@@ -1606,7 +1649,7 @@ public:
 	}
 
 	/**
-	 * Convert a Grid to some other type.
+	 * \brief Convert a Grid to some other type.
 	 *
 	 * \param g The destination Grid.
 	 * \param srcBand The source band.
@@ -1625,8 +1668,9 @@ public:
 	}
 
 	/**
-	 * Fill the grid, beginning with the target cell, where any contiguous cell
-	 * satisfies the given FillOperator. The other grid is actually filled,
+	 * \brief Fill the grid, beginning with the target cell, where any contiguous cell satisfies the given FillOperator.
+	 *
+	 * The other grid is actually filled,
 	 * and the present grid is unchanged *unless* the present grid is passed
 	 * as other.
 	 *
@@ -1745,7 +1789,8 @@ public:
 	}
 
 	/**
-	 * Smooth the raster and write the smoothed version to the output raster.
+	 * \brief Smooth the raster and write the smoothed version to the output raster.
+	 *
 	 * Callback is an optional function reference with a single float
 	 * between 0 and 1, for status tracking.
 	 *
@@ -1816,7 +1861,8 @@ public:
 	}
 
 	/**
-	 * The radius is given with cells as the unit, but can be rational.
+	 * \brief The radius is given with cells as the unit, but can be rational.
+	 *
 	 * When determining which cells to include in the calculation,
 	 * any cell which partially falls in the radius will be included.
 	 *
@@ -1957,22 +2003,11 @@ public:
 		output.writeTo(routput);
 
 	}
-	// TODO: Document me.
-	template <class V>
-	void writeAStarPath(size_t start, std::unordered_map<size_t, size_t>& parents, V inserter) {
-		*inserter = start;
-		++inserter;
-		while(parents.find(start) != parents.end()) {
-			start = parents[start];
-			*inserter = start;
-			++inserter;
-		}
-	}
 
 	/**
-	 * Finds the least-cost path from the start cell to the goal cell,
-	 * using the given heuristic. Populates the given iterator with
-	 * the optimal path between the start cell and the goal.
+	 * \brief Finds the least-cost path from the start cell to the goal cell, using the given heuristic.
+	 *
+	 * Populates the given iterator with the optimal path between the start cell and the goal.
 	 *
 	 * If the search fails for some reason, like exceeding the maxCost, returns
 	 * false. Otherwise returns true.
@@ -2064,6 +2099,11 @@ public:
 		return true;
 	}
 
+	/**
+	 * \brief Flush the raster data to the file.
+	 *
+	 * \param monitor An optional Monitor object.
+	 */
 	void flush(Monitor* monitor = nullptr) {
 
 		if(!m_ds || !props().writable())
@@ -2090,6 +2130,9 @@ public:
 		}
 	}
 
+	/**
+	 * \brief Destroy the raster.
+	 */
 	void destroy()  {
 
 		if(m_ds) {
@@ -2115,10 +2158,20 @@ public:
 		m_size = 0;
 	}
 
+	/**
+	 * \brief Return true if the raster is using file-backed mapped memory.
+	 *
+	 * \return True if the raster is using file-backed mapped memory.
+	 */
 	bool mapped() const {
 		return m_mapped;
 	}
 
+	/**
+	 * \brief Re-map the file into memory according to the given Interleave type.
+	 *
+	 * \param interleave The Interleave type.
+	 */
 	void remap(Interleave interleave) {
 
 		if(props().interleave() == interleave)
@@ -2149,7 +2202,7 @@ public:
 	}
 
 	/**
-	 * Vectorize the raster.
+	 * \brief Vectorize the raster.
 	 *
 	 * \param filename The filename of the output vector.
 	 * \param layerName The name of the output layer.
@@ -2191,7 +2244,7 @@ public:
 	}
 
 	/**
-	 * Vectorize the raster.
+	 * \brief Vectorize the raster.
 	 *
 	 * \param filename The filename of the output vector.
 	 * \param layerName The name of the output layer.
@@ -2386,22 +2439,22 @@ public:
 };
 
 /**
- * Used by flood fill to determine whether a pixel should be filled.
+ * \brief Used by flood fill to determine whether a pixel should be filled.
  * Identifies pixels that match a given value.
  */
 template <class T, class U>
 class G_DLL_EXPORT TargetFillOperator : public FillOperator<T, U> {
 private:
-	Grid<T>* m_src;
-	int m_srcBand;
-	Grid<U>* m_dst;
-	int m_dstBand;
-	T m_target;
-	U m_fill;
+	Grid<T>* m_src;		///<! The source grid.
+	int m_srcBand;		///<! The source band.
+	Grid<U>* m_dst;		///<! The destination grid.
+	int m_dstBand;		///<! The destination band.
+	T m_target;			///<! The target value.
+	U m_fill;			///<! The fill value.
 public:
 
 	/**
-	 * Construct a TargetFillOperator to fill a different raster.
+	 * \brief Construct a TargetFillOperator to fill a different raster.
 	 *
 	 * \param src The source raster.
 	 * \param dst The destination raster.
@@ -2416,7 +2469,7 @@ public:
 	}
 
 	/**
-	 * Construct a TargetFillOperator. To fill the same raster.
+	 * \brief Construct a TargetFillOperator. To fill the same raster.
 	 *
 	 * \param grd The source and destination raster.
 	 * \param srcBand The source band.
@@ -2431,7 +2484,7 @@ public:
 	}
 
 	/**
-	 * Return the source grid properties.
+	 * \brief Return the source grid properties.
 	 *
 	 * \return The source grid properties.
 	 */
@@ -2440,7 +2493,7 @@ public:
 	}
 
 	/**
-	 * Return the destination grid properties.
+	 * \brief Return the destination grid properties.
 	 *
 	 * \return The destination grid properties.
 	 */
@@ -2449,7 +2502,7 @@ public:
 	}
 
 	/**
-	 * Return true if the given cell should be filled.
+	 * \brief Return true if the given cell should be filled.
 	 *
 	 * \param col A column index.
 	 * \param row A row index.
@@ -2460,7 +2513,7 @@ public:
 	}
 
 	/**
-	 * Fill the given cell.
+	 * \brief Fill the given cell.
 	 *
 	 * \param col A column index.
 	 * \param row A row index.
@@ -2478,8 +2531,21 @@ public:
 
 namespace {
 
-	// Write to the file from the map of geometry lists.
-	// On each loop, extracts a single finalized poly ID and loads those polys for unioning.
+	/**
+	 * \brief Write to the file from the map of geometry lists.
+	 *
+	 * On each loop, extracts a single finalized poly ID and loads those polys for unioning.
+	 *
+	 * \param geoms The map of geometries.
+	 * \param finalIds The set of IDs that are ready for finalization.
+	 * \param idField The name of the field for storing IDs.
+	 * \param layer The OGRLayer for output.
+	 * \param gctx The GEOS context object.
+	 * \param removeHoles If true, removes holes from polygons.
+	 * \param removeDangles If true, removes degeneracies from the edges of polygons.
+	 * \param running If false, the operation is canceled.
+	 * \param cancel If true, the operation is cancelled.
+	 */
 	void polyWriteToFile(std::unordered_map<int, std::vector<GEOSGeometry*> >* geoms, std::set<int>* finalIds,
 			const std::string* idField, OGRLayer* layer, GEOSContextHandle_t* gctx,
 			bool removeHoles, bool removeDangles, bool* running, bool* cancel) {
@@ -2612,7 +2678,15 @@ namespace {
 		}
 	}
 
-	// Produce a rectangular polygon from the four corners.
+	/**
+	 * \brief Produce a rectangular polygon from the four corners.
+	 *
+	 * \param x0 The top left corner x-coordinate.
+	 * \param y0 The top left corner y-coordinate.
+	 * \param x1 The top left corner x-coordinate.
+	 * \param y1 The top left corner y-coordinate.
+	 * \param dims The number of dimensions.
+	 */
 	GEOSGeometry* polyMakeGeom(double x0, double y0, double x1, double y1, int dims) {
 
 		// Build the geometry.
@@ -2632,8 +2706,20 @@ namespace {
 		return poly;
 	}
 
-	// Make or open an OGR database to write the polygons to.
-	void polyMakeDataset(const std::string& filename, const std::string& driver, const std::string& layerName, const std::string& idField,
+	/**
+	 * \brief Make or open an OGR database to write the polygons to.
+	 *
+	 * \param filename The output filename.
+	 * \param driver The output driver.
+	 * \param layerName The layer name.
+	 * \param idField The field for the geometry ID.
+	 * \param sr The spatial reference object.
+	 * \param gType The geometry type.
+	 * \param ds The dataset.
+	 * \param layer the layer.
+	 */
+	void polyMakeDataset(const std::string& filename, const std::string& driver, const std::string& layerName,
+			const std::string& idField,
 			OGRSpatialReference* sr, OGRwkbGeometryType gType,
 			GDALDataset** ds, OGRLayer** layer) {
 
@@ -2678,7 +2764,13 @@ namespace {
 
 	}
 
-	// Produce a status message from the current and total row counds.
+	/**
+	 * \brief Produce a status message from the current and total row counds.
+	 *
+	 * \param r The current row.
+	 * \param rows The total number of rows.
+	 * \return The new status message.
+	 */
 	std::string polyRowStatus(int r, int rows) {
 		std::stringstream ss;
 		ss << "Polygonizing row " << (r + 1) << " of " << rows;
@@ -2692,17 +2784,18 @@ namespace {
 namespace {
 
 	/**
-	 * Parallel function for smoothing, called by smooth().
-	 * @param iter A pointer to a TileIterator.
-	 * @param smoothed The grid to contain smoothed output.
-	 * @param status The status object.
-	 * @param size The size of the kernel.
-	 * @param nodata The nodata value from the original raster.
-	 * @param weights A list of Gaussian weights.
-	 * @param rmtx The read mutex.
-	 * @param wmtx The write mutex.
-	 * @param cancel If set to true during operation, cancels the operation.
-	 * @param ex If the function terminates with an exception, this pointer should point to it.
+	 * \brief Parallel function for smoothing, called by smooth().
+	 *
+	 * \param iter A pointer to a TileIterator.
+	 * \param smoothed The grid to contain smoothed output.
+	 * \param status The status object.
+	 * \param size The size of the kernel.
+	 * \param nodata The nodata value from the original raster.
+	 * \param weights A list of Gaussian weights.
+	 * \param rmtx The read mutex.
+	 * \param wmtx The write mutex.
+	 * \param cancel If set to true during operation, cancels the operation.
+	 * \param ex If the function terminates with an exception, this pointer should point to it.
 	 */
 	template <class T>
 	void smooth(Grid<T>* source, Grid<T>* smoothed,
@@ -2765,6 +2858,12 @@ namespace {
 
 	using namespace geo::grid;
 
+	/**
+	 * \brief Return the number of bytes required to store each type.
+	 *
+	 * \param type The libgeo data type.
+	 * \return The number of bytes required to store each type.
+	 */
 	int getTypeSize(DataType type) {
 		switch(type) {
 		case DataType::Byte: return sizeof(uint8_t);
@@ -2779,6 +2878,12 @@ namespace {
 		}
 	}
 
+	/**
+	 * \brief Convert the libgeo data type to a GDAL data type.
+	 *
+	 * \param The libgeo data type.
+	 * \return type The GDAL data type.
+	 */
 	GDALDataType dataType2GDT(DataType type) {
 		switch(type) {
 		case DataType::Byte:  	return GDT_Byte;
@@ -2795,6 +2900,12 @@ namespace {
 		return GDT_Unknown;
 	}
 
+	/**
+	 * \brief Convert the GDAL data type to a libgeo data type.
+	 *
+	 * \param type The GDAL data type.
+	 * \return The libgeo data type.
+	 */
 	DataType gdt2DataType(GDALDataType type) {
 		switch(type) {
 		case GDT_Byte:	  	return DataType::Byte;
@@ -2816,6 +2927,14 @@ namespace {
 		return DataType::None;
 	}
 
+	/**
+	 * \brief Write typed data to the un-typed GDAL block.
+	 *
+	 * \param[out] block The block of GDAL-read data.
+	 * \param type The GDAL type of the source raster.
+	 * \param[in] value The typed output block.
+	 * \param idx The offset into the output buffer. (Already appropriate size for the type.)
+	 */
 	template <class T>
 	inline void writeToBlock(void *block, GDALDataType type, T value, int idx) {
 		switch (type) {
@@ -2846,6 +2965,14 @@ namespace {
 		}
 	}
 
+	/**
+	 * \brief Read typed data from the un-typed GDAL block.
+	 *
+	 * \param[in] block The block of GDAL-read data.
+	 * \param type The GDAL type of the source raster.
+	 * \param[out] value The typed output block.
+	 * \param idx The offset into the output buffer. (Already appropriate size for the type.)
+	 */
 	template <class T>
 	inline void readFromBlock(void* block, GDALDataType type, T* value, int idx) {
 		switch (type) {
