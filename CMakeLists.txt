@@ -121,17 +121,8 @@ if(${BUILD_APPS})
 	#file (GLOB FSRC src/fitpack/*.f)
 	#add_library (fitpack_mod SHARED ${FSRC}) 
 
-	# add_executable (polygonize src/apps/polygonize.cpp)
-	# target_link_libraries (polygonize geoutil geogrid ${Boost_LIBRARIES})
-
-	add_executable (pc2grid src/apps/pc2grid.cpp)
-	target_link_libraries (pc2grid geoutil geogrid geopc ${GEOS_LIBRARY})
-
 	# add_executable (pc2tile src/apps/pc2tile.cpp)
 	# target_link_libraries (pc2tile geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY} ${GEOS_LIBRARY})
-
-	add_executable (pcnorm src/apps/pcnorm.cpp)
-	target_link_libraries (pcnorm ${LIBLAS_LIBRARY})
 
 	# add_executable (pcperturb src/apps/pcperturb.cpp)
 	# target_link_libraries (pcperturb geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY})
@@ -142,8 +133,8 @@ if(${BUILD_APPS})
 	# add_executable (geoinfo src/apps/geoinfo.cpp)
 	# target_link_libraries (geoinfo geoutil ${GDAL_LIBRARY} ${LIBLAS_LIBRARY} ${JSONCPP_LIBRARY})
 
-	#add_executable (voidfill src/apps/voidfill.cpp)
-	#target_link_libraries (voidfill geoutil geogrid ${GDAL_LIBRARY})
+	# add_executable (voidfill src/apps/voidfill.cpp)
+	# target_link_libraries (voidfill geoutil geogrid ${GDAL_LIBRARY})
 
 	# add_executable (datumshift src/apps/datumshift.cpp)
 	# target_link_libraries (datumshift geoutil geogrid ${GDAL_LIBRARY} ${PROJ_LIBRARY})
@@ -151,29 +142,24 @@ if(${BUILD_APPS})
 	# add_executable (extmergesort src/apps/externalmergesort.cpp)
 	# target_link_libraries (extmergesort geoutil geopc ${LIBLAS_LIBRARY})
 
-	# add_executable (sbet2csv src/apps/sbet2csv.cpp)
-	# target_link_libraries (sbet2csv geoutil ${PROJ_LIBRARY})
-
 	# add_executable (groundassign src/apps/groundassign.cpp)
 	# target_link_libraries (groundassign ${LIBLAS_LIBRARY})
 
-	#add_executable (rastermatch src/apps/rastermatch.cpp)
-	#target_link_libraries (rastermatch geoutil geoann geogrid ${GEOS_LIBRARY} ${GDAL_LIBRARY})
+	# add_executable (rastermatch src/apps/rastermatch.cpp)
+	# target_link_libraries (rastermatch geoutil geoann geogrid ${GEOS_LIBRARY} ${GDAL_LIBRARY})
 
-	#add_executable (raster_test src/raster.cpp)
-	#target_link_libraries (raster_test geoutil geoann geogrid ${GEOS_LIBRARY} ${GDAL_LIBRARY})
+	# add_executable (raster_test src/raster.cpp)
+	# target_link_libraries (raster_test geoutil geoann geogrid ${GEOS_LIBRARY} ${GDAL_LIBRARY})
 
-	#add_executable (cloudmatch src/apps/cloudmatch.cpp)
-	#target_link_libraries (cloudmatch geoann ${Boost_LIBRARIES} ${GDAL_LIBRARY} ${PDAL_LIBRARIES} fitpack_mod)
+	# add_executable (cloudmatch src/apps/cloudmatch.cpp)
+	# target_link_libraries (cloudmatch geoann ${Boost_LIBRARIES} ${GDAL_LIBRARY} ${PDAL_LIBRARIES} fitpack_mod)
 
 	# add_executable (rbf src/tests/rbf.cpp)
 	# target_link_libraries (rbf)
-
-	# install(TARGETS pc2grid pc2tile rastermatch geopc geogrid geoinfo geoutil geoann RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
-	
-	install(TARGETS pc2grid pcnorm geoann geopc geogrid geoutil geodb RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
 	
 endif()
+
+install(TARGETS geoann geopc geogrid geoutil geodb RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
 
 if(${BUILD_TESTS})
 
