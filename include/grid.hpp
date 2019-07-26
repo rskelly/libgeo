@@ -2348,7 +2348,7 @@ public:
 			monitor->status((float) r / rows, polyRowStatus(r, rows));
 
 			// Load the row buffer.
-			getRow(r, band, buf);
+			getRow(r, band, buf.data());
 
 			// Initialize the corner coordinates.
 			double x0 = startX;
