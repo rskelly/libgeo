@@ -279,6 +279,7 @@ public:
 				if(m_files.find(idx) != m_files.end()) {
 					int ct = m_counts[idx];
 					int fd = m_files[idx];
+					lseek(fd, 0, SEEK_SET);
 					for(int i = 0; i < ct; ++i) {
 						read(fd, &pt0, sizeof(T));
 						if(std::pow(pt.x() - pt0.x(), 2.0) + std::pow(pt.y() - pt0.y(), 2.0) <= radius * radius) {
