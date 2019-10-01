@@ -98,7 +98,7 @@ Rasterizer::Rasterizer(const std::vector<std::string> filenames) :
 	m_filter(nullptr),
 	m_thin(0),
 	m_nodata(-9999),
-	m_limit(0),
+	m_memMode(false),
 	m_scale(1) {
 	for(const std::string& filename : filenames)
 		m_files.emplace_back(filename);
@@ -188,8 +188,8 @@ void Rasterizer::setNoData(double nodata) {
 	m_nodata = nodata;
 }
 
-void Rasterizer::setMemLimit(size_t limit) {
-	m_limit = limit;
+void Rasterizer::setMemMode(bool memMode) {
+	m_memMode = memMode;
 }
 
 void Rasterizer::setScale(double scale) {
@@ -296,7 +296,6 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 			}
 		}
 	}
-	tree.build();
 	g_trace(" " << tree.size() << " points added to tree.");
 
 	// Prepare the final output raster.

@@ -27,99 +27,6 @@ using namespace geo::util;
 namespace geo {
 namespace ds {
 
-/*
-class lrunode {
-public:
-	int fd;
-	size_t idx;
-	lrunode* next;
-	lrunode* prev;
-	lrunode(size_t idx) :
-		fd(0), idx(idx), next(nullptr), prev(nullptr) {}
-
-	int open() {
-		if(!fd) {
-			if(!(fd = ::open("/tmp", O_TMPFILE|O_RDWR|O_EXCL)))
-				g_runerr("Failed to open temp file for mqtree.");
-		}
-		return fd;
-	}
-
-	void close() {
-		::close(fd);
-		fd = 0;
-	}
-
-	~lrunode() {
-		close();
-	}
-};
-
-class lru {
-private:
-	std::unordered_map<size_t, lrunode*> m_nodes;
-	int m_size;
-	lrunode* m_first;
-	lrunode* m_last;
-public:
-	lru(int size) :
-		m_size(size),
-		m_first(nullptr), m_last(nullptr) {
-		if(size <= 0)
-			g_runerr("Size must be > 0.");
-	}
-
-	int get(size_t idx) {
-		int fd = 0;
-		if(m_nodes.find(idx) != m_nodes.end()) {
-			lrunode* tmp = m_nodes[idx];
-			if(tmp != m_last) {
-				if(tmp->next)
-					tmp->next->prev = tmp->prev;
-				if(tmp->prev)
-					tmp->prev->next = tmp->next;
-				tmp->prev = m_last;
-				tmp->next = nullptr;
-				m_last->next = tmp;
-				m_last = tmp;
-			}
-			fd = tmp->open();
-		} else {
-			lrunode* tmp = nullptr;
-			if(m_nodes.size() > m_size) {
-				tmp = m_first;
-				m_first = tmp->next;
-				m_first->prev = nullptr;
-				m_nodes.erase(idx);
-				tmp->close();
-			}
-			if(tmp) {
-				tmp->idx = idx;
-			} else {
-				tmp = m_nodes[idx] = new lrunode(idx);
-			}
-			tmp->next = nullptr;
-			tmp->prev = m_last;
-			m_last->next = tmp;
-			m_last = tmp;
-			fd = tmp->open();
-		}
-		return fd;
-	}
-
-	~lru() {
-		lrunode* tmp = m_first, *next;
-		while(tmp) {
-			next = tmp->next;
-			delete tmp;
-			tmp = next;
-		}
-	}
-
-};
-*/
-
-
 /**
  * A file-backed qtree.
  *
@@ -129,6 +36,12 @@ public:
  */
 template <class T>
 class mqtree {
+public:
+	enum Mode {
+		Memory,
+		File
+	};
+
 private:
 
 	double m_minx, m_miny;				///<! The minimum x and y coordinates. Used for shifting coordinates.
@@ -137,10 +50,11 @@ private:
 	double m_tileSize;					///<! The tile size required to achieve the tile count given the data extent.
 	int m_cols;
 	int m_rows;
-	std::unordered_map<size_t, int> m_files;	///<! File descriptors of temporary files.
-	std::unordered_map<size_t, int> m_counts;	///<! Number of points in each file.
+	std::unordered_map<size_t, int> m_files;			///<! File descriptors of temporary files. For file mode.
+	std::unordered_map<size_t, std::vector<T>> m_mem;	///<! Vectors for items. For memory mode.
+	std::unordered_map<size_t, int> m_counts;			///<! Number of points in each file.
 	int m_size;
-	//lru m_open;							///<! LRU cache of open files.
+	Mode m_mode;										///<! Mode.
 
 public:
 
@@ -155,11 +69,11 @@ public:
 	 * \param miny The maximum y coordinate.
 	 * \param maxTiles the maximum number of tiles, or files, created to store blocks of points.
 	 */
-	mqtree<T>(double minx, double miny, double maxx, double maxy, int tileCount) :
+	mqtree<T>(double minx, double miny, double maxx, double maxy, int tileCount, Mode mode = Memory) :
 		m_minx(minx), m_miny(miny),
 		m_maxx(maxx), m_maxy(maxy),
 		m_tileCount(tileCount),
-		m_size(0) {
+		m_size(0), m_mode(mode) {
 
 		double w = m_maxx - m_minx;
 		double h = m_maxy - m_miny;
@@ -178,21 +92,20 @@ public:
 		int col = (int) (item.x() - m_minx) / (m_maxx - m_minx) * m_cols;
 		int row = (int) (item.y() - m_miny) / (m_maxy - m_miny) * m_rows;
 		size_t idx = row * m_cols + col;
-		if(m_files.find(idx) == m_files.end()) {
+		if(m_mode == File && m_files.find(idx) == m_files.end()) {
 			if(!(m_files[idx] = open("/tmp", O_TMPFILE|O_RDWR|O_EXCL)))
 				g_runerr("Failed to open temp file for mqtree.");
 			m_counts[idx] = 0;
 		}
 		//lseek(m_files[idx], m_counts[idx], SEEK_SET);
-		if(!write(m_files[idx], &item, sizeof(T)))
-			g_runerr("Failed to write item in qtree.");
+		if(m_mode == File) {
+			if(!write(m_files[idx], &item, sizeof(T)))
+				g_runerr("Failed to write item in qtree.");
+		} else {
+			m_mem[idx].push_back(item);
+		}
 		++m_counts[idx];
 		++m_size;
-	}
-
-	void build() {
-		for(auto& it : m_files)
-			lseek(it.second, 0, SEEK_SET);
 	}
 
 	/**
@@ -209,9 +122,13 @@ public:
 	 * Clear the tree and remove all items.
 	 */
 	void clear() {
-		for(auto& it : m_files) {
-			close(it.second);
-			it.second = 0;
+		if(m_mode == File) {
+			for(auto& it : m_files) {
+				close(it.second);
+				it.second = 0;
+			}
+		} else {
+			m_mem.clear();
 		}
 		m_size = 0;
 	}
@@ -276,14 +193,24 @@ public:
 		for(int r = row0; r <= row1; ++r) {
 			for(int c = col0; c <= col1; ++c) {
 				size_t idx = r * m_cols + c;
-				if(m_files.find(idx) != m_files.end()) {
-					int ct = m_counts[idx];
-					int fd = m_files[idx];
-					lseek(fd, 0, SEEK_SET);
-					for(int i = 0; i < ct; ++i) {
-						read(fd, &pt0, sizeof(T));
-						if(std::pow(pt.x() - pt0.x(), 2.0) + std::pow(pt.y() - pt0.y(), 2.0) <= radius * radius) {
-							*piter = pt0;
+				if(m_mode == File) {
+					if(m_files.find(idx) != m_files.end()) {
+						int ct = m_counts[idx];
+						int fd = m_files[idx];
+						lseek(fd, 0, SEEK_SET);
+						for(int i = 0; i < ct; ++i) {
+							read(fd, &pt0, sizeof(T));
+							if(std::pow(pt.x() - pt0.x(), 2.0) + std::pow(pt.y() - pt0.y(), 2.0) <= radius * radius) {
+								*piter = pt0;
+								++piter;
+								++count;
+							}
+						}
+					}
+				} else {
+					for(const T& p : m_mem[idx]) {
+						if(std::pow(pt.x() - p.x(), 2.0) + std::pow(pt.y() - p.y(), 2.0) <= radius * radius) {
+							*piter = p;
 							++piter;
 							++count;
 						}
@@ -298,7 +225,6 @@ public:
 	~mqtree() {
 		clear();
 	}
-
 
 };
 

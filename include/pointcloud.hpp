@@ -753,7 +753,7 @@ private:
 	PCPointFilter* m_filter;
 	int m_thin;
 	double m_nodata;
-	size_t m_limit;						///<! The memory threshold (bytes) that triggers the use of file-backed storage. Otherwise RAM is used.
+	bool m_memMode;						///<! If true, use memory-backed storage instead of file.
 	double m_scale;
 
 	// Used by finalizer.
@@ -822,12 +822,11 @@ public:
 	void setNoData(double nodata);
 
 	/**
-	 * The memory usage limit of data items which will trigger the use
-	 * of file-backed memory.
+	 * If true, uses memory mode instead of files.
 	 *
-	 * \param limit The memory limit (bytes).
+	 * \param memMode True to use memory mode.
 	 */
-	void setMemLimit(size_t limit);
+	void setMemMode(bool memMode);
 
 	/**
 	 * Set the scale. Converts coordinates to integers, retaining a fixed amount of precision.
