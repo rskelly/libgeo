@@ -93,7 +93,7 @@ public:
 		int row = (int) (item.y() - m_miny) / (m_maxy - m_miny) * m_rows;
 		size_t idx = row * m_cols + col;
 		if(m_mode == File && m_files.find(idx) == m_files.end()) {
-			if(!(m_files[idx] = open("/tmp", O_TMPFILE|O_RDWR|O_EXCL)))
+			if(!(m_files[idx] = open("/tmp", O_TMPFILE|O_RDWR|O_EXCL, S_IRWXU)))
 				g_runerr("Failed to open temp file for mqtree.");
 			m_counts[idx] = 0;
 		}

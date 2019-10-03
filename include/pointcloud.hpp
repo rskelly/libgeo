@@ -754,7 +754,6 @@ private:
 	int m_thin;
 	double m_nodata;
 	bool m_memMode;						///<! If true, use memory-backed storage instead of file.
-	double m_scale;
 
 	// Used by finalizer.
 	std::vector<std::unique_ptr<Computer> > m_computers;
@@ -827,13 +826,6 @@ public:
 	 * \param memMode True to use memory mode.
 	 */
 	void setMemMode(bool memMode);
-
-	/**
-	 * Set the scale. Converts coordinates to integers, retaining a fixed amount of precision.
-	 *
-	 * \param scale The scale.
-	 */
-	void setScale(double scale);
 
 	/**
 	 * Set a point filter to use for filtering points. Removes the old filter.

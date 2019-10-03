@@ -29,16 +29,6 @@ using namespace geo::ds;
 using namespace geo::pc::compute;
 using namespace geo::pc::sort;
 
-namespace {
-
-	void checkScale(double* bounds, double scale) {
-		if((int) ((bounds[2] - bounds[0]) * scale) >= (1 << 15))
-			g_runerr("Scale value is too high: " << scale);
-		if((int) ((bounds[3] - bounds[1]) * scale) >= (1 << 15))
-			g_runerr("Scale value is too high: " << scale);
-	}
-}
-
 const std::unordered_map<std::string, std::string> computerNames = {
 		{"min", "The minimum value"},
 		{"max", "The maximum value"},
@@ -98,8 +88,7 @@ Rasterizer::Rasterizer(const std::vector<std::string> filenames) :
 	m_filter(nullptr),
 	m_thin(0),
 	m_nodata(-9999),
-	m_memMode(false),
-	m_scale(1) {
+	m_memMode(false) {
 	for(const std::string& filename : filenames)
 		m_files.emplace_back(filename);
 }
@@ -192,10 +181,6 @@ void Rasterizer::setMemMode(bool memMode) {
 	m_memMode = memMode;
 }
 
-void Rasterizer::setScale(double scale) {
-	m_scale = scale;
-}
-
 void Rasterizer::setFilter(PCPointFilter* filter) {
 	m_filter = filter;
 }
@@ -251,8 +236,6 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 		}
 	}
 
-	checkScale(bounds, m_scale);
-
 	// "Fix" the bounds so they align with the resolution, and are oriented correctly.
 	g_trace("Fixing bounds ")
 	fixBounds(bounds, resX, resY, easting, northing);
@@ -286,6 +269,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	// Add the points to the qtree. Note the scale must be chosen carefully.
 	g_trace("Adding files to tree");
 	{
+		size_t pts = 0;
 		geo::pc::Point pt;
 		for(PCFile& f: m_files) {
 			for(const std::string& fn : f.filenames())
@@ -293,6 +277,8 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 			f.init(useHeader);
 			while(f.next(pt)) {
 				tree.add(pt);
+				if(++pts % 10000000 == 0)
+					std::cout << pts << "pts\n";
 			}
 		}
 	}
