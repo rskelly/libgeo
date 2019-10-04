@@ -19,7 +19,6 @@
 #include "pointcloud.hpp"
 #include "pc_computer.hpp"
 #include "grid.hpp"
-#include "ds/kdtree.hpp"
 #include "util.hpp"
 
 using namespace geo::grid;

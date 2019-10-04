@@ -19,6 +19,7 @@
 #include <iterator>
 #include <unordered_map>
 #include <unordered_set>
+#include <list>
 
 #include "geo.hpp"
 #include "util.hpp"
@@ -35,19 +36,18 @@ public:
 	std::vector<T> cache;
 	lrunode* left;
 	lrunode* right;
-	size_t idx;
+	std::string path;
 
-	void load(size_t idx) {
-		if(idx == this->idx)
+	void load(const std::string& path) {
+		if(path == this->path)
 			return;
 
-		this->idx = idx;
+		this->path = path;
 
 		int handle, pos;
-		size_t size = cache.size();
-		std::string file = "/tmp/" + std::to_string(idx);
+		size_t size;
 
-		if((handle = open(file.c_str(), O_RDONLY|O_EXCL, S_IRWXU)) > 0) {
+		if((handle = open(path.c_str(), O_RDONLY|O_EXCL, S_IRWXU)) > 0) {
 			if((pos = lseek(handle, 0, SEEK_END)) > 0) {
 				lseek(handle, 0, SEEK_SET);
 				if(read(handle, &size, sizeof(size_t)) > 0) {
@@ -71,9 +71,8 @@ public:
 
 		int handle, pos;
 		size_t size = cache.size();
-		std::string file = "/tmp/" + std::to_string(idx);
 
-		if((handle = open(file.c_str(), O_WRONLY|O_EXCL|O_CREAT|O_TRUNC, S_IRWXU)) > -1) {
+		if((handle = open(path.c_str(), O_WRONLY|O_EXCL|O_CREAT|O_TRUNC, S_IRWXU)) > -1) {
 
 			if(!write(handle, &size, sizeof(size_t)))
 				std::cerr << "Failed to write cache size.\n";
@@ -90,12 +89,15 @@ public:
 };
 
 template <class T>
+class mqnode;
+
+template <class T>
 class lru {
 private:
 	lrunode<T>* m_first;
 	lrunode<T>* m_last;
-	std::unordered_map<size_t, lrunode<T>*> m_nodes;
-	std::unordered_set<size_t> m_idxs;
+	std::unordered_map<std::string, lrunode<T>*> m_nodes;
+	std::unordered_set<std::string> m_files;
 	size_t m_size;
 
 	void movelast(lrunode<T>* node) {
@@ -115,42 +117,194 @@ private:
 
 public:
 
-	lru(size_t size = 1000) :
+	lru(size_t size = 10) :
 		m_first(nullptr), m_last(nullptr),
 		m_size(size) {
 	}
 
-	std::vector<T>& cache(size_t idx) {
-		m_idxs.insert(idx);
+	std::vector<T>& cache(mqnode<T>* node) {
+		const std::string& path = node->path();
 		lrunode<T>* n = nullptr;
-		if(m_nodes.find(idx) != m_nodes.end()) {
-			n = m_nodes[idx];
+		if(m_nodes.find(path) != m_nodes.end()) {
+			n = m_nodes[path];
 		} else if(m_nodes.size() < m_size) {
 			n = new lrunode<T>();
-			m_nodes[idx] = n;
-			n->load(idx);
+			m_nodes[path] = n;
+			n->load(path);
 		} else {
 			n = m_first;
 			n->flush();
-			n->load(idx);
+			m_nodes.erase(n->path);
+			m_nodes[n->path] = n;
+			n->load(path);
 		}
 		if(n != m_last)
 			movelast(n);
 		return n->cache;
 	}
 
+	void remove(mqnode<T>* node) {
+		util::rem(node->path());
+	}
+
 	void clear() {
-		for(const size_t& idx : m_idxs) {
-			std::string file = "/tmp/" + std::to_string(idx);
-			util::rem(file);
-		}
+		for(const std::string& path: m_files)
+			util::rem(path);
+		m_files.clear();
 		for(auto& it : m_nodes)
 			delete it.second;
+		m_nodes.clear();
 	}
 
 	~lru() {
 		clear();
 	}
+};
+
+template <class T>
+class mqtree;
+
+template <class T>
+class mqnode {
+public:
+	lru<T>* m_cache;
+	mqnode* m_parent;
+	double m_bounds[4];
+	double m_midx;
+	double m_midy;
+	mqnode* m_nodes[4];
+	int m_depth;
+	size_t m_maxSize;
+	int m_maxDepth;
+	char m_idx;
+	bool m_split;
+	std::string m_path;
+	size_t m_size;
+
+	mqnode(char idx, double minx, double miny, double maxx, double maxy,
+			int depth, size_t maxSize, int maxDepth,
+			mqnode<T>* parent, lru<T>* cache) :
+		m_cache(cache), m_parent(parent),
+		m_depth(depth), m_maxSize(maxSize), m_maxDepth(maxDepth),
+		m_idx(idx), m_split(false),
+		m_size(0) {
+
+		m_midx = (minx + maxx) / 2.0;
+		m_midy = (miny + maxy) / 2.0;
+		m_bounds[0] = minx;
+		m_bounds[1] = miny;
+		m_bounds[2] = maxx;
+		m_bounds[3] = maxy;
+		for(int i = 0; i < 4; ++i)
+			m_nodes[i] = nullptr;
+	}
+
+	const std::string& path() {
+		if(m_path.empty()) {
+			std::list<int> ids;
+			mqnode* n = this;
+			while(n) {
+				ids.push_back(n->m_idx);
+				n = n->m_parent;
+			}
+			std::reverse(ids.begin(), ids.end());
+			std::stringstream ss;
+			for(int id : ids)
+				ss << "_" << id;
+			m_path = "/tmp/tree" + ss.str();
+		}
+		return m_path;
+	}
+
+	void add(const T& item) {
+		if(m_split) {
+			node(idx(item))->add(item);
+			++m_size;
+		} else if(m_size >= m_maxSize && m_depth < m_maxDepth) {
+			split();
+			node(idx(item))->add(item);
+			++m_size;
+		} else {
+			m_cache->cache(this).push_back(item);
+			++m_size;
+		}
+	}
+
+	size_t size() const {
+		return m_size;
+	}
+
+	char idx(const T& item) {
+		return ((char) (item.x() >= m_midx) << 1) | (char) (item.y() >= m_midy);
+	}
+
+	mqnode<T>* node(char i) {
+		char ix = i >> 1;
+		char iy = i & 1;
+		mqnode* n;
+		if(!(n = m_nodes[i])) {
+			n = m_nodes[i] = new mqnode(i,
+					ix ? m_midx : m_bounds[0],
+					iy ? m_midy : m_bounds[1],
+					ix ? m_bounds[2] : m_midx,
+					iy ? m_bounds[3] : m_midy,
+					m_depth + 1, m_maxSize, m_maxDepth,
+					this, m_cache
+			);
+		}
+		return n;
+	}
+
+	void split() {
+		std::vector<T>& c = m_cache->cache(this);
+		for(T& item : c)
+			node(idx(item))->add(item);
+		// m_cache->remove(this);
+		m_split = true;
+	}
+
+	bool contains(const T& item, double radius = 0) {
+		return (item.x() + radius) >= m_bounds[0] && (item.x() - radius) < m_bounds[2] &&
+				(item.y() + radius) >= m_bounds[1] && (item.y() - radius) < m_bounds[3];
+	}
+
+	void clear() {
+		for(char i = 0; i < 4; ++i) {
+			if(m_nodes[i])
+				m_nodes[i]->clear();
+		}
+		m_cache->remove(this);
+	}
+
+	template <class TIter>
+	size_t search(const T& pt, double radius, TIter& piter) {
+		size_t count = 0;
+		if(contains(pt, radius)) {
+			if(m_split) {
+				for(char i = 0; i < 4; ++i) {
+					if(m_nodes[i])
+						count += m_nodes[i]->search(pt, radius, piter);
+				}
+			} else {
+				for(const T& item : m_cache->cache(this)) {
+					if(std::pow(item.x() - pt.x(), 2.0) + std::pow(item.y() - pt.y(), 2.0) <= radius * radius) {
+						*piter = item;
+						++piter;
+						++count;
+					}
+				}
+			}
+		}
+		return count;
+	}
+
+	~mqnode() {
+		for(char i = 0; i < 4; ++i) {
+			if(m_nodes[i])
+				delete m_nodes[i];
+		}
+	}
+
 };
 
 /**
@@ -172,15 +326,14 @@ private:
 
 	double m_minx, m_miny;				///<! The minimum x and y coordinates. Used for shifting coordinates.
 	double m_maxx, m_maxy;				///<! The minimum x and y coordinates. Used for shifting coordinates.
-	int m_tileCount;					///<! The number of tiles, or files that can be created to store blocks of points.
+	int m_maxDepth;						///<! The maximum tree depth.
 	double m_tileSize;					///<! The tile size required to achieve the tile count given the data extent.
-	int m_cols;
-	int m_rows;
 	std::unordered_map<size_t, std::vector<T>> m_mem;	///<! Vectors for items. For memory mode.
 	std::unordered_map<size_t, int> m_counts;			///<! Number of points in each file.
 	int m_size;
 	Mode m_mode;										///<! Mode.
 	lru<T> m_lru;
+	mqnode<T>* m_root;
 
 	/**
 	 * Get the cache object associated with the index.
@@ -206,20 +359,24 @@ public:
 	 * \param miny The minimum y coordinate.
 	 * \param minx The maximum x coordinate.
 	 * \param miny The maximum y coordinate.
-	 * \param maxTiles the maximum number of tiles, or files, created to store blocks of points.
+	 * \param maxDepth The maximum depth of the tree. Zero is no limit.
+	 * \param mode Determines whether file-backed storage is used, or memory.
 	 */
-	mqtree<T>(double minx, double miny, double maxx, double maxy, int tileCount, Mode mode = Memory) :
+	mqtree<T>(double minx, double miny, double maxx, double maxy, int maxDepth = 0, Mode mode = Memory) :
 		m_minx(minx), m_miny(miny),
 		m_maxx(maxx), m_maxy(maxy),
-		m_tileCount(tileCount),
+		m_maxDepth(maxDepth),
 		m_size(0), m_mode(mode) {
 
 		double w = m_maxx - m_minx;
 		double h = m_maxy - m_miny;
-		m_tileSize = std::max(w / std::sqrt(m_tileCount), h / std::sqrt(m_tileCount));
-		m_cols = (int) std::ceil(w / m_tileSize);
-		m_rows = (int) std::ceil(h / m_tileSize);
-		m_tileCount = m_cols * m_rows;
+		if(w < h) {
+			w = h;
+		} else {
+			h = w;
+		}
+		m_tileSize = std::max(m_maxx - m_minx, m_maxy - m_miny);
+		m_root = new mqnode<T>(0, m_minx, m_miny, m_minx + m_tileSize, m_miny + m_tileSize, 0, 10000, 10, nullptr, &m_lru);
 	}
 
 	/**
@@ -228,14 +385,7 @@ public:
 	 * \param item An item.
 	 */
 	void add(const T& item) {
-		if(!contains(item.x(), item.y()))
-			return;
-		int col = (int) (item.x() - m_minx) / (m_maxx - m_minx) * m_cols;
-		int row = (int) (item.y() - m_miny) / (m_maxy - m_miny) * m_rows;
-		size_t idx = row * m_cols + col;
-		cache(idx).push_back(item);
-		++m_counts[idx];
-		++m_size;
+		m_root->add(item);
 	}
 
 	/**
@@ -252,12 +402,7 @@ public:
 	 * Clear the tree and remove all items.
 	 */
 	void clear() {
-		if(m_mode == File) {
-			m_lru.clear();
-		} else {
-			m_mem.clear();
-		}
-		m_size = 0;
+		m_root->clear();
 	}
 
 	/**
@@ -269,8 +414,8 @@ public:
 	 * \param y The y coordinate.
 	 * \return True if the tree contains the point within the radius.
 	 */
-	bool contains(double x, double y, double radius = 0) {
-		return (x >= m_minx - radius && x <= m_maxx + radius && y >= m_miny - radius && y <= m_maxy + radius);
+	bool contains(const T& item, double radius = 0) {
+		return m_root->contains(item, radius);
  	}
 
 	/**
@@ -279,7 +424,7 @@ public:
 	 * \return The number of items in the tree.
 	 */
 	size_t size() const {
-		return m_size;
+		return m_root->size();
 	}
 
 	/**
@@ -305,35 +450,13 @@ public:
 	 * \return The number of items found.
 	 */
 	template <class TIter>
-	size_t search(const T& pt, double radius, TIter piter) {
-
-		int rr = (int) std::ceil(radius / m_tileSize);
-		int col = (int) (pt.x() - m_minx) / (m_maxx - m_minx) * m_cols;
-		int row = (int) (pt.y() - m_miny) / (m_maxy - m_miny) * m_rows;
-		int col0 = std::max(0, col - rr);
-		int col1 = std::min(m_cols - 1, col + rr);
-		int row0 = std::max(0, row - rr);
-		int row1 = std::min(m_rows - 1, row + rr);
-
-		size_t count = 0;
-		for(int r = row0; r <= row1; ++r) {
-			for(int c = col0; c <= col1; ++c) {
-				size_t idx = r * m_cols + c;
-				for(const T& p : cache(idx)) {
-					if(std::pow(pt.x() - p.x(), 2.0) + std::pow(pt.y() - p.y(), 2.0) <= radius * radius) {
-						*piter = p;
-						++piter;
-						++count;
-					}
-				}
-			}
-		}
-
-		return count;
+	size_t search(const T& pt, double radius, TIter& piter) {
+		return m_root->search(pt, radius, piter);
 	}
 
 	~mqtree() {
-		clear();
+		m_lru.clear();
+		delete m_root;
 	}
 
 };
