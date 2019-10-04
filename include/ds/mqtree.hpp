@@ -89,6 +89,10 @@ public:
 	 * \param item An item.
 	 */
 	void add(const T& item) {
+
+		if(!contains(item.x(), item.y()))
+			return;
+
 		int col = (int) (item.x() - m_minx) / (m_maxx - m_minx) * m_cols;
 		int row = (int) (item.y() - m_miny) / (m_maxy - m_miny) * m_rows;
 		size_t idx = row * m_cols + col;

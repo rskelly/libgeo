@@ -754,6 +754,7 @@ private:
 	int m_thin;
 	double m_nodata;
 	bool m_memMode;						///<! If true, use memory-backed storage instead of file.
+	double m_bounds[4];					///<! If bounds are given, this contains them. BLX, BLY, TRX, TRY.
 
 	// Used by finalizer.
 	std::vector<std::unique_ptr<Computer> > m_computers;
@@ -839,6 +840,13 @@ public:
 	 * \return A pointer to the PointFilter.
 	 */
 	PCPointFilter* filter() const;
+
+	/**
+	 * \brief Assign the projected bounds for the output raster. minx, miny, maxx, maxy.
+	 *
+	 * \param bounds The projected bounds for the output raster. minx, miny, maxx, maxy.
+	 */
+	void setBounds(double* bounds);
 
 	/**
 	 * Destroy the Rasterizer.

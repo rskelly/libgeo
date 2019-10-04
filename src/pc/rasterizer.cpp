@@ -18,7 +18,6 @@
 
 #include "pointcloud.hpp"
 #include "pc_computer.hpp"
-#include "externalmergesort.hpp"
 #include "grid.hpp"
 #include "ds/kdtree.hpp"
 #include "util.hpp"
@@ -27,7 +26,6 @@ using namespace geo::grid;
 using namespace geo::pc;
 using namespace geo::ds;
 using namespace geo::pc::compute;
-using namespace geo::pc::sort;
 
 const std::unordered_map<std::string, std::string> computerNames = {
 		{"min", "The minimum value"},
@@ -89,6 +87,10 @@ Rasterizer::Rasterizer(const std::vector<std::string> filenames) :
 	m_thin(0),
 	m_nodata(-9999),
 	m_memMode(false) {
+
+	for(size_t i = 0; i < 4; ++i)
+		m_bounds[i] = std::nan("");
+
 	for(const std::string& filename : filenames)
 		m_files.emplace_back(filename);
 }
@@ -117,10 +119,17 @@ double Rasterizer::density(double resolution, double radius) {
 	return (sum / count) * 1.5 * cell;
 }
 
-void fixBounds(double* bounds, double resX, double resY, double& easting, double& northing) {
+void fixBounds(double* bounds, double resX, double resY, double& easting, double& northing, double* rasterBounds) {
 
 	double rx = std::abs(resX);
 	double ry = std::abs(resY);
+
+	// If the raster bounds are given, use 'em.
+	if(!std::isnan(rasterBounds[0])) {
+		g_debug("Using given raster bounds");
+		for(size_t i = 0; i < 4; ++i)
+			bounds[i] = rasterBounds[i];
+	}
 
 	double xmin = std::floor(std::min(bounds[0], bounds[2]) / rx) * rx;
 	double ymin = std::floor(std::min(bounds[1], bounds[3]) / ry) * ry;
@@ -189,6 +198,11 @@ PCPointFilter* Rasterizer::filter() const {
 	return m_filter;
 }
 
+void Rasterizer::setBounds(double* bounds) {
+	for(size_t i = 0; i < 4; ++i)
+		m_bounds[i] = bounds[i];
+}
+
 Rasterizer::~Rasterizer() {
 }
 
@@ -237,8 +251,9 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	}
 
 	// "Fix" the bounds so they align with the resolution, and are oriented correctly.
+	// Constrain to the given bounds if set.
 	g_trace("Fixing bounds ")
-	fixBounds(bounds, resX, resY, easting, northing);
+	fixBounds(bounds, resX, resY, easting, northing, m_bounds);
 	g_trace(" bounds: " << bounds[0] << ", " << bounds[1] << "; " << bounds[2] << ", " << bounds[3])
 
 	mqtree<geo::pc::Point> tree(std::min(bounds[0], bounds[2]), std::min(bounds[1], bounds[3]),
