@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <iterator>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "geo.hpp"
 #include "util.hpp"
@@ -26,6 +27,131 @@ using namespace geo::util;
 
 namespace geo {
 namespace ds {
+
+template <class T>
+class lrunode {
+public:
+
+	std::vector<T> cache;
+	lrunode* left;
+	lrunode* right;
+	size_t idx;
+
+	void load(size_t idx) {
+		if(idx == this->idx)
+			return;
+
+		this->idx = idx;
+
+		int handle, pos;
+		size_t size = cache.size();
+		std::string file = "/tmp/" + std::to_string(idx);
+
+		if((handle = open(file.c_str(), O_RDONLY|O_EXCL, S_IRWXU)) > 0) {
+			if((pos = lseek(handle, 0, SEEK_END)) > 0) {
+				lseek(handle, 0, SEEK_SET);
+				if(read(handle, &size, sizeof(size_t)) > 0) {
+					cache.resize(size);
+					read(handle, cache.data(), size * sizeof(T));
+				}
+			}
+			close(handle);
+
+		} else {
+
+			cache.resize(0);
+
+		}
+	}
+
+	void flush() {
+
+		if(cache.empty())
+			return;
+
+		int handle, pos;
+		size_t size = cache.size();
+		std::string file = "/tmp/" + std::to_string(idx);
+
+		if((handle = open(file.c_str(), O_WRONLY|O_EXCL|O_CREAT|O_TRUNC, S_IRWXU)) > -1) {
+
+			if(!write(handle, &size, sizeof(size_t)))
+				std::cerr << "Failed to write cache size.\n";
+			if(!write(handle, cache.data(), size * sizeof(T)))
+				std::cerr << "Failed to write cache.\n";
+			close(handle);
+
+		}
+
+		cache.resize(0);
+
+	}
+
+};
+
+template <class T>
+class lru {
+private:
+	lrunode<T>* m_first;
+	lrunode<T>* m_last;
+	std::unordered_map<size_t, lrunode<T>*> m_nodes;
+	std::unordered_set<size_t> m_idxs;
+	size_t m_size;
+
+	void movelast(lrunode<T>* node) {
+		if(!m_last) {
+			m_first = m_last = node;
+		} else if(node != m_last) {
+			if(node->left)
+				node->left->right = node->right;
+			if(node->right)
+				node->right->left = node->left;
+			m_last->right = node;
+			node->left = m_last;
+			node->right = nullptr;
+			m_last = node;
+		}
+	}
+
+public:
+
+	lru(size_t size = 1000) :
+		m_first(nullptr), m_last(nullptr),
+		m_size(size) {
+	}
+
+	std::vector<T>& cache(size_t idx) {
+		m_idxs.insert(idx);
+		lrunode<T>* n = nullptr;
+		if(m_nodes.find(idx) != m_nodes.end()) {
+			n = m_nodes[idx];
+		} else if(m_nodes.size() < m_size) {
+			n = new lrunode<T>();
+			m_nodes[idx] = n;
+			n->load(idx);
+		} else {
+			n = m_first;
+			n->flush();
+			n->load(idx);
+		}
+		if(n != m_last)
+			movelast(n);
+		return n->cache;
+	}
+
+	void clear() {
+		for(const size_t& idx : m_idxs) {
+			std::string file = "/tmp/" + std::to_string(idx);
+			util::rem(file);
+		}
+		for(auto& it : m_nodes)
+			delete it.second;
+	}
+
+	~lru() {
+		clear();
+	}
+};
 
 /**
  * A file-backed qtree.
@@ -50,11 +176,24 @@ private:
 	double m_tileSize;					///<! The tile size required to achieve the tile count given the data extent.
 	int m_cols;
 	int m_rows;
-	std::unordered_map<size_t, int> m_files;			///<! File descriptors of temporary files. For file mode.
 	std::unordered_map<size_t, std::vector<T>> m_mem;	///<! Vectors for items. For memory mode.
 	std::unordered_map<size_t, int> m_counts;			///<! Number of points in each file.
 	int m_size;
 	Mode m_mode;										///<! Mode.
+	lru<T> m_lru;
+
+	/**
+	 * Get the cache object associated with the index.
+	 *
+	 * Return file-backed or memory version depending on mode.
+	 */
+	std::vector<T>& cache(size_t idx) {
+		if(m_mode == File) {
+			return m_lru.cache(idx);
+		} else {
+			return m_mem[idx];
+		}
+	}
 
 public:
 
@@ -89,21 +228,12 @@ public:
 	 * \param item An item.
 	 */
 	void add(const T& item) {
+		if(!contains(item.x(), item.y()))
+			return;
 		int col = (int) (item.x() - m_minx) / (m_maxx - m_minx) * m_cols;
 		int row = (int) (item.y() - m_miny) / (m_maxy - m_miny) * m_rows;
 		size_t idx = row * m_cols + col;
-		if(m_mode == File && m_files.find(idx) == m_files.end()) {
-			if(!(m_files[idx] = open("/tmp", O_TMPFILE|O_RDWR|O_EXCL, S_IRWXU)))
-				g_runerr("Failed to open temp file for mqtree.");
-			m_counts[idx] = 0;
-		}
-		//lseek(m_files[idx], m_counts[idx], SEEK_SET);
-		if(m_mode == File) {
-			if(!write(m_files[idx], &item, sizeof(T)))
-				g_runerr("Failed to write item in qtree.");
-		} else {
-			m_mem[idx].push_back(item);
-		}
+		cache(idx).push_back(item);
 		++m_counts[idx];
 		++m_size;
 	}
@@ -123,10 +253,7 @@ public:
 	 */
 	void clear() {
 		if(m_mode == File) {
-			for(auto& it : m_files) {
-				close(it.second);
-				it.second = 0;
-			}
+			m_lru.clear();
 		} else {
 			m_mem.clear();
 		}
@@ -189,31 +316,14 @@ public:
 		int row1 = std::min(m_rows - 1, row + rr);
 
 		size_t count = 0;
-		T pt0;
 		for(int r = row0; r <= row1; ++r) {
 			for(int c = col0; c <= col1; ++c) {
 				size_t idx = r * m_cols + c;
-				if(m_mode == File) {
-					if(m_files.find(idx) != m_files.end()) {
-						int ct = m_counts[idx];
-						int fd = m_files[idx];
-						lseek(fd, 0, SEEK_SET);
-						for(int i = 0; i < ct; ++i) {
-							read(fd, &pt0, sizeof(T));
-							if(std::pow(pt.x() - pt0.x(), 2.0) + std::pow(pt.y() - pt0.y(), 2.0) <= radius * radius) {
-								*piter = pt0;
-								++piter;
-								++count;
-							}
-						}
-					}
-				} else {
-					for(const T& p : m_mem[idx]) {
-						if(std::pow(pt.x() - p.x(), 2.0) + std::pow(pt.y() - p.y(), 2.0) <= radius * radius) {
-							*piter = p;
-							++piter;
-							++count;
-						}
+				for(const T& p : cache(idx)) {
+					if(std::pow(pt.x() - p.x(), 2.0) + std::pow(pt.y() - p.y(), 2.0) <= radius * radius) {
+						*piter = p;
+						++piter;
+						++count;
 					}
 				}
 			}
