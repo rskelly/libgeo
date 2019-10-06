@@ -26,6 +26,26 @@
 
 using namespace geo::util;
 
+namespace {
+
+int mkpath(const char* file_path, mode_t mode) {
+    //assert(file_path && *file_path);
+    for (char* p = strchr((char*) file_path + 1, '/'); p; p = strchr(p + 1, '/')) {
+        *p = '\0';
+        if (mkdir(file_path, mode) == -1) {
+            if (errno != EEXIST) {
+                *p = '/';
+                return -1;
+            }
+        }
+        *p = '/';
+    }
+    return 0;
+}
+
+}
+
+
 namespace geo {
 namespace ds {
 
@@ -50,7 +70,7 @@ public:
 		size_t size;
 
 		if((handle = open(path.c_str(), O_RDWR, 0777)) > 0) {
- 			if((pos = lseek(handle, 0, SEEK_END)) > 0) {
+			if((pos = lseek(handle, 0, SEEK_END)) > 0) {
 				lseek(handle, 0, SEEK_SET);
 				if(read(handle, &size, sizeof(size_t)) > 0) {
 					cache.resize(size);
@@ -71,14 +91,18 @@ public:
 		int handle, pos;
 		size_t size = cache.size();
 
-		if((handle = open(path.c_str(), O_RDWR|O_CREAT|O_TRUNC, 0777)) > 0) {
-			if(!write(handle, &size, sizeof(size_t)))
-				std::cerr << "Failed to write cache size.\n";
-			if(!write(handle, cache.data(), size * sizeof(T)))
-				std::cerr << "Failed to write cache.\n";
-			close(handle);
+		if(!mkpath(path.c_str(), 0777)) {
+			if((handle = open(path.c_str(), O_RDWR|O_CREAT|O_TRUNC, 0777)) > 0) {
+				if(!write(handle, &size, sizeof(size_t)))
+					std::cerr << "Failed to write cache size.\n";
+				if(!write(handle, cache.data(), size * sizeof(T)))
+					std::cerr << "Failed to write cache.\n";
+				close(handle);
+			} else {
+				std::cerr << "Failed to open file for flush: " << path << " (" << strerror(errno) << ")\n";
+			}
 		} else {
-			std::cerr << "Failed to open file for flush: " << path << " (" << strerror(errno) << ")\n";
+			std::cerr << "Failed to create dir for flush: " << path << " (" << strerror(errno) << ")\n";
 		}
 
 		cache.resize(0);
@@ -93,11 +117,11 @@ class mqnode;
 template <class T>
 class lru {
 private:
-	lrunode<T>* m_first;
-	lrunode<T>* m_last;
-	std::unordered_map<std::string, lrunode<T>*> m_nodes;
-	size_t m_size;
-	size_t m_stats[3];
+	std::unordered_map<std::string, lrunode<T>*> m_nodes;	///<! The mapping from path to node instance.
+	lrunode<T>* m_first;									///<! The first (oldest) node.
+	lrunode<T>* m_last;										///<! The last (newest) node.
+	size_t m_size;											///<! The number of nodes allowed before swapping.
+	size_t m_stats[3];										///<! Statistics for cache hits, new nodes and swapped nodes.
 
 	/**
 	 * \brief Move the given node to the end of the list.
@@ -126,6 +150,9 @@ private:
 
 public:
 
+	/**
+	 * \brief Create the LRU cache with the given maximum number of elements.
+	 */
 	lru(size_t size = 100) :
 		m_first(nullptr), m_last(nullptr),
 		m_size(size) {
@@ -144,20 +171,24 @@ public:
 		const std::string& path = node->path();
 		lrunode<T>* n = nullptr;
 		if(m_nodes.find(path) != m_nodes.end()) {
+			// The node is in the list. Select it.
 			n = m_nodes[path];
 			m_stats[0]++;
 		} else if(m_nodes.size() < m_size) {
+			// The node is not in the list and there's room. Create one.
 			n = new lrunode<T>();
 			m_nodes[path] = n;
-			n->load(path);
+			n->path = path;
 			m_stats[1]++;
 		} else {
+			// The node is not in the list and there's no room. Swap the first node.
 			n = m_first;
 			m_nodes.erase(n->path);
 			m_nodes[path] = n;
 			n->load(path);
 			m_stats[2]++;
 		}
+		// If the node isn't last, move it up.
 		if(n != m_last)
 			movelast(n);
 		return n->cache;
@@ -211,21 +242,35 @@ class mqtree;
 template <class T>
 class mqnode {
 public:
-	lru<T>* m_cache;
-	mqnode* m_parent;
-	double m_bounds[4];
-	double m_midx;
-	double m_midy;
-	mqnode* m_nodes[4];
-	int m_depth;
-	size_t m_maxSize;
-	int m_maxDepth;
-	char m_idx;
-	bool m_split;
-	std::string m_path;
-	size_t m_size;
-	std::unordered_set<std::string> m_files;
+	std::unordered_set<std::string> m_files;	///<! List of node files to delete on destruction.
+	lru<T>* m_cache;							///<! Pointer to the main lru cache instance.
+	mqnode* m_parent;							///<! Pointer to this node's parent.
+	mqnode* m_nodes[4];							///<! Pointers to this node's children (if instantiated).
+	double m_bounds[4];							///<! Geographic bounds of node.
+	double m_midx;								///<! Lateral midpoint of bounds.
+	double m_midy;								///<! Vertical midpoint of bounds.
+	int m_depth;								///<! Depth of this node. Root is zero.
+	size_t m_maxSize;							///<! Maximum number of elements before split (unless depth >= m_maxDepth).
+	int m_maxDepth;								///<! Maximum tree depth.
+	char m_idx;									///<! The index of this node relative to the parent (0-3).
+	bool m_split;								///<! True if the node has been split.
+	std::string m_path;							///<! The path to this node's temp file.
+	size_t m_size;								///<! The current number of items in the node or its children.
 
+	/**
+	 * \brief Create an mqtree node.
+	 *
+	 * \param idx The index of the ndoe in the children list of the parent.
+	 * \param minx The minimum x coordinate of the bounding box.
+	 * \param miny The minimum y coordinate of the bounding box.
+	 * \param maxx  The maximum x coordinate of the bounding box.
+	 * \param maxy The maximum y coordinate of the bounding box.
+	 * \param dept The depth of this node relative to the root.
+	 * \param maxSize The maximum number of items allowed in a node before splitting.
+	 * \param maxDepth The maximum depth of the tree.
+	 * \param parent The parent node; nullptr if root.
+	 * \param cache The pointer to the LRU cache.
+	 */
 	mqnode(char idx, double minx, double miny, double maxx, double maxy,
 			int depth, size_t maxSize, int maxDepth,
 			mqnode<T>* parent, lru<T>* cache) :
@@ -260,8 +305,8 @@ public:
 			std::reverse(ids.begin(), ids.end());
 			std::stringstream ss;
 			for(int id : ids)
-				ss << "_" << id;
-			m_path = "/tmp/tree" + ss.str();
+				ss << "/" << id;
+			m_path = "/tmp/mqtree" + ss.str() + "/dat";
 			m_files.insert(m_path);
 		}
 		return m_path;
@@ -323,9 +368,9 @@ public:
 	 */
 	void split() {
 		std::vector<T>& c = m_cache->cache(this);
+		m_cache->remove(this); // The file is removed before being replaced with a directory.
 		for(T& item : c)
 			node(idx(item))->add(item);
-		m_cache->remove(this);
 		m_split = true;
 	}
 
@@ -333,8 +378,8 @@ public:
 	 * \brief Returns true of the node contains the given point (considers the radius if given).
 	 */
 	bool contains(const T& item, double radius = 0) {
-		return (item.x() + radius) >= m_bounds[0] && (item.x() - radius) < m_bounds[2] &&
-				(item.y() + radius) >= m_bounds[1] && (item.y() - radius) < m_bounds[3];
+		return item.x() >= (m_bounds[0] - radius) && item.x() <= (m_bounds[2] + radius) &&
+				item.y() >= (m_bounds[1] - radius) && item.y() <= (m_bounds[3] + radius);
 	}
 
 	/**
@@ -418,11 +463,11 @@ public:
 	 * \param maxDepth The maximum depth of the tree. Zero is no limit.
 	 * \param mode Determines whether file-backed storage is used, or memory.
 	 */
-	mqtree<T>(double minx, double miny, double maxx, double maxy, int maxDepth = 0) :
+	mqtree<T>(double minx, double miny, double maxx, double maxy, int maxDepth = 100) :
 		m_maxDepth(maxDepth) {
 
 		double side = std::max(maxx - minx, maxy - miny);
-		m_root = new mqnode<T>(0, minx, miny, minx + side, miny + side, 0, 1000, 100, nullptr, &m_lru);
+		m_root = new mqnode<T>(0, minx, miny, minx + side, miny + side, 0, 1024 * 32, maxDepth, nullptr, &m_lru);
 	}
 
 	/**
@@ -497,7 +542,6 @@ public:
 	 */
 	template <class TIter>
 	size_t search(const T& pt, double radius, TIter& piter) {
-		m_lru.flush();
 		return m_root->search(pt, radius, piter);
 	}
 

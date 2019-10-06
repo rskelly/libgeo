@@ -251,7 +251,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	g_trace(" bounds: " << bounds[0] << ", " << bounds[1] << "; " << bounds[2] << ", " << bounds[3])
 
 	mqtree<geo::pc::Point> tree(std::min(bounds[0], bounds[2]), std::min(bounds[1], bounds[3]),
-			std::max(bounds[0], bounds[2]), std::max(bounds[1], bounds[3]), 100000);
+			std::max(bounds[0], bounds[2]), std::max(bounds[1], bounds[3]), 100);
 
 	// Compute the grid dimensions.
 	int cols = (int) std::ceil((bounds[2] - bounds[0]) / resX);
