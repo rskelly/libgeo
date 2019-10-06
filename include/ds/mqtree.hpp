@@ -182,10 +182,8 @@ public:
 	 * \brief Delete all nodes and remove their files.
 	 */
 	void clear() {
-		for(auto& it : m_nodes) {
-			remove(it.second);
+		for(auto& it : m_nodes)
 			delete it.second;
-		}
 		m_nodes.clear();
 	}
 
