@@ -84,8 +84,7 @@ Computer* getComputer(const std::string& name) {
 Rasterizer::Rasterizer(const std::vector<std::string> filenames) :
 	m_filter(nullptr),
 	m_thin(0),
-	m_nodata(-9999),
-	m_memMode(false) {
+	m_nodata(-9999) {
 
 	for(size_t i = 0; i < 4; ++i)
 		m_bounds[i] = std::nan("");
@@ -185,10 +184,6 @@ void Rasterizer::setNoData(double nodata) {
 	m_nodata = nodata;
 }
 
-void Rasterizer::setMemMode(bool memMode) {
-	m_memMode = memMode;
-}
-
 void Rasterizer::setFilter(PCPointFilter* filter) {
 	m_filter = filter;
 }
@@ -256,8 +251,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	g_trace(" bounds: " << bounds[0] << ", " << bounds[1] << "; " << bounds[2] << ", " << bounds[3])
 
 	mqtree<geo::pc::Point> tree(std::min(bounds[0], bounds[2]), std::min(bounds[1], bounds[3]),
-			std::max(bounds[0], bounds[2]), std::max(bounds[1], bounds[3]),
-			100000, m_memMode ? mqtree<geo::pc::Point>::Memory : mqtree<geo::pc::Point>::File);
+			std::max(bounds[0], bounds[2]), std::max(bounds[1], bounds[3]), 100000);
 
 	// Compute the grid dimensions.
 	int cols = (int) std::ceil((bounds[2] - bounds[0]) / resX);
@@ -405,6 +399,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 						pts.clear();
 					}
 				}
+				tree.printStats();
 			}
 
 			// If void filling is enabled, check whether there are void cells and

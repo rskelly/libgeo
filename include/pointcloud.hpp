@@ -753,7 +753,6 @@ private:
 	PCPointFilter* m_filter;
 	int m_thin;
 	double m_nodata;
-	bool m_memMode;						///<! If true, use memory-backed storage instead of file.
 	double m_bounds[4];					///<! If bounds are given, this contains them. BLX, BLY, TRX, TRY.
 
 	// Used by finalizer.
@@ -820,13 +819,6 @@ public:
 	 * \param nodata The nodata value.
 	 */
 	void setNoData(double nodata);
-
-	/**
-	 * If true, uses memory mode instead of files.
-	 *
-	 * \param memMode True to use memory mode.
-	 */
-	void setMemMode(bool memMode);
 
 	/**
 	 * Set a point filter to use for filtering points. Removes the old filter.
