@@ -161,6 +161,11 @@ bool isfile(const std::string& path);
 bool rem(const std::string& dir);
 
 /**
+ * Create a temporary directory and return the path.
+ */
+std::string tmpdir(const std::string& tpl);
+
+/**
  * Return the parent directory of the path.
  */
 std::string parent(const std::string& path);

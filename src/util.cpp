@@ -9,6 +9,9 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <ftw.h>
 
 #include <cstdlib>
 #include <cstdio>
@@ -21,6 +24,21 @@
 #include "util.hpp"
 
 using namespace geo::util;
+
+namespace {
+
+	// Used in rem.
+	// https://stackoverflow.com/questions/2256945/removing-a-non-empty-directory-programmatically-in-c-or-c
+	int rmFiles(const char *pathname, const struct stat*, int, struct FTW*) {
+		if(remove(pathname) < 0) {
+			perror("ERROR: remove");
+			return -1;
+		}
+		return 0;
+	}
+
+} // anon
+
 
 FileType geo::util::getFileType(const std::string& filename) {
 	std::string ext;
@@ -129,7 +147,13 @@ bool geo::util::isfile(const std::string& path) {
 }
 
 bool geo::util::rem(const std::string& dir) {
-	return !::unlink(dir.c_str());
+	if(isfile(dir)) {
+		return !::unlink(dir.c_str());
+	} else if (isdir(dir) && nftw(dir.c_str(), rmFiles,10, FTW_DEPTH|FTW_MOUNT|FTW_PHYS) < 0) {
+		perror("ERROR: ntfw");
+		return false;
+	}
+	return true;
 }
 
 #ifdef _WIN32
@@ -191,6 +215,15 @@ std::string geo::util::extension(const std::string& path) {
 	if(pos < std::string::npos)
 		return path.substr(pos, std::string::npos);
 	return path;
+}
+
+std::string geo::util::tmpdir(const std::string& tpl) {
+	char tname[PATH_MAX];
+	std::strncpy(tname, tpl.c_str(), tpl.size());
+	tname[tpl.size()] = '\0';
+	if(!mkdtemp(tname))
+		g_runerr("Failed to make temporary dir " << tname << ": " << strerror(errno));
+	return std::string(tname);
 }
 
 bool geo::util::makedir(const std::string& filename) {
