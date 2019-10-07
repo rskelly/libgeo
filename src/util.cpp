@@ -275,7 +275,7 @@ int geo::util::gdalTypeSize(GDALDataType type) {
 
 TmpFile::TmpFile(size_t size) :
 	fd(0), size(0) {
-	char tpl[] = {"geo_util_XXXXXX"};
+	char tpl[] = {"/tmp/geo_util_XXXXXX"};
 	fd = mkstemp(tpl);
 	filename = tpl;
 	resize(size);
