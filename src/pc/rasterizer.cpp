@@ -203,7 +203,7 @@ Rasterizer::~Rasterizer() {
 
 void Rasterizer::rasterize(const std::string& filename, const std::vector<std::string>& types,
 		double resX, double resY, double easting, double northing, double radius, 
-		int srid, bool useHeader, bool voids) {
+		int srid, bool useHeader, bool voids, double maxRadius) {
 
 	if(std::isnan(resX) || std::isnan(resY))
 		g_runerr("Resolution not valid");
@@ -311,8 +311,6 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 		std::vector<double> dist;
 		geo::pc::Point spt;
 
-		bool voidCells = false;
-
 		// Prepare insertion iterators.
 		auto citer = std::back_inserter(cpts);
 		auto fiter = std::back_inserter(filtered);
@@ -324,11 +322,21 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 		double aresX = std::abs(resX) / 2;
 		double aresY = std::abs(resY) / 2;
 
+		// The number of cells found to be void.
+		size_t voidCount = 0;
+		bool hasVoids = false;
+
 		do {
 
 			// If this is a void filling loop, increase the radius.
-			if(voidCells)
+			if(voidCount) {
+				hasVoids = true;
+				voidCount = 0;
 				radius *= 2;
+				if(radius > maxRadius)
+					break;
+			}
+
 
 			for(int r = 1; r < rows - 1; ++r) {
 				std::cout << "Row " << r << " of " << rows << "\n";
@@ -339,7 +347,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 					spt.y(props.toY(r));
 
 					// If this is a void filing loop, skip when the value is valid.
-					if(voidCells && outrast.get(c, r, 1) != props.nodata())
+					if(hasVoids && outrast.get(c, r, 1) != props.nodata())
 						continue;
 
 					// Search for points within the radius of the cell centre.
@@ -390,6 +398,8 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 										outrast.set(c, r, val, band++);
 								}
 							}
+						} else {
+							++voidCount;
 						}
 
 						filtered.clear();
@@ -402,18 +412,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 				tree.printStats();
 			}
 
-			// If void filling is enabled, check whether there are void cells and
-			// enable the loop.
-			if(voids) {
-				voidCells = false;
-				for(int r = 0; !voidCells && r < rows; ++r) {
-					for(int c = 0; !voidCells && c < cols; ++c) {
-						if(outrast.get(c, r, 1) == props.nodata())
-							voidCells = true;
-					}
-				}
-			}
-		} while(voidCells);
+		} while(voids && voidCount);
 	}
 
 	g_debug("Done")
