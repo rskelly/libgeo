@@ -203,7 +203,7 @@ Rasterizer::~Rasterizer() {
 
 void Rasterizer::rasterize(const std::string& filename, const std::vector<std::string>& types,
 		double resX, double resY, double easting, double northing, double radius, 
-		int srid, bool useHeader, bool voids, double maxRadius) {
+		const std::string& projection, bool useHeader, bool voids, double maxRadius) {
 
 	if(std::isnan(resX) || std::isnan(resY))
 		g_runerr("Resolution not valid");
@@ -270,7 +270,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	props.setTrans(easting, resX, northing, resY);
 	props.setSize(cols, rows);
 	props.setDataType(DataType::Float32);
-	props.setSrid(srid);
+	props.setProjection(projection);
 	props.setWritable(true);
 	props.setBands(bandCount);
 	props.setNoData(m_nodata);

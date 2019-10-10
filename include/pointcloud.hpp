@@ -789,13 +789,13 @@ public:
 	 * \param easting 	The minimum corner coordinate of the raster.
 	 * \param northing 	The minimum corner coordinate of the raster.
 	 * \param radius 	The size of the neighbourhood around each cell centre.
-	 * \param srid 		The spatial reference ID of the output.
+	 * \param projection The well-known text representation of the projection.
 	 * \param useHeader True to trust the LAS file headers for things like bounds. Otherwise, read the points.
 	 * \param voids     If true, fill voids in the raster by expanding the radius iteratively.
 	 * \param maxRadius If voids is true, this gives the maximum radius for searching. Once exceeded the program quits.
 	 */
 	void rasterize(const std::string& filename, const std::vector<std::string>& types, double resX, double resY,
-		double easting, double northing, double radius, int srid, bool useHeader, bool voids, double maxRadius);
+		double easting, double northing, double radius, const std::string& projection, bool useHeader, bool voids, double maxRadius);
 
 	/**
 	 * Esitmate the point density (per cell) given the source files, resolution and search radius.
