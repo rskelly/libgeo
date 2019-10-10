@@ -222,6 +222,15 @@ std::string sanitize(const std::string& str);
 int gdalTypeSize(GDALDataType type);
 
 /**
+ * \brief Get the well-known text representation of the projection from the SRID.
+ *
+ * \param srid The SRID.
+ * \return The projection string.
+ */
+std::string projectionFromSRID(int srid);
+
+
+/**
  * Convert the given char buffer to a buffer of the templated type.
  *
  * \param[in] The source buffer.

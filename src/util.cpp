@@ -20,6 +20,7 @@
 #include <regex>
 
 #include <gdal_priv.h>
+#include <ogr_spatialref.h>
 
 #include "util.hpp"
 
@@ -272,6 +273,17 @@ int geo::util::gdalTypeSize(GDALDataType type) {
 	}
 }
 
+std::string geo::util::projectionFromSRID(int srid) {
+	std::string out;
+	OGRSpatialReference osr;
+	if((OGRERR_NONE == osr.importFromEPSG(srid))) {
+		char* wkt;
+		osr.exportToWkt(&wkt);
+		out = wkt;
+		CPLFree(wkt);
+	}
+	return out;
+}
 
 TmpFile::TmpFile(size_t size) :
 	fd(0), size(0) {
