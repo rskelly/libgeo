@@ -294,7 +294,17 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	g_trace(" " << tree.size() << " points added to tree.");
 
 	// Prepare the final output raster.
-	Grid<double> outrast(filename, props);
+	Grid<float> outrast(filename, props);
+
+	GridProps maskProps(props);
+	maskProps.setBands(1);
+	maskProps.setDataType(DataType::Byte);
+	maskProps.setWritable(true);
+	Grid<char> mask(maskProps);
+	mask.fill(0);
+
+	TargetFillOperator<float, char> op1(&outrast, 0, &mask, 0, -9999, 1);
+	TargetFillOperator<char, char> op2(&mask, 0, &mask, 0, 1, 2);
 
 	g_trace("Running...")
 	{
@@ -325,6 +335,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 		// The number of cells found to be void.
 		size_t voidCount = 0;
 		bool hasVoids = false;
+		int fx0, fx1, fy0, fy1, fa;
 
 		do {
 
@@ -338,17 +349,35 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 			}
 
 
-			for(int r = 1; r < rows - 1; ++r) {
+			for(int r = 0; r < rows; ++r) {
 				std::cout << "Row " << r << " of " << rows << "\n";
-				for(int c = 1; c < cols - 1; ++c) {
+				for(int c = 0; c < cols; ++c) {
 
 					// Prepare a query point based on the grid location.
 					spt.x(props.toX(c));
 					spt.y(props.toY(r));
 
-					// If this is a void filing loop, skip when the value is valid.
-					if(hasVoids && outrast.get(c, r, 1) != props.nodata())
-						continue;
+					if(hasVoids) {
+
+						// The count is good. Skip.
+						// TODO: Not always a good way to check for validity.
+						if(outrast.get(c, r, 0) > 0)
+							continue;
+
+						// The mask says this is an edge-connected pixel. Skip.
+						if(mask.get(c, r, 0) == 2)
+							continue;
+
+						// Flood to find edge-connected pixels.
+						Grid<float>::floodFill(c, r, op1, false, &fx0, &fy0, &fx1, &fy1, &fa);
+
+						// If the fill touches an edge, set it to 2 and ignore it.
+						if(fx0 == 0 || fx1 == cols - 1 || fy0 == 0 || fy1 == rows - 1) {
+							Grid<char>::floodFill(c, r, op2, false, &fx0, &fy0, &fx1, &fy1, &fa);
+							continue;
+						}
+
+					}
 
 					// Search for points within the radius of the cell centre.
 					if(tree.search(spt, radius, citer)) {
@@ -384,9 +413,12 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 
 						band = 0;
 
-						// Write the point count.
-						// morton((spt.x() - bounds[0]) * scale, (spt.y() - bounds[1]) * scale), /*
-						outrast.set(c, r, count, band++);
+						// Write the point count. If it's a void fill, the count is still zero.
+						if(hasVoids) {
+							outrast.set(c, r, 0, band++);
+						} else {
+							outrast.set(c, r, count, band++);
+						}
 
 						if(count) {
 							for(size_t i = 0; i < m_computers.size(); ++i) {
