@@ -1088,7 +1088,11 @@ public:
 		m_props.setProjection(std::string(m_ds->GetProjectionRef()));
 		m_props.setNoData(m_ds->GetRasterBand(1)->GetNoDataValue()); // TODO: This might not be a real nodata value.
 		m_props.setFilename(filename);
-		m_props.setInterleave(interleaveFromString(*interleave));
+		if(interleave) {
+			m_props.setInterleave(interleaveFromString(*interleave));
+		} else {
+			m_props.setInterleave(Interleave::BIL);
+		}
 
 	}
 
