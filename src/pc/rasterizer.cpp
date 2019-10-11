@@ -296,15 +296,8 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	// Prepare the final output raster.
 	Grid<float> outrast(filename, props);
 
-	GridProps maskProps(props);
-	maskProps.setBands(1);
-	maskProps.setDataType(DataType::Byte);
-	maskProps.setWritable(true);
-	Grid<char> mask(maskProps);
-	mask.fill(0);
-
-	TargetFillOperator<float, char> op1(&outrast, 0, &mask, 0, -9999, 1);
-	TargetFillOperator<char, char> op2(&mask, 0, &mask, 0, 1, 2);
+	// The number of cells found to be void.
+	size_t voidCount = 0;
 
 	g_trace("Running...")
 	{
@@ -332,119 +325,143 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 		double aresX = std::abs(resX) / 2;
 		double aresY = std::abs(resY) / 2;
 
-		// The number of cells found to be void.
-		size_t voidCount = 0;
-		bool hasVoids = false;
+		std::cout << std::setprecision(2) << std::fixed;
+
+		std::cout << "Rows: " << rows << "\n";
+		for(int r = 0; r < rows; ++r) {
+			if(r % 100 == 0)
+				std::cout << "Row " << r << " of " << rows << " ("<< ((float) r / rows * 100) << "%)\n";
+			for(int c = 0; c < cols; ++c) {
+
+				// Prepare a query point based on the grid location.
+				spt.x(props.toX(c));
+				spt.y(props.toY(r));
+
+				// Search for points within the radius of the cell centre.
+				if(tree.search(spt, radius, citer)) {
+
+					// If the radius was 0, filter the points to the cell bounds.
+					if(initrad == 0) {
+						tmp.swap(cpts);
+						cpts.clear();
+						for(geo::pc::Point& pt : tmp) {
+							if(pt.x() < spt.x() - aresX || pt.x() > spt.x() + aresX || pt.y() < spt.y() - aresY || pt.y() > spt.y() + aresY)
+								continue;
+							cpts.push_back(std::move(pt));
+						}
+					}
+
+					// Filter the points according to the configured filter.
+					if(!cpts.empty()) {
+						count = m_filter->filter(cpts.begin(), cpts.end(), fiter);
+
+						if(m_thin > 0) {
+							// Thin the points to the desired density, if required.
+							if(filtered.size() < (size_t) m_thin) {
+								filtered.clear();
+								count = 0;
+							} else {
+								// Randomize, then take the first n points.
+								std::random_shuffle(filtered.begin(), filtered.end());
+								filtered.resize(m_thin);
+								count = m_thin;
+							}
+						}
+					}
+
+					band = 0;
+
+					outrast.set(c, r, count, band++);
+
+					if(count) {
+						for(size_t i = 0; i < m_computers.size(); ++i) {
+							out.clear();
+							// Calculate the values in the computer and append to the raster.
+							m_computers[i]->compute(spt.x(), spt.y(), cpts, filtered, radius, out);
+							for(double val : out) {
+								if(!std::isnan(val))
+									outrast.set(c, r, val, band++);
+							}
+						}
+					} else {
+						++voidCount;
+					}
+
+					filtered.clear();
+					out.clear();
+					cpts.clear();
+					dist.clear();
+					pts.clear();
+				} else {
+					++voidCount;
+				}
+			}
+			//tree.printStats();
+		}
+	}
+
+	if(voids && voidCount) {
+
+		GridProps maskProps(props);
+		maskProps.setBands(1);
+		maskProps.setDataType(DataType::Byte);
+		maskProps.setWritable(true);
+		Grid<char> mask(maskProps);
+		mask.fill(0);
+
 		int fx0, fx1, fy0, fy1, fa;
 
-		do {
+		TargetFillOperator<float, char> op1(&outrast, 0, &mask, 0, props.nodata(), 1);
+		TargetFillOperator<char, char> op2(&mask, 0, &mask, 0, 1, 2);
 
-			// If this is a void filling loop, increase the radius.
-			if(voidCount) {
-				hasVoids = true;
-				voidCount = 0;
-				radius *= 2;
-				if(radius > maxRadius)
-					break;
-			}
-
-
+		for(int b = 1; b < props.bands(); ++b) {
+			std::cout << "Filling voids in band " << b << "\n";
 			for(int r = 0; r < rows; ++r) {
-				std::cout << "Row " << r << " of " << rows << "\n";
 				for(int c = 0; c < cols; ++c) {
 
-					// Prepare a query point based on the grid location.
-					spt.x(props.toX(c));
-					spt.y(props.toY(r));
+					// The value is good. Skip.
+					if(outrast.get(c, r, b) != props.nodata())
+						continue;
 
-					if(hasVoids) {
+					// The mask says this is an edge-connected pixel. Skip.
+					if(mask.get(c, r, 0) == 2)
+						continue;
 
-						// The count is good. Skip.
-						// TODO: Not always a good way to check for validity.
-						if(outrast.get(c, r, 0) > 0)
-							continue;
+					// Flood to find edge-connected pixels.
+					Grid<float>::floodFill(c, r, op1, false, &fx0, &fy0, &fx1, &fy1, &fa);
 
-						// The mask says this is an edge-connected pixel. Skip.
-						if(mask.get(c, r, 0) == 2)
-							continue;
-
-						// Flood to find edge-connected pixels.
-						Grid<float>::floodFill(c, r, op1, false, &fx0, &fy0, &fx1, &fy1, &fa);
-
-						// If the fill touches an edge, set it to 2 and ignore it.
-						if(fx0 == 0 || fx1 == cols - 1 || fy0 == 0 || fy1 == rows - 1) {
-							Grid<char>::floodFill(c, r, op2, false, &fx0, &fy0, &fx1, &fy1, &fa);
-							continue;
-						}
-
+					// If the fill touches an edge, set it to 2 and ignore it.
+					if(fx0 == 0 || fx1 == cols - 1 || fy0 == 0 || fy1 == rows - 1) {
+						Grid<char>::floodFill(c, r, op2, false, &fx0, &fy0, &fx1, &fy1, &fa);
+						continue;
 					}
 
-					// Search for points within the radius of the cell centre.
-					if(tree.search(spt, radius, citer)) {
-
-						// If the radius was 0, filter the points to the cell bounds.
-						if(initrad == 0) {
-							tmp.swap(cpts);
-							cpts.clear();
-							for(geo::pc::Point& pt : tmp) {
-								if(pt.x() < spt.x() - aresX || pt.x() > spt.x() + aresX || pt.y() < spt.y() - aresY || pt.y() > spt.y() + aresY)
+					// Fill the pixel.
+					int rad = 0;
+					double v0, v = 0, w0, w = 0;
+					bool found = false;
+					do {
+						++rad;
+						for(int rr = r - rad; rr < r + rad + 1; ++rr) {
+							for(int cc = c - rad; cc < c + rad + 1; ++cc) {
+								if(cc < 0 || cc >= cols || rr < 0 || rr >= rows || (cc == c && rr == r))
 									continue;
-								cpts.push_back(std::move(pt));
-							}
-						}
-
-						// Filter the points according to the configured filter.
-						if(!cpts.empty()) {
-							count = m_filter->filter(cpts.begin(), cpts.end(), fiter);
-
-							if(m_thin > 0) {
-								// Thin the points to the desired density, if required.
-								if(filtered.size() < (size_t) m_thin) {
-									filtered.clear();
-									count = 0;
-								} else {
-									// Randomize, then take the first n points.
-									std::random_shuffle(filtered.begin(), filtered.end());
-									filtered.resize(m_thin);
-									count = m_thin;
+								if((v0 = outrast.get(cc, rr, b)) != props.nodata()) {
+									w0 = 1 / (std::pow(props.toX(c) - props.toX(cc), 2.0) + std::pow(props.toY(r) - props.toY(rr), 2.0));	// not possible for d to be zero.
+									w += w0;
+									v += w0 * v0;
+									found = true;
 								}
 							}
 						}
+					} while(!found && rad * std::abs(resY) < maxRadius);
 
-						band = 0;
+					if(found)
+						outrast.set(c, r, v / w, b);
 
-						// Write the point count. If it's a void fill, the count is still zero.
-						if(hasVoids) {
-							outrast.set(c, r, 0, band++);
-						} else {
-							outrast.set(c, r, count, band++);
-						}
-
-						if(count) {
-							for(size_t i = 0; i < m_computers.size(); ++i) {
-								out.clear();
-								// Calculate the values in the computer and append to the raster.
-								m_computers[i]->compute(spt.x(), spt.y(), cpts, filtered, radius, out);
-								for(double val : out) {
-									if(!std::isnan(val))
-										outrast.set(c, r, val, band++);
-								}
-							}
-						} else {
-							++voidCount;
-						}
-
-						filtered.clear();
-						out.clear();
-						cpts.clear();
-						dist.clear();
-						pts.clear();
-					}
 				}
-				tree.printStats();
 			}
-
-		} while(voids && voidCount);
+		}
 	}
 
 	g_debug("Done")
