@@ -204,6 +204,7 @@ public:
 		lrunode<T>* n = nullptr;
 		if(m_nodes.find(path) != m_nodes.end()) {
 			// The node is in the list. Select it.
+			std::cout << path << "\n";
 			n = m_nodes[path];
 			m_stats[0]++;
 		} else if(m_nodes.size() < m_size) {
@@ -488,6 +489,13 @@ private:
 
 public:
 
+	mqtree<T>() :
+		m_maxDepth(0),
+		m_maxCount(0),
+		m_root(nullptr),
+		m_blkSize(0) {
+	}
+
 	/**
 	 * Construct an mqtree.
 	 *
@@ -500,8 +508,12 @@ public:
 	 * \param maxDepth The maximum depth of the tree. Zero is no limit.
 	 * \param mode Determines whether file-backed storage is used, or memory.
 	 */
-	mqtree<T>(double minx, double miny, double maxx, double maxy, int maxDepth = 100) :
-		m_maxDepth(maxDepth) {
+	mqtree<T>(double minx, double miny, double maxx, double maxy, int maxDepth = 100) {
+		init(minx, miny, maxx, maxy, maxDepth);
+	}
+
+	void init(double minx, double miny, double maxx, double maxy, int maxDepth = 100) {
+		m_maxDepth = maxDepth;
 
 		// Create a root path.
 		m_rootPath = util::tmpdir("/tmp/mqtreeXXXXXX");
