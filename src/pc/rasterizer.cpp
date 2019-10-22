@@ -329,7 +329,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 
 		std::cout << "Rows: " << rows << "\n";
 		for(int r = 0; r < rows; ++r) {
-			if(r % 100 == 0)
+			if(r % 10 == 0)
 				std::cout << "Row " << r << " of " << rows << " ("<< ((float) r / rows * 100) << "%)\n";
 			for(int c = 0; c < cols; ++c) {
 
@@ -417,6 +417,8 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 		for(int b = 1; b < props.bands(); ++b) {
 			std::cout << "Filling voids in band " << b << "\n";
 			for(int r = 0; r < rows; ++r) {
+				if(r % 10 == 0)
+					std::cout << "Row " << r << " of " << rows << " (" << (float) r / rows * 100 << "%)\n";
 				for(int c = 0; c < cols; ++c) {
 
 					// The value is good. Skip.

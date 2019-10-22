@@ -19,6 +19,7 @@
 #include <iterator>
 #include <unordered_map>
 #include <list>
+#include <atomic>
 
 #include "geo.hpp"
 #include "util.hpp"
@@ -56,9 +57,12 @@ class lrucache;
 template <class T>
 class lrunode {
 private:
+	bool m_locked;				///<! If the node is in use is should not be expirable. This is a problem in tree traversals. Lock to prevent.
+	uint64_t m_key;
+	std::string m_path;
 	lrucache<T>* m_lru;
 	std::vector<T> m_cache;
-	std::string m_path;
+	std::vector<char> m_buf;
 
 public:
 
@@ -66,7 +70,20 @@ public:
 	lrunode* right;
 
 	lrunode(lrucache<T>* lru) :
-		m_lru(lru), left(nullptr), right(nullptr) {
+		m_locked(false), m_key(0), m_lru(lru),
+		left(nullptr), right(nullptr) {
+	}
+
+	void lock() {
+		m_locked = true;
+	}
+
+	void unlock() {
+		m_locked = false;
+	}
+
+	bool locked() const {
+		return m_locked;
 	}
 
 	std::vector<T>& cache() {
@@ -81,6 +98,14 @@ public:
 		m_path = path;
 	}
 
+	uint64_t key() const {
+		return m_key;
+	}
+
+	void key(uint64_t key) {
+		m_key = key;
+	}
+
 	void load(const std::string& path) {
 		if(path != m_path) {
 
@@ -88,16 +113,16 @@ public:
 
 			m_path = path;
 
-			static std::vector<char> buf(BUF_SIZE);
-
 			int handle;
 			size_t size;
 
+			m_buf.resize(BUF_SIZE);
+
 			if((handle = open(path.c_str(), O_RDWR, 0777)) > 0) {
-				if(read(handle, buf.data(), BUF_SIZE) > sizeof(T)) {
-					std::memcpy(&size, buf.data(), sizeof(size_t));
+				if(read(handle, m_buf.data(), BUF_SIZE) > sizeof(T)) {
+					std::memcpy(&size, m_buf.data(), sizeof(size_t));
 					m_cache.resize(size);
-					std::memcpy(m_cache.data(), buf.data() + sizeof(size_t), size * sizeof(T));
+					std::memcpy(m_cache.data(), m_buf.data() + sizeof(size_t), size * sizeof(T));
 				}
 				close(handle);
 			} else if(errno != ENOENT){
@@ -109,16 +134,16 @@ public:
 	void flush() {
 		if(!m_cache.empty()) {
 
-			static std::vector<char> buf(BUF_SIZE);
-
 			int handle;
 			size_t size = m_cache.size();
 
+			m_buf.resize(BUF_SIZE);
+
 			if(!mkpath(m_path.c_str(), 0777)) {
 				if((handle = open(m_path.c_str(), O_RDWR|O_CREAT|O_TRUNC, 0777)) > 0) {
-					std::memcpy(buf.data(), &size, sizeof(size_t));
-					std::memcpy(buf.data() + sizeof(size_t), m_cache.data(), size * sizeof(T));
-					if(!write(handle, buf.data(), BUF_SIZE))
+					std::memcpy(m_buf.data(), &size, sizeof(size_t));
+					std::memcpy(m_buf.data() + sizeof(size_t), m_cache.data(), size * sizeof(T));
+					if(!write(handle, m_buf.data(), BUF_SIZE))
 						std::cerr << "Failed to write cache.\n";
 					close(handle);
 				} else {
@@ -140,7 +165,7 @@ class mqnode;
 template <class T>
 class lrucache {
 private:
-	std::unordered_map<std::string, lrunode<T>*> m_nodes;	///<! The mapping from path to node instance.
+	std::unordered_map<uint64_t, lrunode<T>*> m_nodes;		///<! The mapping from path to node instance.
 	lrunode<T>* m_first;									///<! The first (oldest) node.
 	lrunode<T>* m_last;										///<! The last (newest) node.
 	size_t m_size;											///<! The number of nodes allowed before swapping.
@@ -199,32 +224,48 @@ public:
 	 * Will be returned if it's in memory, created if it doesn't exist, loaded from file if it does.
 	 * Node is moved to the end of the LRU list.
 	 */
-	std::vector<T>& cache(mqnode<T>* node) {
-		const std::string& path = node->path();
+	lrunode<T>* get(mqnode<T>* node) {
+		uint64_t key = node->key();
 		lrunode<T>* n = nullptr;
-		if(m_nodes.find(path) != m_nodes.end()) {
+		if(m_nodes.find(key) != m_nodes.end()) {
 			// The node is in the list. Select it.
-			std::cout << path << "\n";
-			n = m_nodes[path];
+			n = m_nodes.at(key);
+			n->lock();
 			m_stats[0]++;
 		} else if(m_nodes.size() < m_size) {
 			// The node is not in the list and there's room. Create one.
 			n = new lrunode<T>(this);
-			m_nodes[path] = n;
-			n->path(path);
+			n->path(node->path());
+			n->key(key);
+			n->lock();
+			m_nodes.insert(std::make_pair(key, n));
 			m_stats[1]++;
 		} else {
 			// The node is not in the list and there's no room. Swap the first node.
 			n = m_first;
-			m_nodes.erase(n->path());
-			m_nodes[path] = n;
-			n->load(path);
-			m_stats[2]++;
+			while(n && n->locked())
+				n = n->right;
+			if(!n || n->locked()) {
+				std::cerr << "No available LRU nodes. Expanding.\n";
+				n = new lrunode<T>(this);
+				n->path(node->path());
+				n->key(key);
+				n->lock();
+				m_nodes.insert(std::make_pair(key, n));
+				m_stats[1]++;
+			} else {
+				m_nodes.erase(n->key());
+				n->load(n->path());
+				n->key(key);
+				n->lock();
+				m_nodes.insert(std::make_pair(key, n));
+				m_stats[2]++;
+			}
 		}
 		// If the node isn't last, move it up.
 		if(n != m_last)
 			movelast(n);
-		return n->cache();
+		return n;
 	}
 
 	/**
@@ -287,6 +328,7 @@ public:
 	char m_idx;									///<! The index of this node relative to the parent (0-3).
 	bool m_split;								///<! True if the node has been split.
 	std::string m_path;							///<! The path to this node's temp file.
+	uint64_t m_key;								///<! A numerical key for locating the node in the cache.
 	size_t m_size;								///<! The current number of items in the node or its children.
 
 	/**
@@ -305,8 +347,8 @@ public:
 	 */
 	mqnode(char idx, double minx, double miny, double maxx, double maxy, int depth,
 			mqnode<T>* parent, mqtree<T>* tree) :
-		m_parent(parent), m_depth(depth), m_idx(idx), m_split(false),
-		m_size(0), m_tree(tree) {
+		m_tree(tree), m_parent(parent), m_depth(depth), m_idx(idx), m_split(false),
+		m_key(tree->nextKey()), m_size(0) {
 
 		m_midx = (minx + maxx) / 2.0;
 		m_midy = (miny + maxy) / 2.0;
@@ -316,6 +358,10 @@ public:
 		m_bounds[3] = maxy;
 		for(int i = 0; i < 4; ++i)
 			m_nodes[i] = nullptr;
+	}
+
+	uint64_t key() {
+		return m_key;
 	}
 
 	/**
@@ -361,7 +407,9 @@ public:
 			node(idx(item))->add(item);
 			++m_size;
 		} else {
-			m_tree->lru().cache(this).push_back(item);
+			lrunode<T>* n = m_tree->lru().get(this);
+			n->cache().push_back(item);
+			n->unlock();
 			++m_size;
 		}
 	}
@@ -405,10 +453,12 @@ public:
 	void split() {
 		if(m_depth >= m_tree->maxDepth())
 			std::cerr << "Max depth exceeded: " << m_depth << "\n";
-		std::vector<T>& c = m_tree->lru().cache(this);
+		lrunode<T>* n = m_tree->lru().get(this);
+		std::vector<T>& c = n->cache();
 		m_tree->lru().remove(this); // The file is removed before being replaced with a directory.
 		for(T& item : c)
 			node(idx(item))->add(item);
+		n->unlock();
 		m_split = true;
 	}
 
@@ -446,15 +496,16 @@ public:
 			} else {
 				double r2 = radius * radius;
 				double d;
-				const std::vector<T>& c = m_tree->lru().cache(this);
+				lrunode<T>* n = m_tree->lru().get(this);
+				const std::vector<T>& c = n->cache();
 				for(const T& item : c) {
 					d = std::pow(item.x() - pt.x(), 2.0) + std::pow(item.y() - pt.y(), 2.0);
 					if(d <= r2) {
-						*piter = item;
-						++piter;
+						piter = item;
 						++count;
 					}
 				}
+				n->unlock();
 			}
 		}
 		return count;
@@ -486,6 +537,7 @@ private:
 	mqnode<T>* m_root;
 	std::string m_rootPath;
 	int m_blkSize;
+	uint64_t m_nextKey;					///<! Retrieved by child nodes for identification.
 
 public:
 
@@ -493,7 +545,8 @@ public:
 		m_maxDepth(0),
 		m_maxCount(0),
 		m_root(nullptr),
-		m_blkSize(0) {
+		m_blkSize(0),
+		m_nextKey(0) {
 	}
 
 	/**
@@ -510,6 +563,10 @@ public:
 	 */
 	mqtree<T>(double minx, double miny, double maxx, double maxy, int maxDepth = 100) {
 		init(minx, miny, maxx, maxy, maxDepth);
+	}
+
+	uint64_t nextKey() {
+		return ++m_nextKey;
 	}
 
 	void init(double minx, double miny, double maxx, double maxy, int maxDepth = 100) {
@@ -626,7 +683,7 @@ public:
 	 * \return The number of items found.
 	 */
 	template <class TIter>
-	size_t search(const T& pt, double radius, TIter& piter) {
+	size_t search(const T& pt, double radius, TIter piter) {
 		return m_root->search(pt, radius, piter);
 	}
 
