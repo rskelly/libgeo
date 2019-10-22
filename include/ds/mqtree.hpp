@@ -45,6 +45,30 @@ int mkpath(const char* file_path, mode_t mode) {
     return 0;
 }
 
+template <class T>
+class Buffer {
+public:
+	T* data;
+	size_t size;
+	Buffer(size_t s = 0) :
+		size(0) {
+		if(s)
+			init(s);
+	}
+
+	void init(size_t s) {
+		if(s > size) {
+			if(size)
+				free(data);
+			size = s;
+			data = (T*) calloc(size, sizeof(T));
+		}
+	}
+	~Buffer() {
+		free(data);
+	}
+};
+
 }
 
 
@@ -58,7 +82,7 @@ private:
 	size_t m_key;
 	std::string m_path;
 	std::vector<T> m_cache;
-	std::vector<char> m_buf;
+	Buffer<char> m_buf;
 
 public:
 
@@ -112,13 +136,13 @@ public:
 			int handle;
 			size_t size;
 
-			m_buf.resize(BUF_SIZE);
+			m_buf.init(BUF_SIZE);
 
 			if((handle = open(path.c_str(), O_RDWR, 0777)) > 0) {
-				if(read(handle, m_buf.data(), BUF_SIZE) > sizeof(T)) {
-					std::memcpy(&size, m_buf.data(), sizeof(size_t));
+				if(read(handle, m_buf.data, BUF_SIZE) > sizeof(T)) {
+					std::memcpy(&size, m_buf.data, sizeof(size_t));
 					m_cache.resize(size);
-					std::memcpy(m_cache.data(), m_buf.data() + sizeof(size_t), size * sizeof(T));
+					std::memcpy(m_cache.data(), m_buf.data + sizeof(size_t), size * sizeof(T));
 				}
 				close(handle);
 			} else if(errno != ENOENT){
@@ -133,13 +157,13 @@ public:
 			int handle;
 			size_t size = m_cache.size();
 
-			m_buf.resize(BUF_SIZE);
+			m_buf.init(BUF_SIZE);
 
 			if(!mkpath(m_path.c_str(), 0777)) {
 				if((handle = open(m_path.c_str(), O_RDWR|O_CREAT|O_TRUNC, 0777)) > 0) {
-					std::memcpy(m_buf.data(), &size, sizeof(size_t));
-					std::memcpy(m_buf.data() + sizeof(size_t), m_cache.data(), size * sizeof(T));
-					if(!write(handle, m_buf.data(), BUF_SIZE))
+					std::memcpy(m_buf.data, &size, sizeof(size_t));
+					std::memcpy(m_buf.data + sizeof(size_t), m_cache.data(), size * sizeof(T));
+					if(!write(handle, m_buf.data, BUF_SIZE))
 						std::cerr << "Failed to write cache.\n";
 					close(handle);
 				} else {
