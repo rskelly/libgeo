@@ -367,7 +367,7 @@ public:
 	mqnode(char idx, double minx, double miny, double maxx, double maxy, int depth,
 			mqnode<T>* parent, mqtree<T>* tree) :
 		m_tree(tree), m_parent(parent), m_depth(depth), m_idx(idx), m_split(false),
-		m_key(tree->nextKey()), m_size(0) {
+		m_key(tree->nextKey()), m_size(0), m_iter(0) {
 
 		m_midx = (minx + maxx) / 2.0;
 		m_midy = (miny + maxy) / 2.0;
