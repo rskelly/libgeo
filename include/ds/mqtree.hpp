@@ -348,6 +348,7 @@ public:
 	std::string m_path;							///<! The path to this node's temp file.
 	size_t m_key;								///<! A numerical key for locating the node in the cache.
 	size_t m_size;								///<! The current number of items in the node or its children.
+	size_t m_iter;								///<! An index to keep track of iteration.
 
 	/**
 	 * \brief Create an mqtree node.
@@ -478,6 +479,7 @@ public:
 			node(idx(item))->add(item);
 		n->unlock();
 		m_split = true;
+		m_iter = 0;
 	}
 
 	/**
@@ -529,6 +531,42 @@ public:
 		return count;
 	}
 
+	void reset() {
+		m_iter = 0;
+		for(int i = 0; i < 4; ++i) {
+			if(m_nodes[i])
+				m_nodes[i]->reset();
+		}
+	}
+
+	/**
+	 * \brief Return the next item in a depth-first traversal.
+	 *
+	 * \param The item to populate.
+	 * \return True if an item was found.
+	 */
+	bool next(T& item) {
+		if(!m_split) {
+			if(m_iter < m_size) {
+				// Get the list and return the ndex item in it.
+				lrunode<T>* n = m_tree->lru().get(m_key, path());
+				const std::vector<T>& c = n->cache();
+				item = c[m_iter];
+				++m_iter;
+				return true;
+			}
+		} else {
+			// Check each node in turn, if it returns false,
+			// try the next. If all return false, return false.
+			while(m_iter < 4) {
+				if(m_nodes[m_iter] && m_nodes[m_iter]->next(item))
+					return true;
+				++m_iter;
+			}
+		}
+		return false;
+	}
+
 	~mqnode() {
 		for(char i = 0; i < 4; ++i) {
 			if(m_nodes[i])
@@ -547,6 +585,7 @@ public:
  */
 template <class T>
 class mqtree {
+	friend class mqnode<T>;
 private:
 
 	int m_maxDepth;						///<! The maximum tree depth.
@@ -556,6 +595,12 @@ private:
 	std::string m_rootPath;
 	int m_blkSize;
 	uint64_t m_nextKey;					///<! Retrieved by child nodes for identification.
+
+protected:
+
+	uint64_t nextKey() {
+		return ++m_nextKey;
+	}
 
 public:
 
@@ -581,10 +626,6 @@ public:
 	 */
 	mqtree<T>(double minx, double miny, double maxx, double maxy, int maxDepth = 100) {
 		init(minx, miny, maxx, maxy, maxDepth);
-	}
-
-	uint64_t nextKey() {
-		return ++m_nextKey;
 	}
 
 	void init(double minx, double miny, double maxx, double maxy, int maxDepth = 100) {
@@ -647,6 +688,23 @@ public:
 	void add(std::vector<T>& items) {
 		for(const T& item : items)
 			add(item);
+	}
+
+	/**
+	 * \brief Reset the iterator.
+	 */
+	void reset() {
+		m_root->reset();
+	}
+
+	/**
+	 * \brief Return the next item in a depth-first traversal.
+	 *
+	 * \param The item to populate.
+	 * \return True if an item was found.
+	 */
+	bool next(T& item) {
+		return m_root->next(item);
 	}
 
 	/**
