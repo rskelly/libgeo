@@ -51,7 +51,7 @@ public:
 	T* data;
 	size_t size;
 	Buffer(size_t s = 0) :
-		size(0) {
+		data(nullptr), size(0) {
 		if(s)
 			init(s);
 	}
@@ -65,7 +65,8 @@ public:
 		}
 	}
 	~Buffer() {
-		free(data);
+		if(data)
+			free(data);
 	}
 };
 
