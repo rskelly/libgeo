@@ -30,6 +30,13 @@ using namespace geo::util;
 
 namespace {
 
+/**
+ * \brief Recursively create the directory with the given mode.
+ *
+ * \param file_path The path to the directory.
+ * \param mode The folder permissions.
+ * \return 0 on success.
+ */
 int mkpath(const char* file_path, mode_t mode) {
     //assert(file_path && *file_path);
     for (char* p = strchr((char*) file_path + 1, '/'); p; p = strchr(p + 1, '/')) {
@@ -79,15 +86,15 @@ template <class T>
 class lrunode {
 private:
 	bool m_locked;				///<! If the node is in use is should not be expirable. This is a problem in tree traversals. Lock to prevent.
-	size_t m_key;
-	std::string m_path;
-	std::vector<T> m_cache;
-	Buffer<char> m_buf;
+	size_t m_key;				///<! This node's key in the lookup table.
+	std::string m_path;			///<! The path to the storage file.
+	std::vector<T> m_cache;		///<! The list of elements stored in the leaf.
+	Buffer<char> m_buf;			///<! A buffer for reading and writing to the file.
 
 public:
 
-	lrunode* left;
-	lrunode* right;
+	lrunode* left;				///<! The left (older) node.
+	lrunode* right;				///<! The right (newer) node.
 
 	lrunode() :
 		m_locked(false), m_key(0),
@@ -186,7 +193,7 @@ private:
 	lrunode<T>* m_first;								///<! The first (oldest) node.
 	lrunode<T>* m_last;									///<! The last (newest) node.
 	size_t m_size;										///<! The number of nodes allowed before swapping.
-	size_t m_blkSize;
+	size_t m_blkSize;									///<! The size of data blocks used for storing to file.
 	size_t m_stats[3];									///<! Statistics for cache hits, new nodes and swapped nodes.
 
 	/**
@@ -222,8 +229,6 @@ public:
 	lrucache(size_t size = 100, size_t blkSize = 4096) :
 		m_first(nullptr), m_last(nullptr),
 		m_size(size), m_blkSize(blkSize) {
-
-		std::cerr << "LRU Load factor: " << m_nodes.load_factor() << "; " << m_nodes.max_load_factor() << "\n";
 
 		for(int i = 0; i < 3; ++i)
 			m_stats[i] = 0;
