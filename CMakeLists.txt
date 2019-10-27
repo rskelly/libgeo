@@ -79,6 +79,10 @@ link_directories(./build/lib ./build/bin ${GDAL_LIBRARYDIR}
 
 # Build support libraries ################################################################################
 
+enable_language (Fortran)
+file (GLOB FSRC src/fitpack/*.f)
+add_library (fitpack_mod SHARED ${FSRC}) 
+
 set (geoutilsrc src/geo.cpp src/util.cpp src/md5.cpp)
 add_library (geoutilobj OBJECT ${geoutilsrc})
 set_target_properties (geoutilobj PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -116,10 +120,6 @@ target_link_libraries (geoann geoutil)
 # Applications ##################################################################################################
 
 if(${BUILD_APPS})
-
-	#enable_language (Fortran)
-	#file (GLOB FSRC src/fitpack/*.f)
-	#add_library (fitpack_mod SHARED ${FSRC}) 
 
 	# add_executable (pc2tile src/apps/pc2tile.cpp)
 	# target_link_libraries (pc2tile geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY} ${GEOS_LIBRARY})
@@ -163,7 +163,10 @@ install(TARGETS geoann geopc geogrid geoutil geodb RUNTIME DESTINATION bin LIBRA
 
 if(${BUILD_TESTS})
 
-	add_executable (libgeo_test src/tests/test.cpp)
-	target_link_libraries (libgeo_test geoutil geogrid geopc)
+	#add_executable (libgeo_test src/tests/test.cpp)
+	#target_link_libraries (libgeo_test geoutil geogrid geopc)
+
+	add_executable (bvspline_test src/tests/bvspline_test.cpp)
+	target_link_libraries (bvspline_test geoutil fitpack_mod)
 
 endif()
