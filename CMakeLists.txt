@@ -87,7 +87,7 @@ set (geoutilsrc src/geo.cpp src/util.cpp src/md5.cpp)
 add_library (geoutilobj OBJECT ${geoutilsrc})
 set_target_properties (geoutilobj PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_library(geoutil SHARED $<TARGET_OBJECTS:geoutilobj>)
-target_link_libraries (geoutil ${Boost_LIBRARIES} ${GDAL_LIBRARY} ${CRYPTO_LIBRARY} ${SQLITE_LIBRARY} ${SPATIALITE_LIBRARY})
+target_link_libraries (geoutil fitpack_mod ${Boost_LIBRARIES} ${GDAL_LIBRARY} ${CRYPTO_LIBRARY} ${SQLITE_LIBRARY} ${SPATIALITE_LIBRARY})
 # is rt needed here doesn't work on windows.
 
 set (geodbsrc src/geo.cpp src/db.cpp)
@@ -159,7 +159,7 @@ if(${BUILD_APPS})
 	
 endif()
 
-install(TARGETS geoann geopc geogrid geoutil geodb RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
+install(TARGETS geoann geopc geogrid geoutil geodb fitpack_mod RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
 
 if(${BUILD_TESTS})
 

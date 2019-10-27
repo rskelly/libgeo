@@ -694,6 +694,7 @@ int BivariateSpline::init(double& smooth, const std::vector<double>& x, const st
 	}
 
 	if(weights.empty()) {
+		std::cout << "Using std. dev. for weights.\n";
 		double s = 1.0 / stddev(z);
 		weights.resize(x.size());
 		for(size_t i = 0; i < x.size(); ++i)
