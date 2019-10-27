@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <sstream>
 #include <regex>
+#include <fstream>
 
 #include <gdal_priv.h>
 #include <ogr_spatialref.h>
@@ -25,6 +26,22 @@
 #include "util.hpp"
 
 using namespace geo::util;
+
+extern "C" {
+
+	// Using const for arrays passed directly in from c++ call.
+
+	void surfit_(int* iopt, int* m, const double* x, const double* y, const double* z, const double* w,
+			double* xb, double* xe, double* yb, double* ye, int* kx, int* ky,
+			double* s, int* nxest, int* nyest, int* nmax, double* eps,
+			int* nx, double* tx, int* ny, double* ty, double* c, double* fp,
+			double* wrk1, int* lwrk1, double* wrk2, int* lwrk2, int* iwrk, int* kwrk,
+			int* ier);
+
+	void surev_(int* idim, double* tu, int* nu, double* tv, int* nv,
+			double* c, const double* u, int* mu, const double* v, int* mv, double* f, int* mf,
+			double* wrk, int* lwrk, int* iwrk, int* kwrk, int* ier);
+}
 
 namespace {
 
@@ -657,3 +674,305 @@ void Bounds::align(double x, double y, double xres, double yres) {
 	m_maxy = y;
 }
 
+double BivariateSpline::stddev(const std::vector<double>& v) const {
+	double mean = 0, var = 0;
+	for(const double& vv : v)
+		mean += vv;
+	mean /= v.size();
+	for(const double& vv : v)
+		var += std::pow(vv - mean, 2.0);
+	return std::sqrt(var / v.size());
+}
+
+int BivariateSpline::init(double& smooth, const std::vector<double>& x, const std::vector<double>& y, const std::vector<double>& z,
+		std::vector<double>& weights,
+		double x0, double y0, double x1, double y1) {
+
+	if(smooth <= 0) {
+		smooth = x.size();
+		std::cout << "Setting smooth value to " << smooth << "\n";
+	}
+
+	if(weights.empty()) {
+		double s = 1.0 / stddev(z);
+		weights.resize(x.size());
+		for(size_t i = 0; i < x.size(); ++i)
+			weights[i] = s;
+	}
+
+	int iopt = 0;
+	int kx = 3;
+	int ky = 3;
+	double eps = std::pow(10.0, -15.0);
+
+	int m = x.size();
+	if(m < (kx + 1) * (ky + 1))
+		throw std::runtime_error("x array size must be greater than or equal to (kx + 1) * (ky + 1).");
+
+	int nxest = (int) std::ceil(kx + 1.0 + std::sqrt(m / 2.0));
+	if(nxest < 2 * kx + 2)
+		throw std::runtime_error("nxest too small.");
+	int nyest = (int) std::ceil(ky + 1.0 + std::sqrt(m / 2.0));
+	if(nyest < 2 * ky + 2)
+		throw std::runtime_error("nyest too small.");
+	int nmax = std::max(std::max(m, nxest), nyest);
+
+	m_c.resize((nxest - kx - 1) * (nyest - ky - 1));
+	m_tx.resize(m);
+	m_ty.resize(m);
+
+	double fp;
+
+	int u = nxest - kx - 1;
+	int v = nyest - ky - 1;
+	int km = std::max(kx, ky) + 1;
+	int ne = std::max(nxest, nyest);
+	int bx = kx * v + ky + 1;
+	int by = ky * u + kx +1;
+	int b1, b2;
+	if(bx <= by) {
+		b1 = bx;
+		b2 = b1 + v - ky;
+	} else {
+		b1 = by;
+		b2 = b1 + u - kx;
+	}
+
+	int lwrk1 = u * v * (2 + b1 + b2) + 2 * (u + v + km * (m + ne) + ne - kx - ky) + b2 + 1;
+	std::vector<double> wrk1(lwrk1);
+
+	int lwrk2 = u * v * (b2 + 1) + b2;
+	std::vector<double> wrk2(lwrk2);
+
+	int kwrk = m + (nxest - 2 * kx - 1) * (nyest - 2 * ky - 1);
+	std::vector<int> iwrk(kwrk);
+
+	int ier, iter = 0;
+	do {
+		std::cout << "Smoothing with " << smooth << "\n";
+		surfit_(&iopt, &m, x.data(), y.data(), z.data(), weights.data(),
+				&x0, &x1, &y0, &y1, &kx, &ky,
+				&smooth, &nxest, &nyest, &nmax, &eps,
+				&m_nx, m_tx.data(), &m_ny, m_ty.data(), m_c.data(), &fp,
+				wrk1.data(), (int*) &lwrk1, wrk2.data(), (int*) &lwrk2, iwrk.data(), (int*) &kwrk,	// Dangerous converstion to int.
+				&ier);
+
+		if(ier == 1) {
+			std::cerr << "Smoothing parameter too small. Increasing: " << smooth << "->" << smooth * 2 << "\n";
+			smooth *= 2;
+		} else if(ier == 4) {
+			std::cerr << "Too many knots. Increased smoothing parameter: " << smooth << "->" << smooth * 2 << "\n";
+			smooth *= 2;
+		} else if(ier == 5) {
+			std::cerr << "Can't add more knots. Increased smoothing parameter: " << smooth << "->" << smooth * 2 << "\n";
+			smooth *= 2;
+		} else if(ier == -2) {
+			std::cerr << "Output is the least squares fit. Smoothing should be no larger than " << fp << " (" << smooth << ")\n";
+			smooth *= 0.5;
+		} else if(ier < 0) {
+			std::cerr << "The coefficients are the minimal norm least-squares solution of a rank deficient system (" << ier << ")\n";
+			break;
+		} else if(ier > 5) {
+			throw std::runtime_error("Smoothing failed");
+		} else if(ier == 0) {
+			break;
+		}
+		++iter;
+	} while(iter < 100);
+
+	return ier;
+
+}
+
+int BivariateSpline::evaluate(const std::vector<double>& x, const std::vector<double>& y, std::vector<double>& z) {
+
+	int idim = 1;
+	int cols = x.size();
+	int rows = y.size();
+	int mf = cols * rows * idim;
+
+	int lwrk1 = cols * rows * 4;
+	std::vector<double> wrk1(lwrk1);
+
+	int liwrk = cols * rows;
+	std::vector<int> iwrk(liwrk);
+
+	int ier;
+
+	z.resize(mf);
+
+	surev_(&idim, m_tx.data(), &m_nx, m_ty.data(), &m_ny,
+			m_c.data(), x.data(), &cols, y.data(), &rows, z.data(), &mf,
+			wrk1.data(), (int*) &lwrk1, iwrk.data(), (int*) &liwrk, &ier);
+
+	return ier;
+}
+
+
+using namespace geo::util::csv;
+
+int CSVValue::asInt() const {
+	return i;
+}
+
+double CSVValue::asDouble() const {
+	return d;
+}
+
+const std::string& CSVValue::asString() const {
+	return s;
+}
+
+
+bool CSV::isdouble(const std::string& s) {
+	if(s == "inf" || s == "-inf" || s == "NaN")
+		return true;
+	for(size_t i = 0; i < s.size(); ++i) {
+		if(!std::isdigit(s[i]) && s[i] != '.')
+			return false;
+	}
+	return true;
+}
+
+bool CSV::isint(const std::string& s) {
+	for(size_t i = 0; i < s.size(); ++i) {
+		if(!std::isdigit(s[i]))
+			return false;
+	}
+	return true;
+}
+
+CSV::CSV(const std::string& file, bool header) {
+	if(!file.empty())
+		load(file, header);
+}
+
+void CSV::load(const std::string& file, bool header) {
+	std::ifstream in(file);
+	std::string line;
+	std::string cell;
+	std::vector<std::string> names;
+	std::vector<CSVType> types;
+	std::vector<std::vector<std::string>> values;
+	int colCount = 0;
+	bool doNames = true;
+	while(std::getline(in, line)) {
+		std::stringstream ss(line);
+		if(header) {
+			while(std::getline(ss, cell, ','))
+				names.push_back(cell);
+			colCount = names.size();
+			values.resize(colCount);
+			header = false;
+			doNames = false;
+		} else {
+			int idx = 0;
+			while(std::getline(ss, cell, ',')) {
+				if(doNames) {
+					names.push_back("col_" + std::to_string(++colCount));
+					values.resize(colCount);
+				}
+				values[idx++].push_back(cell);
+			}
+			doNames = false;
+		}
+	}
+	types.resize(names.size());
+	for(size_t i = 0; i < names.size(); ++i) {
+		int t = 2;
+		for(size_t j = 0; j < values[i].size(); ++j) {
+			if(t == 2 && !isint(values[i][j])) {
+				--t;
+			} else if(t == 1 && !isdouble(values[i][j])) {
+				--t;
+				break;
+			}
+		}
+		switch(t) {
+		case 2: types[i] = Int; break;
+		case 1: types[i] = Double; break;
+		default: types[i] = String; break;
+		}
+	}
+	m_values.resize(names.size());
+	for(size_t i = 0; i < names.size(); ++i) {
+		m_values[i].name = names[i];
+		m_values[i].type = types[i];
+		m_values[i].values.resize(values[i].size());
+		for(size_t j = 0; j < values[i].size(); ++j) {
+			switch(types[i]) {
+			case Double:
+				m_values[i].values[j].d = atof(values[i][j].c_str());
+				break;
+			case Int:
+				m_values[i].values[j].i = atoi(values[i][j].c_str());
+				break;
+			default:
+				m_values[i].values[j].s = values[i][j];
+				break;
+			}
+		}
+		values[i].clear();
+	}
+}
+
+std::vector<std::string> CSV::columnNames() const {
+	std::vector<std::string> names;
+	for(const CSVColumn& c : m_values)
+		names.push_back(c.name);
+	return names;
+}
+
+std::vector<CSVValue> CSV::row(size_t idx) const {
+	if(idx >= m_values[0].values.size())
+		throw std::runtime_error("Index is too large.");
+	std::vector<CSVValue> row;
+	for(size_t i = 0; i < m_values.size(); ++i)
+		row.push_back(m_values[i].values[idx]);
+	return row;
+}
+
+std::vector<CSVValue> CSV::column(const std::string& name) const {
+	for(size_t i = 0; i < m_values.size(); ++i) {
+		if(m_values[i].name == name)
+			return m_values[i].values;
+	}
+	throw std::runtime_error("No column named " + name);
+}
+
+CSVType CSV::columnType(const std::string& name) const {
+	for(size_t i = 0; i < m_values.size(); ++i) {
+		if(m_values[i].name == name)
+			return m_values[i].type;
+	}
+	throw std::runtime_error("No column named " + name);
+}
+
+std::vector<CSVValue> CSV::column(size_t i) const {
+	if(i < m_values.size())
+		return m_values[i].values;
+	throw std::runtime_error("No column with index " + i);
+}
+
+CSVType CSV::columnType(size_t i) const {
+	if(i < m_values.size())
+		return m_values[i].type;
+	throw std::runtime_error("No column with index " + i);
+}
+
+
+void geo::util::saveGrid(const std::string& file, const std::vector<double> grid,
+		int cols, int rows, double minx, double miny, double xres, double yres,
+		const std::string& proj) {
+	GDALAllRegister();
+	GDALDriverManager* dm = GetGDALDriverManager();
+	GDALDriver* drv = dm->GetDriverByName("GTiff");
+	GDALDataset* ds = drv->Create(file.c_str(), cols, rows, 1, GDT_Float32, 0);
+	double trans[] = {minx, xres, 0, miny, 0, yres};
+	ds->SetGeoTransform(trans);
+	ds->SetProjection(proj.c_str());
+	if(CE_None != ds->GetRasterBand(1)->RasterIO(GF_Write, 0, 0, cols, rows, (void*) grid.data(), cols, rows, GDT_Float64, 0, 0, 0))
+		std::cerr << "Failed to write to raster.\n";
+	ds->GetRasterBand(1)->SetNoDataValue(-9999.0);
+	GDALClose(ds);
+}

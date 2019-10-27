@@ -460,6 +460,188 @@ public:
 };
 
 
+class BivariateSpline {
+private:
+	std::vector<double> m_tx;
+	std::vector<double> m_ty;
+	std::vector<double> m_c;
+	int m_nx;
+	int m_ny;
+
+public:
+
+	/**
+	 * \brief Initialize the spline.
+	 *
+	 * The x, y, z and weights lists are the same length.
+	 *
+	 * Recommended values for s depend on the weights w(i). if these are
+	 * taken as 1/d(i) with d(i) an estimate of the standard deviation of
+	 * z(i), a good s-value should be found in the range (m-sqrt(2*m),m+
+	 * sqrt(2*m)). if nothing is known about the statistical error in z(i)
+	 * each w(i) can be set equal to one and s determined by trial and
+	 * error, taking account of the comments above. the best is then to
+	 * start with a very large value of s ( to determine the least-squares
+	 * polynomial and the corresponding upper bound fp0 for s) and then to
+	 * progressively decrease the value of s ( say by a factor 10 in the
+	 * beginning, i.e. s=fp0/10, fp0/100,...and more carefully as the
+	 * approximation shows more detail) to obtain closer fits.
+	 *
+	 * \param[inout] smooth The smoothness parameter. Recommended to be between m - sqrt(2 * m) and m + sqrt(2 * m) if the weights are 1/std(z). On exit has the smoothed value that was used.
+	 * \param x The list of x-coordinates.
+	 * \param y The list of x-coordinates.
+	 * \param z The list of x-coordinates.
+	 * \param[inout] weights The list of weights. If empty, estimated as 1/stddev(z). If this is the case, smooth should be chosen accordingly.
+	 * \param x0 The minimum x coordinate of the computation area.
+	 * \param y0 The minimum y coordinate of the computation area.
+	 * \param x1 The maximum x coordinate of the computation area.
+	 * \param y1 The maximum y coordinate of the computation area.
+	 */
+	int init(double& smooth, const std::vector<double>& x, const std::vector<double>& y, const std::vector<double>& z,
+			std::vector<double>& weights,
+			double x0, double y0, double x1, double y1);
+
+	int evaluate(const std::vector<double>& x, const std::vector<double>& y, std::vector<double>& z);
+
+	double stddev(const std::vector<double>& v) const;
+
+};
+
+namespace csv {
+
+	enum CSVType {
+		Int,
+		Double,
+		String
+	};
+
+	class CSVValue {
+	public:
+		std::string s;
+		union {
+			int i;
+			double d;
+		};
+		int asInt() const;
+		double asDouble() const;
+		const std::string& asString() const;
+	};
+
+	class CSVColumn {
+	public:
+		std::string name;
+		CSVType type;
+		std::vector<CSVValue> values;
+	};
+
+	class CSV {
+	private:
+		std::vector<CSVColumn> m_values;
+		std::string m_file;
+
+		/**
+		 * \brief Return true if the string contains a double.
+		 *
+		 * \param s A string, possibly representing a double.
+		 * \return True if the string contains a double.
+		 */
+		bool isdouble(const std::string& s);
+
+		/**
+		 * \brief Return true if the string contains an int.
+		 *
+		 * \param s A string, possibly representing an int.
+		 * \return True if the string contains an int.
+		 */
+		bool isint(const std::string& s);
+
+	public:
+
+		/**
+		 * \brief Construct and possibly load a CSV file.
+		 *
+		 * \param file The filename.
+		 * \param header True if the first line contains column names.
+		 */
+		CSV(const std::string& file = "", bool header = false);
+
+		/**
+		 * \brief Load a CSV file.
+		 *
+		 * \param file The filename.
+		 * \param header True if the first line contains column names.
+		 */
+		void load(const std::string& file, bool header);
+
+		/**
+		 * \brief Return the list of column names.
+		 *
+		 * \return The list of column names.
+		 */
+		std::vector<std::string> columnNames() const ;
+
+		/**
+		 * \brief Return the row.
+		 *
+		 * \param idx The row index.
+		 * \return The row of values.
+		 */
+		std::vector<CSVValue> row(size_t idx) const;
+
+		/**
+		 * \brief Return the column.
+		 *
+		 * \param name The column name.
+		 * \return The column.
+		 */
+		std::vector<CSVValue> column(const std::string& name) const;
+
+		/**
+		 * \brief Return the column type.
+		 *
+		 * \param name The column name.
+		 * \return The column type.
+		 */
+		CSVType columnType(const std::string& name) const;
+
+		/**
+		 * \brief Return the column.
+		 *
+		 * \param idx The column index.
+		 * \return The column.
+		 */
+		std::vector<CSVValue> column(size_t i) const;
+
+		/**
+		 * \brief Return the column type.
+		 *
+		 * \param name The column index.
+		 * \return The column type.
+		 */
+		CSVType columnType(size_t i) const;
+
+	};
+
+} // csv
+
+/**
+ * \brief A quick and dirty way to save a raster.
+ *
+ * The grid is a list of values in row-major order.
+ *
+ * \param file The path to the new files.
+ * \param grid The grid of values to write to a raster.
+ * \param cols The column width of teh raster.
+ * \param rows The row height of the raster.
+ * \param minx The x-coordinate at the top-left corner of the raster.
+ * \param miny The y-coordinate at the top-left corner of the raster.
+ * \param xres The resolution of the raster in x.
+ * \param yres The resolution of the raster in y.
+ * \param proj The projection.
+ */
+void saveGrid(const std::string& file, const std::vector<double> grid,
+		int cols, int rows, double minx, double miny,
+		double xres, double yres, const std::string& proj);
 
 } // util
 } // geo
