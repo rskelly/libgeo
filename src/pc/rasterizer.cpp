@@ -143,7 +143,7 @@ void fixBounds(double* bounds, double resX, double resY, double& easting, double
 			if(easting > xmin) {
 				while(easting > xmin)
 					easting -= rx;
-				g_argerr("Adjusted easting to be to the West of the boundary.")
+				g_warn("Adjusted easting to be to the West of the boundary.")
 			}
 			xmin = easting;
 			xmax += rx;
@@ -151,7 +151,7 @@ void fixBounds(double* bounds, double resX, double resY, double& easting, double
 			if(easting < xmax) {
 				while(easting < xmax)
 					easting += rx;
-				g_argerr("Adjusted easting to be to the East of the boundary.")
+				g_warn("Adjusted easting to be to the East of the boundary.")
 			}
 			xmax = easting;
 			xmin -= rx;
@@ -166,7 +166,7 @@ void fixBounds(double* bounds, double resX, double resY, double& easting, double
 			if(northing > ymin) {
 				while(northing > ymin)
 					northing -= ry;
-				g_argerr("Adjusted Northing to be to the North of the boundary.")
+				g_warn("Adjusted Northing to be to the North of the boundary.")
 			}
 			ymin = northing;
 			ymax += ry;
@@ -174,7 +174,7 @@ void fixBounds(double* bounds, double resX, double resY, double& easting, double
 			if(northing < ymax) {
 				while(northing < ymax)
 					northing += ry;
-				g_argerr("Adjusted Northing to be to the North of the boundary.")
+				g_warn("Adjusted Northing to be to the North of the boundary.")
 			}
 			ymax = northing;
 			ymin -= ry;
