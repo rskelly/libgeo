@@ -761,6 +761,9 @@ int BivariateSpline::init(double& smooth, const std::vector<double>& x, const st
 		if(ier == 1) {
 			std::cerr << "Smoothing parameter too small. Increasing: " << smooth << "->" << smooth * 2 << "\n";
 			smooth *= 2;
+		} else if(ier == 2) {
+			std::cerr << "Smoothing parameter probably too small. Increasing: " << smooth << "->" << smooth * 2 << "\n";
+			smooth *= 2;
 		} else if(ier == 4) {
 			std::cerr << "Too many knots. Increased smoothing parameter: " << smooth << "->" << smooth * 2 << "\n";
 			smooth *= 2;
@@ -829,7 +832,7 @@ bool CSV::isdouble(const std::string& s) {
 	if(s == "inf" || s == "-inf" || s == "NaN")
 		return true;
 	for(size_t i = 0; i < s.size(); ++i) {
-		if(!std::isdigit(s[i]) && s[i] != '.')
+		if(!std::isdigit(s[i]) && s[i] != '.' && s[i] != '+' && s[i] != '-' && s[i] != 'e')
 			return false;
 	}
 	return true;
