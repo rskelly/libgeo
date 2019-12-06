@@ -140,23 +140,17 @@ void fixBounds(double* bounds, double resX, double resY, double& easting, double
 		easting = resX > 0 ? xmin : xmax;
 	} else {
 		if(resX > 0) {
+			while(easting < xmin)
+				easting += rx;
 			while(easting > xmin)
 				easting -= rx;
-			if(easting < xmin) {
-				while(easting < xmin)
-					easting += rx;
-				easting -= rx;
-			}
 			xmin = easting;
 			xmax += rx;
 		} else {
+			while(easting > xmax)
+				easting -= rx;
 			while(easting < xmax)
-				easting -= rx;
-			if(easting > xmax) {
-				while(easting > xmax)
-					easting += rx;
-				easting -= rx;
-			}
+				easting += rx;
 			xmax = easting;
 			xmin -= rx;
 		}
@@ -167,23 +161,17 @@ void fixBounds(double* bounds, double resX, double resY, double& easting, double
 		northing = resY > 0 ? ymin : ymax;
 	} else {
 		if(resY > 0) {
+			while(northing < ymin)
+				northing += ry;
 			while(northing > ymin)
 				northing -= ry;
-			if(northing < ymin) {
-				while(northing < ymin)
-					northing += ry;
-				northing -= ry;
-			}
 			ymin = northing;
 			ymax += ry;
 		} else {
+			while(northing > ymax)
+				northing -= ry;
 			while(northing < ymax)
-				northing -= ry;
-			if(northing > ymax) {
-				while(northing > ymax)
-					northing += ry;
-				northing -= ry;
-			}
+				northing += ry;
 			ymax = northing;
 			ymin -= ry;
 		}

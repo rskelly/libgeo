@@ -1,6 +1,15 @@
 /*
  * hlrg_biometrics.cpp
  *
+ * Bands:
+ * 1) count
+ * 2) std. dev
+ * 3) gap fraction
+ * 4) 85th percentile
+ * 5-9) L-Moments
+ * 10-29) LHQ
+ * 30-50) CCF
+ *
  *  Created on: Apr 3, 2018
  *      Author: rob
  */
