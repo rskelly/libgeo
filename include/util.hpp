@@ -501,6 +501,9 @@ public:
 			std::vector<double>& weights,
 			double x0, double y0, double x1, double y1);
 
+	/**
+	 * \brief Evaluate.
+	 */
 	int evaluate(const std::vector<double>& x, const std::vector<double>& y, std::vector<double>& z);
 
 	double stddev(const std::vector<double>& v) const;

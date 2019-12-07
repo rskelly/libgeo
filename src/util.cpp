@@ -790,15 +790,15 @@ int BivariateSpline::init(double& smooth, const std::vector<double>& x, const st
 
 int BivariateSpline::evaluate(const std::vector<double>& x, const std::vector<double>& y, std::vector<double>& z) {
 
-	int idim = 1;
-	int cols = x.size();
-	int rows = y.size();
-	int mf = cols * rows * idim;
+	int idim = 2;
+	int nx = x.size();
+	int ny = y.size();
+	int mf = nx* ny * idim;
 
-	int lwrk1 = cols * rows * 4;
+	int lwrk1 = (nx + ny) * 4;
 	std::vector<double> wrk1(lwrk1);
 
-	int liwrk = cols * rows;
+	int liwrk = nx + ny;
 	std::vector<int> iwrk(liwrk);
 
 	int ier;
@@ -806,7 +806,7 @@ int BivariateSpline::evaluate(const std::vector<double>& x, const std::vector<do
 	z.resize(mf);
 
 	surev_(&idim, m_tx.data(), &m_nx, m_ty.data(), &m_ny,
-			m_c.data(), x.data(), &cols, y.data(), &rows, z.data(), &mf,
+			m_c.data(), x.data(), &nx, y.data(), &ny, z.data(), &mf,
 			wrk1.data(), (int*) &lwrk1, iwrk.data(), (int*) &liwrk, &ier);
 
 	return ier;
