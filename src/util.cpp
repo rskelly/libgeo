@@ -816,11 +816,19 @@ int BivariateSpline::evaluate(const std::vector<double>& x, const std::vector<do
 using namespace geo::util::csv;
 
 int CSVValue::asInt() const {
-	return i;
+	if(t == Int) {
+		return i;
+	} else {
+		return (int) d;
+	}
 }
 
 double CSVValue::asDouble() const {
-	return d;
+	if(t == Double) {
+		return d;
+	} else {
+		return (double) i;
+	}
 }
 
 const std::string& CSVValue::asString() const {
@@ -872,6 +880,8 @@ void CSV::load(const std::string& file, bool header) {
 		} else {
 			int idx = 0;
 			while(std::getline(ss, cell, ',')) {
+				if(idx == colCount)
+					break;
 				if(doNames) {
 					names.push_back("col_" + std::to_string(++colCount));
 					values.resize(colCount);
@@ -904,6 +914,7 @@ void CSV::load(const std::string& file, bool header) {
 		m_values[i].type = types[i];
 		m_values[i].values.resize(values[i].size());
 		for(size_t j = 0; j < values[i].size(); ++j) {
+			m_values[i].values[j].t = types[i];
 			switch(types[i]) {
 			case Double:
 				m_values[i].values[j].d = atof(values[i][j].c_str());

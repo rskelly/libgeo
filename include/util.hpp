@@ -521,6 +521,7 @@ namespace csv {
 	class CSVValue {
 	public:
 		std::string s;
+		CSVType t;
 		union {
 			int i;
 			double d;
