@@ -10,8 +10,9 @@
 #include <thread>
 #include <iostream>
 
+#include "grid.hpp"
 
-using namespace geo::raster;
+using namespace geo::grid;
 
 double memAvg(std::vector<double>& buf, int size, double nd) {
 	double sum = 0, div = 0;
@@ -49,7 +50,7 @@ double memMed(std::vector<double>& buf, double nd) {
 	}
 }
 
-void doInterp(MemRaster& tmem, MemRaster& amem, MemRaster& difmem, int size) {
+void doInterp(Grid<float>& tmem, Grid<float>& amem, Grid<float>& difmem, int size) {
 
 	const GridProps& tprops = tmem.props();
 	const GridProps& aprops = amem.props();
@@ -59,17 +60,17 @@ void doInterp(MemRaster& tmem, MemRaster& amem, MemRaster& difmem, int size) {
 
 	std::vector<double> buf(size * size);
 
-	difmem.fillFloat(nd, 1);
+	difmem.fill(nd, 1);
 
 	double tavg, aavg, tv;
 	for(int trow = 0; trow < tprops.rows(); ++trow) {
 		for(int tcol = 0; tcol < tprops.cols(); ++tcol) {
 
-			if((tv = tmem.getFloat(tcol, trow, 1)) == nd)
+			if((tv = tmem.get(tcol, trow, 1)) == nd)
 				continue;
 
-			double x = tprops.toCentroidX(tcol);
-			double y = tprops.toCentroidY(trow);
+			double x = tprops.toX(tcol);
+			double y = tprops.toY(trow);
 
 			int acol = aprops.toCol(x);
 			int arow = aprops.toRow(y);
@@ -79,7 +80,7 @@ void doInterp(MemRaster& tmem, MemRaster& amem, MemRaster& difmem, int size) {
 					int cc = acol - size / 2 + c;
 					int rr = arow - size / 2 + r;
 					if(aprops.hasCell(cc, rr)) {
-						buf[r * size + c] = amem.getFloat(cc, rr, 1);
+						buf[r * size + c] = amem.get(cc, rr, 1);
 					} else {
 						buf[r * size + c] = nd;
 					}
@@ -88,7 +89,7 @@ void doInterp(MemRaster& tmem, MemRaster& amem, MemRaster& difmem, int size) {
 			aavg = memAvg(buf, size, nd);
 
 			if(aavg == nd) {
-				difmem.setFloat(tcol, trow, tv, 1);
+				difmem.set(tcol, trow, tv, 1);
 				continue;
 			}
 
@@ -97,7 +98,7 @@ void doInterp(MemRaster& tmem, MemRaster& amem, MemRaster& difmem, int size) {
 					int cc = tcol - size / 2 + c;
 					int rr = trow - size / 2 + r;
 					if(tprops.hasCell(cc, rr)) {
-						buf[r * size + c] = tmem.getFloat(cc, rr, 1);
+						buf[r * size + c] = tmem.get(cc, rr, 1);
 					} else {
 						buf[r * size + c] = nd;
 					}
@@ -105,13 +106,13 @@ void doInterp(MemRaster& tmem, MemRaster& amem, MemRaster& difmem, int size) {
 			}
 			tavg = memAvg(buf, size, nd);
 
-			difmem.setFloat(tcol, trow, tv + (aavg - tavg), 1);
+			difmem.set(tcol, trow, tv + (aavg - tavg), 1);
 		}
 	}
 
 	for(int trow = 0; trow < tprops.rows(); ++trow) {
 		for(int tcol = 0; tcol < tprops.cols(); ++tcol)
-			tmem.setFloat(tcol, trow, difmem.getFloat(tcol, trow, 1), 1);
+			tmem.set(tcol, trow, difmem.get(tcol, trow, 1), 1);
 	}
 }
 
@@ -133,7 +134,7 @@ double meanDif(std::vector<double>& tvec, double tn, std::vector<double>& avec, 
 	return count > 0 ? sum / count : 0;
 }
 
-void doInterp2(MemRaster& tmem, MemRaster& amem, MemRaster& dmem, int size) {
+void doInterp2(Grid<double>& tmem, Grid<double>& amem, Grid<double>& dmem, int size) {
 
 	const GridProps& tprops = tmem.props();
 	const GridProps& aprops = amem.props();
@@ -144,7 +145,7 @@ void doInterp2(MemRaster& tmem, MemRaster& amem, MemRaster& dmem, int size) {
 	if(size % 2 != 0) ++size;
 	int side = 2 * size + 1;
 
-	dmem.fillFloat(tn, 1);
+	dmem.fill(tn, 1);
 
 	std::vector<double> avec(side * side);
 	std::vector<double> tvec(side * side);
@@ -171,7 +172,7 @@ void doInterp2(MemRaster& tmem, MemRaster& amem, MemRaster& dmem, int size) {
 
 		for(int trow = 0; trow < trows; ++trow) {
 
-			if((tv = tmem.getFloat(tcol, trow, 1)) != tn) {
+			if((tv = tmem.get(tcol, trow, 1)) != tn) {
 
 				if((trow - lastRow) != 1) {
 					tmem.writeToVector(tvec, tcol - size, trow - size, side, side, 1, invalid);
@@ -200,9 +201,9 @@ void doInterp2(MemRaster& tmem, MemRaster& amem, MemRaster& dmem, int size) {
 
 				double dif = meanDif(tvec, tn, avec, an, side);
 
-				dmem.setFloat(tcol, trow, tv + dif, 1);
+				dmem.set(tcol, trow, tv + dif, 1);
 			} else {
-				dmem.setFloat(tcol, trow, tn, 1);
+				dmem.set(tcol, trow, tn, 1);
 			}
 		}
 	}
@@ -261,9 +262,9 @@ int main(int argc, char** argv) {
 
 	Bounds bounds;
 	GridProps tprops;
-	MemRaster tmem;
+	Grid<float> tmem;
 	{
-		Raster trast(target);
+		Grid<float> trast(target);
 		tprops = trast.props();
 		tprops.setWritable(true);
 		tprops.setBands(1);
@@ -272,25 +273,25 @@ int main(int argc, char** argv) {
 	}
 
 	GridProps mprops;
-	MemRaster mmem;
+	Grid<float> mmem;
 	if(!mask.empty()) {
-		Raster mrast(mask);
+		Grid<float> mrast(mask);
 		mprops = mrast.props();
 		mmem.init(mprops, mapped);
 		mrast.writeTo(mmem, mprops.cols(), mprops.rows(), 0, 0, 0, 0, mband, 1);
 	}
 
 	GridProps aprops(tprops);
-	MemRaster amem;
+	Grid<float> amem;
 	{
 		amem.init(tprops, mapped);
-		amem.fillFloat(tprops.nodata(), 1);
+		amem.fill(tprops.nodata(), 1);
 
 		for(size_t i = 0; i < anchors.size(); ++i) {
-			MemRaster cmem;
+			Grid<float> cmem;
 			GridProps cprops;
 			{
-				Raster crast(anchors[i]);
+				Grid<float> crast(anchors[i]);
 				cprops = crast.props();
 				cprops.setBands(1);
 				cprops.setWritable(true);
@@ -303,16 +304,16 @@ int main(int argc, char** argv) {
 			bool hasMask = !mask.empty();
 			for(int crow = 0; crow < cprops.rows(); ++crow) {
 				for(int ccol = 0; ccol < cprops.cols(); ++ccol) {
-					double x = cprops.toCentroidX(ccol);
-					double y = cprops.toCentroidY(crow);
+					double x = cprops.toX(ccol);
+					double y = cprops.toY(crow);
 					int mcol = mprops.toCol(x);
 					int mrow = mprops.toRow(y);
 					int tcol = tprops.toCol(x);
 					int trow = tprops.toRow(y);
 					if(tprops.hasCell(tcol, trow)) {
-							if((cv = cmem.getFloat(ccol, crow, 1)) != cn
-									&& (!hasMask || mmem.getInt(mcol, mrow, 1) == 1)) {
-							amem.setFloat(tcol, trow, cv, 1);
+							if((cv = cmem.get(ccol, crow, 1)) != cn
+									&& (!hasMask || mmem.get<int>(mcol, mrow, 1) == 1)) {
+							amem.set(tcol, trow, cv, 1);
 						}
 					}
 				}
@@ -321,7 +322,7 @@ int main(int argc, char** argv) {
 	}
 
 	{
-		MemRaster dmem(tprops, mapped);
+		Grid<float> dmem(tprops, mapped);
 		for(const int& d : sizes) {
 
 			doInterp2(tmem, amem, dmem, d);
@@ -330,13 +331,13 @@ int main(int argc, char** argv) {
 				std::stringstream tmp;
 				tmp << "/tmp/match_" <<  d << ".tif";
 				std::cerr << tmp.str() << "\n";
-				Raster rtmp(tmp.str(), tprops);
+				Grid<float> rtmp(tmp.str(), tprops);
 				tmem.writeTo(rtmp);
 			}
 		}
 	}
 
-	Raster adjrast(adjusted, tprops);
+	Grid<float> adjrast(adjusted, tprops);
 	tmem.writeTo(adjrast);
 
 }

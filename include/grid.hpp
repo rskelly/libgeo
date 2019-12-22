@@ -1084,7 +1084,7 @@ public:
 		m_props.setSize(m_ds->GetRasterXSize(), m_ds->GetRasterYSize());
 		m_props.setDataType(gdt2DataType(m_type));
 		m_props.setBands(m_ds->GetRasterCount());
-		m_props.setWritable(writable);
+		m_props.setWritable(true);
 		m_props.setProjection(std::string(m_ds->GetProjectionRef()));
 		m_props.setNoData(m_ds->GetRasterBand(1)->GetNoDataValue()); // TODO: This might not be a real nodata value.
 		m_props.setFilename(filename);
@@ -1094,6 +1094,22 @@ public:
 			m_props.setInterleave(Interleave::BIL);
 		}
 
+		if(mapped()) {
+			initMapped();
+		} else {
+			initMem();
+		}
+
+		std::vector<T> row(props().cols());
+		for(int b = 0; b < props().bands(); ++b) {
+			GDALRasterBand* band = m_ds->GetRasterBand(b + 1);
+			for(int r = 0; r < props().rows(); ++r) {
+				band->RasterIO(GF_Read, 0, r, props().cols(), 1, row.data(), props().cols(), 1, m_type, 0, 0, 0);
+				this->setRow(r, b, row.data());
+			}
+		}
+
+		m_props.setWritable(writable);
 	}
 
 	/**
@@ -1221,7 +1237,7 @@ public:
 	 * \param sigma The standard deviation.
 	 * \param mean The centre of the curve.
 	 */
-	static void gaussianWeights(double *weights, int size, double sigma, double mean = 0) {
+	static void gaussianWeights(T* weights, int size, double sigma, double mean = 0) {
 		// If size is an even number, bump it up.
 		if (size % 2 == 0) {
 			++size;
@@ -1229,8 +1245,8 @@ public:
 		}
 		for (int r = 0; r < size; ++r) {
 			for (int c = 0; c < size; ++c) {
-				int x = size / 2 - c;
-				int y = size / 2 - r;
+				int x = c - size / 2;
+				int y = r - size / 2;
 				weights[r * size + c] = (1 / (2 * G_PI * sigma * sigma)) * std::pow(G_E, -((x * x + y * y) / (2.0 * sigma * sigma)));
 			}
 		}
@@ -1584,6 +1600,89 @@ public:
 				set(c - srcCol + dstCol, r - srcRow + dstRow, get(c, r, srcBand), dstBand);
 		}
 
+	}
+
+	/**
+	 * \brief Write a segment of the raster to a vector.
+	 *
+	 * The cells will be organized in row-column order.
+	 * Invalid values will be corrected.
+	 *
+	 * \param vec The vector.
+	 * \param col The start column.
+	 * \param row The start row.
+	 * \param cols The number of columns.
+	 * \param rows The number of rows.
+	 * \param band The source band.
+	 * \return The number of elements written.
+	 */
+	size_t readFromVector(std::vector<T>& vec, int col, int row, int cols, int rows, int band) {
+		for(int r = 0; r < rows; ++r) {
+			for(int c = 0; c < cols; ++c) {
+				if(!(c + col < 0 || r + row < 0 || c + col >= props().cols() || r + row >= props().rows()))
+					set(col + c, row + r, vec[r * cols + c], band);
+			}
+		}
+		return cols * rows;
+	}
+
+	/**
+	 * \brief Write a segment of the raster to a vector.
+	 *
+	 * The cells will be organized in row-column order.
+	 * Invalid values will be corrected.
+	 *
+	 * \param vec The vector.
+	 * \param col The start column.
+	 * \param row The start row.
+	 * \param cols The number of columns.
+	 * \param rows The number of rows.
+	 * \param band The source band.
+	 * \return The number of elements written.
+	 */
+	size_t writeToVector(std::vector<T>& vec, int col, int row, int cols, int rows, int band) {
+		vec.resize(cols * rows);
+		size_t i = 0;
+		for(int r = 0; r < rows; ++r) {
+			for(int c = 0; c < cols; ++c) {
+				if(c + col < 0 || r + row < 0 || c + col >= props().cols() || r + row >= props().rows()) {
+					vec[i++] = props().nodata();
+				} else {
+					vec[i++] = get(c + col, r + row, band);
+				}
+			}
+		}
+		return i;
+	}
+
+	/**
+	 * \brief Write a segment of the raster to a vector.
+	 *
+	 * The cells will be organized in row-column order.
+	 * Missing or out of bands cells are replaced with the given invalid value.
+	 *
+	 * \param vec The vector.
+	 * \param col The start column.
+	 * \param row The start row.
+	 * \param cols The number of columns.
+	 * \param rows The number of rows.
+	 * \param band The source band.
+	 * \param invalid A replacement for missing or out of bounds cells.
+	 * \return The number of elements written.
+	 */
+	size_t writeToVector(std::vector<T>& vec, int col, int row, int cols, int rows, int band, T invalid) {
+		vec.resize(cols * rows);
+		size_t i = 0;
+		for(int r = row; r < row + rows; ++r) {
+			for(int c = col; c < col + cols; ++c) {
+				if(c < 0 || r < 0 || c >= props().cols() || r >= props().rows()) {
+					vec[i++] = invalid;
+				} else {
+					vec[i++] = get(c + col, r + row, band);
+				}
+			}
+		}
+		return i;
 	}
 
 	/**
