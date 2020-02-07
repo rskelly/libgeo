@@ -18,29 +18,34 @@
 
 #include "geo.hpp"
 
+size_t __idx;
+
 class pointcloud_reader {
 private:
 	std::string m_projection;
 	double m_bounds[6];
-	bool m_hasBounds;
 
+	pdal::PipelineManager m_mgr;
 	pdal::PointTable* m_table;
-	pdal::LasReader m_rdr;
+	pdal::Stage* m_rdr;
 	pdal::LasHeader m_hdr;
 	pdal::PointViewSet m_viewSet;
 	pdal::PointViewPtr m_view;
 	pdal::Dimension::IdList m_dims;
 
 	pdal::PointId m_idx;
+	bool m_hasBounds;
 	bool m_open;
 	size_t m_size;
 
 public:
 
 	pointcloud_reader() :
-		m_hasBounds(false),
+		m_rdr(nullptr),
 		m_table(nullptr),
-		m_idx(0), m_open(false), m_size(0) {
+		m_idx(0),
+		m_hasBounds(false),
+		m_open(false), m_size(0) {
 
 	}
 
@@ -54,26 +59,19 @@ public:
 
 		using namespace pdal::Dimension;
 
-		pdal::Option opt("filename", filename);
-		pdal::Options opts;
-		opts.add(opt);
-
+		m_rdr = &m_mgr.makeReader(filename, "readers.las");
 		m_table = new pdal::PointTable();
-
-		m_rdr.setOptions(opts);
-		m_rdr.prepare(*m_table);
-
-		pdal::LasHeader m_hdr = m_rdr.header();
-		m_projection = m_hdr.srs().getWKT();
-		m_viewSet = m_rdr.execute(*m_table);
+		m_rdr->prepare(*m_table);
+		m_viewSet = m_rdr->execute(*m_table);
 		m_view = *m_viewSet.begin();
 		m_dims = m_view->dims();
 
+		m_projection = m_hdr.srs().getWKT();
+
 		m_idx = 0;
-
 		m_size = m_view->size();
-
 		m_hasBounds = false;
+
 		if(computeBounds) {
 			for(int i = 0; i < 3; ++i) {
 				m_bounds[i] = G_DBL_MAX_POS;
@@ -98,6 +96,7 @@ public:
 
 	void close() {
 		if(m_open) {
+			m_mgr.destroyStage(m_rdr);
 			m_viewSet.clear();
 			delete m_table;
 			m_table = nullptr;
@@ -125,6 +124,10 @@ public:
 	}
 
 	bool next(double& x, double& y, double& z, int& cls) {
+		return next(x, y, z, cls, __idx);
+	}
+
+	bool next(double& x, double& y, double& z, int& cls, size_t& idx) {
 		if(!m_open || m_idx >= m_view->size())
 			return false;
 
@@ -132,13 +135,19 @@ public:
 
 		x = m_view->getFieldAs<double>(Id::X, m_idx);
 		y = m_view->getFieldAs<double>(Id::Y, m_idx);
-		z = m_view->getFieldAs<double>(Id::Z, m_idx);
+		z = m_view->getFieldAs<double>(pdal::Dimension::Id::Z, m_idx);
+		if(z > 1000)
+			std::cerr << z;
 		cls = m_view->getFieldAs<int>(Id::Classification, m_idx);
+		idx = m_idx;
 		++m_idx;
 		return true;
 	}
 
 	bool next(double& x, double& y, double& z) {
+		return next(x, y, z, __idx);
+	}
+	bool next(double& x, double& y, double& z, size_t& idx) {
 		if(!m_open || m_idx >= m_view->size())
 			return false;
 
@@ -146,7 +155,8 @@ public:
 
 		x = m_view->getFieldAs<double>(Id::X, m_idx);
 		y = m_view->getFieldAs<double>(Id::Y, m_idx);
-		z = m_view->getFieldAs<double>(Id::Z, m_idx);
+		z = m_view->getFieldAs<double>(pdal::Dimension::Id::Z, m_idx);
+		idx = m_idx;
 		++m_idx;
 		return true;
 	}
@@ -216,13 +226,24 @@ public:
 	bool save(const std::string& outfile) {
 		if(!m_open)
 			return false;
-		pdal::Option opt("filename", outfile);
-		pdal::Options opts;
-		opts.add(opt);
 
-		pdal::LasWriter wtr;
-		wtr.setOptions(opts);
+		pdal::PointTable table;
+		for(pdal::Dimension::Id dim : m_dims)
+			table.layout()->registerDim(dim);
+
+		pdal::PointViewPtr view(new pdal::PointView(*m_table));
+		view->append(*m_view);
+
+		pdal::BufferReader reader;
+		reader.addView(view);
+
+		pdal::Stage& wtr = m_mgr.makeWriter(outfile, "writers.las");
+		wtr.setInput(reader);
 		wtr.prepare(*m_table);
+		wtr.execute(*m_table);
+
+		m_mgr.destroyStage(&wtr);
+
 		return true;
 	}
 
