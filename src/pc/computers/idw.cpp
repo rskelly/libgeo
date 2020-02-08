@@ -50,3 +50,8 @@ int IDWComputer::compute(double x, double y, const std::vector<geo::pc::Point>&,
 int IDWComputer::bandCount() const {
 	return 1;
 }
+
+std::vector<std::string> IDWComputer::bandMeta() const {
+	return {"idw - exponent: " + std::to_string(exponent)};
+}
+

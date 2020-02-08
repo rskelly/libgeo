@@ -204,8 +204,23 @@ int HLRGBiometricsComputer::compute(double x, double y, const std::vector<geo::p
 	return bandCount();
 }
 
+std::vector<std::string> HLRGBiometricsComputer::bandMeta() const {
+	std::vector<std::string> ret;
+	ret.push_back("Rugosity (Std. Dev.)");
+	ret.push_back("Gap Fraction");
+	ret.push_back("85th Percentile");
+	for(int i = 0; i < 4; ++i)
+		ret.push_back("L-Moment " + std::to_string(i + 1));
+	float slice = 100.0 / m_bands;
+	for(int i = 0; i < m_bands; ++i)
+		ret.push_back("LHQ " + std::to_string((int) (i * slice)) + "% to " + std::to_string((int) ((i + 1) * slice)));
+	for(int i = 0; i < m_bands; ++i)
+		ret.push_back("CCF " + std::to_string((int) (i * slice)) + "% to " + std::to_string((int) ((i + 1) * slice)));
+	return ret;
+}
+
 int HLRGBiometricsComputer::bandCount() const {
-	return 49;
+	return 7 + (m_bands + 1) * 2;
 }
 
 

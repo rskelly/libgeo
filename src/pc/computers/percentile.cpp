@@ -53,3 +53,7 @@ int PercentileComputer::bandCount() const {
 	return 1;
 }
 
+std::vector<std::string> PercentileComputer::bandMeta() const {
+	return {"percentile: " + std::to_string(m_percentile)};
+}
+

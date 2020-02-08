@@ -225,7 +225,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	}
 
 	if(types.empty())
-		g_argerr("No methods given; defaulting to mean");
+		g_argerr("No methods given.");
 
 	// Configure the computers.
 	m_computers.clear();
@@ -268,8 +268,12 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 
 	// Work out the number of bands; each computer knows how many bands it will produce.
 	int bandCount = 1;
-	for(const std::unique_ptr<Computer>& comp : m_computers)
+	std::vector<std::string> bandMeta = {"count"};
+	for(const std::unique_ptr<Computer>& comp : m_computers) {
 		bandCount += comp->bandCount();
+		std::vector<std::string> meta = comp->bandMeta();
+		bandMeta.insert(bandMeta.end(), meta.begin(), meta.end());
+	}
 	g_trace(" bands: " << bandCount)
 
 	// Configure the raster properties.
@@ -281,6 +285,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	props.setProjection(projection);
 	props.setWritable(true);
 	props.setBands(bandCount);
+	props.setBandMetadata(bandMeta);
 	props.setNoData(m_nodata);
 
 	// Add the points to the qtree. Note the scale must be chosen carefully.

@@ -208,6 +208,8 @@ private:
 	std::string m_filename;		///<! The grid filename.
 	std::string m_projection;	///<! The WKT representation of the projection
 	std::string m_driver;		///<! The name of the GDAL driver.
+	std::string m_bandMetaName;				///<! The name to use for metadata items.
+	std::vector<std::string> m_bandMeta;	///<! Band metadata labels.
 
 public:
 
@@ -224,7 +226,8 @@ public:
 		m_compress(false),
 		m_bigTiff(false),
 		m_type(DataType::None),
-		m_interleave(Interleave::BIL) {
+		m_interleave(Interleave::BIL),
+		m_bandMetaName("name") {
 	}
 
 	/**
@@ -659,6 +662,14 @@ public:
 		m_bands = bands;
 	}
 
+	void setBandMetadata(const std::vector<std::string>& meta) {
+		m_bandMeta.assign(meta.begin(), meta.end());
+	}
+
+	void setBandMetaName(const std::string& name) {
+		m_bandMetaName = name;
+	}
+
 	/**
 	 * \brief Get the number of bands.
 	 *
@@ -666,6 +677,14 @@ public:
 	 */
 	int bands() const {
 		return m_bands;
+	}
+
+	const std::vector<std::string>& bandMetadata() const {
+		return m_bandMeta;
+	}
+
+	const std::string& bandMetaName() const {
+		return m_bandMetaName;
 	}
 
 	/**
@@ -1026,6 +1045,12 @@ public:
 				m_ds->GetRasterBand(i)->SetNoDataValue(m_props.nodata());
 		}
 
+		// Set the metadata if there is any.
+		const std::vector<std::string>& bandMeta = m_props.bandMetadata();
+		const char* metaName = m_props.bandMetaName().c_str();
+		for(size_t i = 0; i < std::min(m_props.bands(), (int) bandMeta.size()); ++i)
+			m_ds->GetRasterBand(i + 1)->SetMetadataItem(metaName, bandMeta[i].c_str(), "");
+
 		// Map the raster into virtual memory.
 
 		initMapped();
@@ -1093,6 +1118,12 @@ public:
 		} else {
 			m_props.setInterleave(Interleave::BIL);
 		}
+		// Set the metadata if there is any.
+		std::vector<std::string> bandMeta;
+		const char* metaName = m_props.bandMetaName().c_str();
+		for(size_t i = 0; i < m_props.bands(); ++i)
+			bandMeta.emplace_back(m_ds->GetRasterBand(i + 1)->GetMetadataItem(metaName, ""));
+		m_props.setBandMetadata(bandMeta);
 
 		if(mapped()) {
 			initMapped();

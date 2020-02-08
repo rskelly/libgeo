@@ -608,6 +608,12 @@ public:
 	virtual int bandCount() const = 0;
 
 	/**
+	 * Return the list of band names corresponding to the bands created by the computer.
+	 * \return The list of band names corresponding to the bands created by the computer.
+	 */
+	virtual std::vector<std::string> bandMeta() const = 0;
+
+	/**
 	 * Destroy the computer.
 	 */
 	virtual ~Computer() {}

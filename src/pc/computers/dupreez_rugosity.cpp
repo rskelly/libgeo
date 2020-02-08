@@ -134,3 +134,8 @@ int RugosityComputer::compute(double, double, const std::vector<geo::pc::Point>&
 int RugosityComputer::bandCount() const {
 	return 1;
 }
+
+std::vector<std::string> RugosityComputer::bandMeta() const {
+	return {"dupreez_rugosity"};
+}
+

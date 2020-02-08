@@ -23,6 +23,7 @@ public:
 	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter = nullptr);
 	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out);
 	int bandCount() const;
+	std::vector<std::string> bandMeta() const;
 };
 
 class MeanComputer : public geo::pc::Computer {
@@ -30,6 +31,7 @@ public:
 	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter = nullptr);
 	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out);
 	int bandCount() const;
+	std::vector<std::string> bandMeta() const;
 };
 
 class VarianceComputer : public MeanComputer {
@@ -41,6 +43,7 @@ public:
 	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter = nullptr);
 	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out);
 	int bandCount() const;
+	std::vector<std::string> bandMeta() const;
 };
 
 class StdDevComputer : public VarianceComputer {
@@ -50,6 +53,7 @@ public:
 	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter = nullptr);
 	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out);
 	int bandCount() const;
+	std::vector<std::string> bandMeta() const;
 };
 
 class PercentileComputer : public geo::pc::Computer {
@@ -61,6 +65,7 @@ public:
 	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter = nullptr);
 	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out);
 	int bandCount() const;
+	std::vector<std::string> bandMeta() const;
 };
 
 class MaxComputer : public geo::pc::Computer {
@@ -68,6 +73,7 @@ public:
 	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter = nullptr);
 	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out);
 	int bandCount() const;
+	std::vector<std::string> bandMeta() const;
 };
 
 class MinComputer : public geo::pc::Computer {
@@ -75,6 +81,7 @@ public:
 	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter = nullptr);
 	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out);
 	int bandCount() const;
+	std::vector<std::string> bandMeta() const;
 };
 
 class DensityComputer : public geo::pc::Computer {
@@ -82,6 +89,7 @@ public:
 	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter = nullptr);
 	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out);
 	int bandCount() const;
+	std::vector<std::string> bandMeta() const;
 };
 
 class CountComputer : public geo::pc::Computer {
@@ -91,6 +99,7 @@ public:
 	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter = nullptr);
 	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out);
 	int bandCount() const;
+	std::vector<std::string> bandMeta() const;
 };
 
 class SkewComputer : public geo::pc::Computer {
@@ -101,6 +110,7 @@ public:
 	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter = nullptr);
 	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out);
 	int bandCount() const;
+	std::vector<std::string> bandMeta() const;
 };
 
 class KurtosisComputer : public geo::pc::Computer {
@@ -111,6 +121,7 @@ public:
 	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter = nullptr);
 	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out);
 	int bandCount() const;
+	std::vector<std::string> bandMeta() const;
 };
 
 class CoVComputer : public geo::pc::Computer {
@@ -122,6 +133,7 @@ public:
 	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter = nullptr);
 	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out);
 	int bandCount() const;
+	std::vector<std::string> bandMeta() const;
 };
 
 class CanopyGapFractionComputer : public geo::pc::Computer {
@@ -132,6 +144,7 @@ public:
 	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter = nullptr);
 	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out);
 	int bandCount() const;
+	std::vector<std::string> bandMeta() const;
 };
 
 /**
@@ -152,6 +165,7 @@ public:
 	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter = nullptr);
 	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out);
 	int bandCount() const;
+	std::vector<std::string> bandMeta() const;
 };
 
 class RugosityComputer : public geo::pc::Computer {
@@ -159,6 +173,7 @@ public:
 	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter = nullptr);
 	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out);
 	int bandCount() const;
+	std::vector<std::string> bandMeta() const;
 };
 
 /*
@@ -168,6 +183,7 @@ public:
 	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter = nullptr);
 	int compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out);
 	int bandCount() const;
+	std::vector<std::string> bandMeta() const;
 };
 */
 
