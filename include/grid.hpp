@@ -1121,8 +1121,14 @@ public:
 		// Set the metadata if there is any.
 		std::vector<std::string> bandMeta;
 		const char* metaName = m_props.bandMetaName().c_str();
-		for(size_t i = 0; i < m_props.bands(); ++i)
-			bandMeta.emplace_back(m_ds->GetRasterBand(i + 1)->GetMetadataItem(metaName, ""));
+		for(size_t i = 0; i < m_props.bands(); ++i) {
+			const char* v = m_ds->GetRasterBand(i + 1)->GetMetadataItem(metaName, "");
+			if(v) {
+				bandMeta.emplace_back(v);
+			} else {
+				bandMeta.emplace_back("");
+			}
+		}
 		m_props.setBandMetadata(bandMeta);
 
 		if(mapped()) {
