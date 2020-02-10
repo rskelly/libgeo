@@ -1150,6 +1150,21 @@ public:
 	}
 
 	/**
+	 * \brief Write the metadata values band-wise.
+	 *
+	 * \param name The name of the field to set.
+	 * \param values The list of band values.
+	 */
+	void setMetadata(const std::string& name, const std::vector<std::string>& values) {
+		if(m_ds && props().writable()) {
+			for(int i = 0; i < std::min((int) values.size(), m_ds->GetRasterCount()); ++i)
+				m_ds->GetRasterBand(i + 1)->SetMetadataItem(name.c_str(), values[i].c_str());
+		} else {
+			g_runerr("Raster not open or not writable.");
+		}
+	}
+
+	/**
 	 * \brief Return a map containing the raster driver short name and extension.
 	 *
 	 * \return A map containing the raster driver short name and extension.
@@ -1623,7 +1638,7 @@ public:
 			int cols = 0, int rows = 0,
 			int srcCol = 0, int srcRow = 0,
 			int dstCol = 0, int dstRow = 0,
-			int srcBand = 1, int dstBand = 1) {
+			int srcBand = 0, int dstBand = 0) {
 
 		int srcCols = props().cols();
 		int srcRows = props().rows();
