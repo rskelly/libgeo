@@ -36,18 +36,24 @@ namespace {
 
 	int hlrgLHQ(const std::vector<geo::pc::Point>& pts, int bands, std::vector<double>& out) {
 
-		out.push_back(pts[0].value());
+		if(pts.empty()) {
+			for(int band = 0; band <= bands; ++band)
+				out.push_back(std::nan(""));
+		} else {
 
-		for(int band = 1; band < bands; ++band) {
-			double rank = ((double) band / bands) * (pts.size() + 1);
-			int base = (int) std::floor(rank);
-			double diff = rank - base;
-			int rank1 = base - 1; if(rank1 < 0) rank1 = 0;
-			int rank2 = base;
-			out.push_back(((1.0 - diff) * pts[rank1].value()) + (diff * pts[rank2].value()));
+			out.push_back(pts[0].value());
+
+			for(int band = 1; band < bands; ++band) {
+				double rank = ((double) band / bands) * (pts.size() + 1);
+				int base = (int) std::floor(rank);
+				double diff = rank - base;
+				int rank1 = base - 1; if(rank1 < 0) rank1 = 0;
+				int rank2 = base;
+				out.push_back(((1.0 - diff) * pts[rank1].value()) + (diff * pts[rank2].value()));
+			}
+
+			out.push_back(pts[pts.size() - 1].value());
 		}
-
-		out.push_back(pts[pts.size() - 1].value());
 
 		return bands + 1;
 
@@ -65,14 +71,19 @@ namespace {
 	int hlrgCCF(const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filteredPts,
 			int bands, double threshold, std::vector<double>& out) {
 
-		double htIncrement = (filteredPts[filteredPts.size() - 1].value() - threshold) / bands;
-		double curHeight = threshold;
+		if(pts.empty() || filteredPts.empty()) {
+			for(int band = 0; band <= bands; ++band)
+				out.push_back(std::nan(""));
+		} else {
+			double htIncrement = (filteredPts.back().value() - threshold) / bands;
+			double curHeight = threshold;
 
-		for(int band = 0; band <= bands; ++band) {
-			int ccfCount = getCCFCount(filteredPts, curHeight);
-			double ccfPercent = (double) ccfCount / pts.size();
-			out.push_back(ccfPercent);
-			curHeight += htIncrement;
+			for(int band = 0; band <= bands; ++band) {
+				int ccfCount = getCCFCount(filteredPts, curHeight);
+				double ccfPercent = (double) ccfCount / pts.size();
+				out.push_back(ccfPercent);
+				curHeight += htIncrement;
+			}
 		}
 
 		return bands + 1;
@@ -82,54 +93,60 @@ namespace {
 
 		// Stolen from here: https://pypi.org/project/lmoments/0.1.0/#files
 
-		size_t n = pts.size();
+		if(pts.empty()) {
+			for(int i = 0; i < 4; ++i)
+				out.push_back(std::nan(""));
+		} else {
 
-		std::vector<double> com1; com1.reserve(n);
-		std::vector<double> com2; com2.reserve(n);
-		std::vector<double> com3; com3.reserve(n);
-		std::vector<double> com4; com4.reserve(n);
-		std::vector<double> com5; com5.reserve(n);
-		std::vector<double> com6; com6.reserve(n);
+			size_t n = pts.size();
 
-		for(size_t i = 1; i < n + 1; ++i) {
-			com1.push_back(comb(i - 1, 1));
-			com2.push_back(comb(n - i, 1));
-			com3.push_back(comb(i - 1, 2));
-			com4.push_back(comb(n - i, 2));
-			com5.push_back(comb(i - 1, 3));
-			com6.push_back(comb(n - i, 3));
+			std::vector<double> com1; com1.reserve(n);
+			std::vector<double> com2; com2.reserve(n);
+			std::vector<double> com3; com3.reserve(n);
+			std::vector<double> com4; com4.reserve(n);
+			std::vector<double> com5; com5.reserve(n);
+			std::vector<double> com6; com6.reserve(n);
+
+			for(size_t i = 1; i < n + 1; ++i) {
+				com1.push_back(comb(i - 1, 1));
+				com2.push_back(comb(n - i, 1));
+				com3.push_back(comb(i - 1, 2));
+				com4.push_back(comb(n - i, 2));
+				com5.push_back(comb(i - 1, 3));
+				com6.push_back(comb(n - i, 3));
+			}
+
+			double sum1 = 0, sum2 = 0, sum3 = 0, sum4 = 0;
+
+			for(const geo::pc::Point& p : pts)
+				sum1 += p.z();
+
+			double co1 = 1.0 / comb(n, 1);
+			double co2 = 0.5 * 1.0 / comb(n, 2);
+			double co3 = 1.0 / 3.0 * 1.0 / comb(n, 3);
+			double co4 = 1.0 / 4.0 * 1.0 / comb(n, 5);
+			double v;
+
+			for(size_t i = 0; i < n; ++i) {
+				v = pts[i].value();
+				double tmp2 = com1[i] - com2[i];
+				double tmp3 = com3[i] - 2 * com1[i] * com2[i] + com4[i];
+				double tmp4 = com5[i] - 3 * com3[i] * com2[i] + 3 * com1[i] * com4[i] - com6[i];
+				sum2 += tmp2 * v;
+				sum3 += tmp3 * v;
+				sum4 += tmp4 * v;
+			}
+
+			double l1 = co1 * sum1;
+			double l2 = co2 * sum2;
+			double l3 = co3 * sum3 / l2;
+			double l4 = co4 * sum4 / l2;
+
+			out.push_back(l1);
+			out.push_back(l2);
+			out.push_back(l3);
+			out.push_back(l4);
 		}
-
-		double sum1 = 0, sum2 = 0, sum3 = 0, sum4 = 0;
-
-		for(const geo::pc::Point& p : pts)
-			sum1 += p.z();
-
-		double co1 = 1.0 / comb(n, 1);
-		double co2 = 0.5 * 1.0 / comb(n, 2);
-		double co3 = 1.0 / 3.0 * 1.0 / comb(n, 3);
-		double co4 = 1.0 / 4.0 * 1.0 / comb(n, 5);
-		double v;
-
-		for(size_t i = 0; i < n; ++i) {
-			v = pts[i].value();
-			double tmp2 = com1[i] - com2[i];
-			double tmp3 = com3[i] - 2 * com1[i] * com2[i] + com4[i];
-			double tmp4 = com5[i] - 3 * com3[i] * com2[i] + 3 * com1[i] * com4[i] - com6[i];
-			sum2 += tmp2 * v;
-			sum3 += tmp3 * v;
-			sum4 += tmp4 * v;
-		}
-
-		double l1 = co1 * sum1;
-		double l2 = co2 * sum2;
-		double l3 = co3 * sum3 / l2;
-		double l4 = co4 * sum4 / l2;
-
-		out.push_back(l1);
-		out.push_back(l2);
-		out.push_back(l3);
-		out.push_back(l4);
 
 		return 4;
 	}
