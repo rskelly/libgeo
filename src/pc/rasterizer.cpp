@@ -401,8 +401,11 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 							// Calculate the values in the computer and append to the raster.
 							m_computers[i]->compute(spt.x(), spt.y(), cpts, filtered, radius, out);
 							for(double val : out) {
-								if(!std::isnan(val))
+								if(!std::isnan(val)) {
 									outrast.set(c, r, val, band++);
+								} else {
+									outrast.set(c, r, m_nodata, band++);
+								}
 							}
 						}
 					} else {
