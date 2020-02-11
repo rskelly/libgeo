@@ -84,7 +84,8 @@ Computer* getComputer(const std::string& name) {
 Rasterizer::Rasterizer(const std::vector<std::string> filenames) :
 	m_filter(nullptr),
 	m_thin(0),
-	m_nodata(-9999) {
+	m_nodata(-9999),
+	m_prefilter(false) {
 
 	for(size_t i = 0; i < 4; ++i)
 		m_bounds[i] = std::nan("");
@@ -200,6 +201,10 @@ PCPointFilter* Rasterizer::filter() const {
 	return m_filter;
 }
 
+void Rasterizer::setPrefilter(bool prefilter) {
+	m_prefilter = prefilter;
+}
+
 void Rasterizer::setBounds(double* bounds) {
 	for(size_t i = 0; i < 4; ++i)
 		m_bounds[i] = bounds[i];
@@ -300,9 +305,11 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 				filenames.push_back(fn);
 			f.init(useHeader);
 			while(f.next(pt)) {
-				tree.add(pt);
-				if(++pts % 10000000 == 0)
-					std::cout << pts << "pts\n";
+				if(!m_prefilter || m_filter->keep(pt)) {
+					tree.add(pt);
+					if(++pts % 10000000 == 0)
+						std::cout << pts << "pts\n";
+				}
 			}
 		}
 	}

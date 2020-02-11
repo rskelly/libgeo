@@ -802,6 +802,7 @@ private:
 	int m_thin;
 	double m_nodata;
 	double m_bounds[4];					///<! If bounds are given, this contains them. BLX, BLY, TRX, TRY.
+	bool m_prefilter;					///<! If true, points are filtered before adding to tree.
 
 	// Used by finalizer.
 	std::vector<std::unique_ptr<Computer> > m_computers;
@@ -861,6 +862,8 @@ public:
 	 * \param thin The number of points in each cell.
 	 */
 	void setThin(int thin);
+
+	void setPrefilter(bool prefilter);
 
 	/**
 	 * Set the nodata value. Default is -9999.
