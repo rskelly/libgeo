@@ -227,7 +227,7 @@ public:
 	/**
 	 * \brief Create the LRU cache with the given maximum number of elements.
 	 */
-	lrucache(size_t size = 100, size_t blkSize = 4096) :
+	lrucache(size_t size = 1000, size_t blkSize = 4096) :
 		m_first(nullptr), m_last(nullptr),
 		m_size(size), m_blkSize(blkSize) {
 
