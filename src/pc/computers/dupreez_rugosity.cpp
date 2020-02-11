@@ -75,16 +75,6 @@ double polyArea(const std::list<Point_3>& hull, const Plane_3& plane,
 	return area;
 }
 
-int RugosityComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter) {
-	if(filter) {
-		std::vector<geo::pc::Point> filtered;
-		pointFilter(pts.begin(), pts.end(), std::back_inserter(filtered), filter);
-		return compute(x, y, pts, filtered, radius, out);
-	} else {
-		return compute(x, y, pts, pts, radius, out);
-	}
-}
-
 int RugosityComputer::compute(double, double, const std::vector<geo::pc::Point>&, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out) {
 
 	if(filtered.size() >= 3) {

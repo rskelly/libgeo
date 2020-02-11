@@ -563,6 +563,8 @@ class PCPointFilter;
 
 class Rasterizer;
 
+class PointFilter;
+
 /**
  * Used by Rasterizer to compute cell values from the points found
  * in the neighbourhood of a cell.
@@ -570,6 +572,23 @@ class Rasterizer;
 class Computer {
 private:
 	geo::pc::Rasterizer* m_rasterizer;		///<! Pointer to instance of Rasterizer.
+	std::vector<PointFilter*> m_filters;	///<! The list of point filters.
+
+protected:
+
+	/**
+	 * \brief Filter the given point array using the internal filter set.
+	 *
+	 * \param pts Input points.
+	 * \param out Output points.
+	 * \return The number of points kept.
+	 */
+	size_t filter(const std::vector<geo::pc::Point>& pts, std::vector<geo::pc::Point>& out) const;
+
+	/**
+	 * \brief Return the list of filters.
+	 */
+	const std::vector<PointFilter*> filters() const;
 
 public:
 
@@ -591,15 +610,16 @@ public:
 	/**
 	 * Compute and return the statistic for the points within the neighbourhood
 	 * defined by the lists of points.
-	 * \param type 	 The statistic to compute.
-	 * \param pts 	 The list of Points.
-	 * \param radius The neighbourhood to calculate within.
-	 * \param out    The output list.
+	 * \param type 	 	The statistic to compute.
+	 * \param pts 	 	The list of Points.
+	 * \param filtered 	The list of prefiltered Points.
+	 * \param radius 	The neighbourhood to calculate within.
+	 * \param out    	The output list.
 	 * \return The the number of bands computed.
 	 */
-	virtual int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter = nullptr) = 0;
-
 	virtual int compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out) = 0;
+	//virtual int compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter = nullptr) = 0;
+
 
 	/**
 	 * Return the number of bands that should be returned by the computer.
@@ -612,6 +632,15 @@ public:
 	 * \return The list of band names corresponding to the bands created by the computer.
 	 */
 	virtual std::vector<std::string> bandMeta() const = 0;
+
+	/**
+	 * \brief Add the list of filters to the computer.
+	 *
+	 * These will be applied to the filtered list passed in to the compute method.
+	 *
+	 * \param filters The list of filters.
+	 */
+	void setFilters(const std::vector<PointFilter*>& filters);
 
 	/**
 	 * Destroy the computer.
@@ -630,8 +659,11 @@ public:
  * A configurable filter for point clouds.
  */
 class PCPointFilter {
+private:
+	std::vector<PointFilter*> m_filters;
+	std::unordered_map<std::string, std::vector<PointFilter*>> m_computerFilters;
+
 public:
-	std::vector<PointFilter*> filters;
 
 	/**
 	 * Construct a PCPointFilter.
@@ -686,25 +718,35 @@ public:
 		return i;
 	}
 
-	void addClassFilter(int cls);
+	const std::vector<PointFilter*> computerFilters(const std::string& name) const;
 
-	void addClassFilter(const std::vector<int>& cls);
-
-	void addIntensityFilter(double min, double max);
-
-	void addZRangeFilter(double min, double max);
+	/**
+	 * \brief Add a point filter to the main filter set.
+	 */
+	void addFilter(PointFilter* filter);
 
 	double minZRange() const;
 
 	double maxZRange() const;
 
-	void addScanAngleFilter(double min, double max);
+	/**
+	 * \brief Add a computer-specific filter.
+	 *
+	 * \param argname The flag that triggers the addition ([method]:[filter]).
+	 * \param argv The list of command line arguments.
+	 * \param idx The index of the first filter parameter.
+	 */
+	void addComputerFilter(const std::string& argname, char** argv, int& idx);
 
-	void addKeepLastFilter();
-
-	void addKeepFirstFilter();
-
-	void addRejectEdgeFilter();
+	/**
+	 * \brief Create and return the named filter given the command line arguments, starting at idx.
+	 *
+	 * \param name The name of the filter.
+	 * \param argv The list of command line arguments.
+	 * \param idx The index of the first filter parameter.
+	 * \return The new filter.
+	 */
+	PointFilter* getFilter(const std::string& name, char** argv, int& idx);
 
 	void print() const;
 

@@ -230,8 +230,10 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	// Configure the computers.
 	m_computers.clear();
 	for(const std::string& name : types) {
-		m_computers.emplace_back(getComputer(name));
-		m_computers.back()->setRasterizer(this);
+		std::unique_ptr<Computer> comp(getComputer(name));
+		comp->setFilters(m_filter->computerFilters(name));
+		comp->setRasterizer(this);
+		m_computers.push_back(std::move(comp));
 	}
 
 	// Calculate the overall boundaries of the point cloud.

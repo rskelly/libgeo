@@ -18,8 +18,10 @@
 
 #include "pointcloud.hpp"
 #include "pc_computer.hpp"
+#include "pc_filter.hpp"
 
 using namespace geo::pc::compute;
+using namespace geo::pc::filter;
 
 namespace {
 
@@ -60,7 +62,8 @@ namespace {
 		return count;
 	}
 
-	int hlrgCCF(const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filteredPts, int bands, double threshold, std::vector<double>& out) {
+	int hlrgCCF(const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filteredPts,
+			int bands, double threshold, std::vector<double>& out) {
 
 		double htIncrement = (filteredPts[filteredPts.size() - 1].value() - threshold) / bands;
 		double curHeight = threshold;
@@ -140,46 +143,45 @@ HLRGBiometricsComputer::HLRGBiometricsComputer(int bands, int minCount) :
 	m_perc.setPercentile(.85);
 }
 
-int HLRGBiometricsComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter) {
-	if(filter) {
-		std::vector<geo::pc::Point> filtered;
-		pointFilter(pts.begin(), pts.end(), std::back_inserter(filtered), filter);
-		return compute(x, y, pts, filtered, radius, out);
-	} else {
-		return compute(x, y, pts, pts, radius, out);
+
+int HLRGBiometricsComputer::compute(double x, double y, const std::vector<geo::pc::Point>& /*pts*/, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out) {
+
+	// TODO: Canopy metrics are performed on the filtered set, split by a threshold
+	// value. Thus the comparison is between filtered points>threshold vs. all filtered points.
+	// I do not agree with this strategy but it is what it is.
+	// (Inspired by a problem with a dataset where the canopy density varied differently from
+	// the ground density, even though the cover seemed to be completely uniform due to a
+	// postprocessing error.
+
+	double thresh = G_DBL_MAX_NEG;
+	for(const PointFilter* filter : filters()) {
+		const PointZRangeFilter* f;
+		if((f = dynamic_cast<const PointZRangeFilter*>(filter)) != nullptr)
+			thresh = f->minZ;
 	}
-}
 
-int HLRGBiometricsComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out) {
-
-	std::vector<geo::pc::Point> _pts(filtered);
-	int count = _pts.size();
-
-	std::sort(_pts.begin(), _pts.end(), pointSort);
-
-	double threshold = 0;
-
-	if(rasterizer()) {
-		if(rasterizer()->filter())
-			threshold = rasterizer()->filter()->minZRange();
-	}
+	std::vector<geo::pc::Point> _allpts(filtered);
+	int count = _allpts.size();
+	std::sort(_allpts.begin(), _allpts.end(), pointSort);
+	std::vector<geo::pc::Point> _threshpts;
+	filter(_allpts, _threshpts);
 
 	// "Rugosity"
-	m_stdDev.compute(x, y, pts, filtered, radius, out);
+	m_stdDev.compute(x, y, _allpts, _threshpts, radius, out);
 
 	// "Gap fraction."
 	if(count) {
-		out.push_back(1.0 - ((double) filtered.size() / pts.size()));
+		out.push_back(1.0 - ((double) _threshpts.size() / _allpts.size()));
 	} else {
 		out.push_back(1.0);
 	}
 
 	// "85th percentile"
-	m_perc.compute(x, y, pts, filtered, radius, out);
+	m_perc.compute(x, y, _allpts, _threshpts, radius, out);
 
 	// "L-Moments"
 	if(count) {
-		hlrgLMoments(_pts, out);
+		hlrgLMoments(_threshpts, out);
 	} else {
 		for(int i = 0; i < 4; ++i)
 			out.push_back(std::nan(""));
@@ -187,7 +189,7 @@ int HLRGBiometricsComputer::compute(double x, double y, const std::vector<geo::p
 
 	// "LHQ"
 	if(count) {
-		hlrgLHQ(_pts, m_bands, out);
+		hlrgLHQ(_threshpts, m_bands, out);
 	} else {
 		for(int i = 0; i <= m_bands; ++i)
 			out.push_back(std::nan(""));
@@ -195,7 +197,7 @@ int HLRGBiometricsComputer::compute(double x, double y, const std::vector<geo::p
 
 	// "Canopy closure fraction."
 	if(count) {
-		hlrgCCF(pts, _pts, m_bands, threshold, out);
+		hlrgCCF(_allpts, _threshpts, m_bands, thresh, out);
 	} else {
 		for(int i = 0; i <= m_bands; ++i)
 			out.push_back(0);

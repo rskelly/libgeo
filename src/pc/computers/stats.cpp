@@ -13,16 +13,6 @@
 
 using namespace geo::pc::compute;
 
-int MeanComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter) {
-	if(filter) {
-		std::vector<geo::pc::Point> filtered;
-		pointFilter(pts.begin(), pts.end(), std::back_inserter(filtered), filter);
-		return compute(x, y, pts, filtered, radius, out);
-	} else {
-		return compute(x, y, pts, pts, radius, out);
-	}
-}
-
 int MeanComputer::compute(double, double, const std::vector<geo::pc::Point>&, const std::vector<geo::pc::Point>& filtered, double, std::vector<double>& out) {
 	if(!filtered.empty()) {
 		double sum = 0;
@@ -48,16 +38,6 @@ VarianceComputer::VarianceComputer(double bias) :
 
 void VarianceComputer::setBias(double bias) {
 	m_bias = bias;
-}
-
-int VarianceComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter) {
-	if(filter) {
-		std::vector<geo::pc::Point> filtered;
-		pointFilter(pts.begin(), pts.end(), std::back_inserter(filtered), filter);
-		return compute(x, y, pts, filtered, radius, out);
-	} else {
-		return compute(x, y, pts, pts, radius, out);
-	}
 }
 
 int VarianceComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out) {
@@ -91,16 +71,6 @@ void StdDevComputer::setBias(double bias) {
 	VarianceComputer::setBias(bias);
 }
 
-int StdDevComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter) {
-	if(filter) {
-		std::vector<geo::pc::Point> filtered;
-		pointFilter(pts.begin(), pts.end(), std::back_inserter(filtered), filter);
-		return compute(x, y, pts, filtered, radius, out);
-	} else {
-		return compute(x, y, pts, pts, radius, out);
-	}
-}
-
 int StdDevComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out) {
 	std::vector<double> _out; // TODO: Instance variable.
 	VarianceComputer::compute(x, y, pts, filtered, radius, _out);
@@ -119,16 +89,6 @@ int StdDevComputer::bandCount() const {
 
 std::vector<std::string> StdDevComputer::bandMeta() const {
 	return {"Standard Deviation."};
-}
-
-int MaxComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter) {
-	if(filter) {
-		std::vector<geo::pc::Point> filtered;
-		pointFilter(pts.begin(), pts.end(), std::back_inserter(filtered), filter);
-		return compute(x, y, pts, filtered, radius, out);
-	} else {
-		return compute(x, y, pts, pts, radius, out);
-	}
 }
 
 int MaxComputer::compute(double, double, const std::vector<geo::pc::Point>&, const std::vector<geo::pc::Point>& filtered, double, std::vector<double>& out) {
@@ -153,16 +113,6 @@ std::vector<std::string> MaxComputer::bandMeta() const {
 	return {"Maximum."};
 }
 
-int MinComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter) {
-	if(filter) {
-		std::vector<geo::pc::Point> filtered;
-		pointFilter(pts.begin(), pts.end(), std::back_inserter(filtered), filter);
-		return compute(x, y, pts, filtered, radius, out);
-	} else {
-		return compute(x, y, pts, pts, radius, out);
-	}
-}
-
 int MinComputer::compute(double, double, const std::vector<geo::pc::Point>&, const std::vector<geo::pc::Point>& filtered, double, std::vector<double>& out) {
 	if(!filtered.empty()) {
 		double min = DBL_MAX;
@@ -185,16 +135,6 @@ std::vector<std::string> MinComputer::bandMeta() const {
 	return {"Minimum."};
 }
 
-int CountComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter) {
-	if(filter) {
-		std::vector<geo::pc::Point> filtered;
-		pointFilter(pts.begin(), pts.end(), std::back_inserter(filtered), filter);
-		return compute(x, y, pts, filtered, radius, out);
-	} else {
-		return compute(x, y, pts, pts, radius, out);
-	}
-}
-
 int CountComputer::compute(double, double, const std::vector<geo::pc::Point>&, const std::vector<geo::pc::Point>& filtered, double, std::vector<double>& out) {
 	out.push_back(filtered.size());
 	return 1;
@@ -210,16 +150,6 @@ std::vector<std::string> CountComputer::bandMeta() const {
 
 SkewComputer::SkewComputer(double bias) {
 	stdDevComp.setBias(bias);
-}
-
-int SkewComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter) {
-	if(filter) {
-		std::vector<geo::pc::Point> filtered;
-		pointFilter(pts.begin(), pts.end(), std::back_inserter(filtered), filter);
-		return compute(x, y, pts, filtered, radius, out);
-	} else {
-		return compute(x, y, pts, pts, radius, out);
-	}
 }
 
 int SkewComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out) {
@@ -258,16 +188,6 @@ KurtosisComputer::KurtosisComputer(double bias) {
 	stdDevComp.setBias(bias);
 }
 
-int KurtosisComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter) {
-	if(filter) {
-		std::vector<geo::pc::Point> filtered;
-		pointFilter(pts.begin(), pts.end(), std::back_inserter(filtered), filter);
-		return compute(x, y, pts, filtered, radius, out);
-	} else {
-		return compute(x, y, pts, pts, radius, out);
-	}
-}
-
 int KurtosisComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out) {
 	if(!filtered.empty()) {
 		// Fisher-Pearson
@@ -298,16 +218,6 @@ int KurtosisComputer::bandCount() const {
 
 std::vector<std::string> KurtosisComputer::bandMeta() const {
 	return {"Kurtosis."};
-}
-
-int CoVComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter) {
-	if(filter) {
-		std::vector<geo::pc::Point> filtered;
-		pointFilter(pts.begin(), pts.end(), std::back_inserter(filtered), filter);
-		return compute(x, y, pts, filtered, radius, out);
-	} else {
-		return compute(x, y, pts, pts, radius, out);
-	}
 }
 
 int CoVComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out) {
