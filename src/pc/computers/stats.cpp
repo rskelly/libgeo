@@ -41,17 +41,19 @@ void VarianceComputer::setBias(double bias) {
 }
 
 int VarianceComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out) {
-	std::vector<double> _out; // TODO: Instance variable.
-	MeanComputer::compute(x, y, pts, filtered, radius, _out);
-	double mean = _out[0];
-	if(!std::isnan(mean) && !filtered.empty()){
-		double sum = 0;
-		for(const geo::pc::Point& pt : filtered)
-			sum += std::pow(pt.value() - mean, 2.0);
-		out.push_back(sum / (filtered.size() + m_bias));
-	} else {
-		out.push_back(std::nan(""));
+	if(filtered.size() > 1) {
+		std::vector<double> _out; // TODO: Instance variable.
+		MeanComputer::compute(x, y, pts, filtered, radius, _out);
+		double mean = _out[0];
+		if(!std::isnan(mean)){
+			double sum = 0;
+			for(const geo::pc::Point& pt : filtered)
+				sum += std::pow(pt.value() - mean, 2.0);
+			out.push_back(sum / (filtered.size() + m_bias));
+			return 1;
+		}
 	}
+	out.push_back(std::nan(""));
 	return 1;
 }
 
@@ -72,14 +74,16 @@ void StdDevComputer::setBias(double bias) {
 }
 
 int StdDevComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out) {
-	std::vector<double> _out; // TODO: Instance variable.
-	VarianceComputer::compute(x, y, pts, filtered, radius, _out);
-	double variance = _out[0];
-	if(std::isnan(variance) || filtered.empty()) {
-		out.push_back(std::nan(""));
-	} else {
-		out.push_back(std::sqrt(variance));
+	if(filtered.size() > 1) {
+		std::vector<double> _out; // TODO: Instance variable.
+		VarianceComputer::compute(x, y, pts, filtered, radius, _out);
+		double variance = _out[0];
+		if(!std::isnan(variance)) {
+			out.push_back(std::sqrt(variance));
+			return 1;
+		}
 	}
+	out.push_back(std::nan(""));
 	return 1;
 }
 
