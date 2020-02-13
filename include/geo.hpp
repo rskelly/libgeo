@@ -70,23 +70,67 @@ namespace geo {
 class Monitor {
 private:
 	bool m_cancel;
+	float m_start;
+	float m_end;
+	Monitor* m_monitor;
+
 public:
 
-	bool cancel() const {
-		return m_cancel;
+	/**
+	 * \brief Initialize a Monitor whose progress range is 0-1 (0-100%).
+	 */
+	Monitor() :
+		m_cancel(false),
+		m_start(0), m_end(1),
+		m_monitor(nullptr) {
+	}
+
+	/**
+	 * \brief Initialize a Monitor whose progress range is {start} to {end}.
+	 *
+	 * The status is transformed by status = start + status * (end - start).
+	 *
+	 * \param monitor The Monitor to which status updates are passed.
+	 * \param start The starting status.
+	 * \param end The ending status.
+	 */
+	Monitor(Monitor* monitor, float start, float end) :
+		m_cancel(false),
+		m_start(start), m_end(end),
+		m_monitor(monitor) {
+	}
+
+	/**
+	 * \brief Return true if the cancel flag is set.
+	 */
+	bool canceled() const {
+		if(m_monitor) {
+			return m_monitor->canceled();
+		} else {
+			return m_cancel;
+		}
+	}
+
+	void cancel() {
+		if(m_monitor) {
+			m_monitor->cancel();
+		} else {
+			m_cancel = true;
+		}
 	}
 
 	void status(float status, const std::string& message = "") {
-
+		std::cout << std::setprecision(1) << std::fixed << message << " " << (m_start + status * (m_end - m_start)) * 100.0f << "%\n";
 	}
 
 	void error(const std::string& err) {
-
+		std::cerr << err << "\n";
 	}
 
 	void exception(const std::exception* ex) {
-
+		error(ex == nullptr ? "Unknown exception" : ex->what());
 	}
+
 };
 
 } // geo
