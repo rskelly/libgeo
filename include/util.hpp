@@ -166,6 +166,11 @@ bool rem(const std::string& dir);
 std::string tmpdir(const std::string& tpl);
 
 /**
+ * Create a temporary file name. No guarantees.
+ */
+std::string tmpfile(const std::string& tpl);
+
+/**
  * Return the parent directory of the path.
  */
 std::string parent(const std::string& path);

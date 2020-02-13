@@ -244,6 +244,16 @@ std::string geo::util::tmpdir(const std::string& tpl) {
 	return std::string(tname);
 }
 
+std::string geo::util::tmpfile(const std::string& tpl) {
+	char tname[PATH_MAX];
+	std::strncpy(tname, tpl.c_str(), tpl.size());
+	tname[tpl.size()] = '\0';
+	std::string ret(mktemp(tname));
+	if(ret.empty())
+		g_runerr("Failed to make temporary file name " << tname << ": " << strerror(errno));
+	return ret;
+}
+
 bool geo::util::makedir(const std::string& filename) {
 	std::stringstream path(filename);
 	std::stringstream inter;
