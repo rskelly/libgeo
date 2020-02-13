@@ -46,4 +46,8 @@ int RBFComputer::compute(double x, double y, const std::vector<geo::pc::Point>& 
 int RBFComputer::bandCount() const {
 	return 1;
 }
+
+std::vector<std::string> RBFComputer::bandMeta() const {
+	return {"rbf"};
+}
 */

@@ -84,7 +84,8 @@ Computer* getComputer(const std::string& name) {
 Rasterizer::Rasterizer(const std::vector<std::string> filenames) :
 	m_filter(nullptr),
 	m_thin(0),
-	m_nodata(-9999) {
+	m_nodata(-9999),
+	m_prefilter(false) {
 
 	for(size_t i = 0; i < 4; ++i)
 		m_bounds[i] = std::nan("");
@@ -200,6 +201,10 @@ PCPointFilter* Rasterizer::filter() const {
 	return m_filter;
 }
 
+void Rasterizer::setPrefilter(bool prefilter) {
+	m_prefilter = prefilter;
+}
+
 void Rasterizer::setBounds(double* bounds) {
 	for(size_t i = 0; i < 4; ++i)
 		m_bounds[i] = bounds[i];
@@ -225,13 +230,15 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	}
 
 	if(types.empty())
-		g_argerr("No methods given; defaulting to mean");
+		g_argerr("No methods given.");
 
 	// Configure the computers.
 	m_computers.clear();
 	for(const std::string& name : types) {
-		m_computers.emplace_back(getComputer(name));
-		m_computers.back()->setRasterizer(this);
+		std::unique_ptr<Computer> comp(getComputer(name));
+		comp->setFilters(m_filter->computerFilters(name));
+		comp->setRasterizer(this);
+		m_computers.push_back(std::move(comp));
 	}
 
 	// Calculate the overall boundaries of the point cloud.
@@ -268,8 +275,12 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 
 	// Work out the number of bands; each computer knows how many bands it will produce.
 	int bandCount = 1;
-	for(const std::unique_ptr<Computer>& comp : m_computers)
+	std::vector<std::string> bandMeta = {"count"};
+	for(const std::unique_ptr<Computer>& comp : m_computers) {
 		bandCount += comp->bandCount();
+		std::vector<std::string> meta = comp->bandMeta();
+		bandMeta.insert(bandMeta.end(), meta.begin(), meta.end());
+	}
 	g_trace(" bands: " << bandCount)
 
 	// Configure the raster properties.
@@ -281,6 +292,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	props.setProjection(projection);
 	props.setWritable(true);
 	props.setBands(bandCount);
+	props.setBandMetadata(bandMeta);
 	props.setNoData(m_nodata);
 
 	// Add the points to the qtree. Note the scale must be chosen carefully.
@@ -293,9 +305,11 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 				filenames.push_back(fn);
 			f.init(useHeader);
 			while(f.next(pt)) {
-				tree.add(pt);
-				if(++pts % 10000000 == 0)
-					std::cout << pts << "pts\n";
+				if(!m_prefilter || m_filter->keep(pt)) {
+					tree.add(pt);
+					if(++pts % 10000000 == 0)
+						std::cout << pts << "pts\n";
+				}
 			}
 		}
 	}
@@ -387,8 +401,11 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 							// Calculate the values in the computer and append to the raster.
 							m_computers[i]->compute(spt.x(), spt.y(), cpts, filtered, radius, out);
 							for(double val : out) {
-								if(!std::isnan(val))
+								if(!std::isnan(val)) {
 									outrast.set(c, r, val, band++);
+								} else {
+									outrast.set(c, r, m_nodata, band++);
+								}
 							}
 						}
 					} else {

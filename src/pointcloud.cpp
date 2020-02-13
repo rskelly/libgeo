@@ -112,7 +112,7 @@ void PCFile::init(bool useHeader) {
 	m_pointCount = 0;
 	liblas::ReaderFactory f;
 	for(const std::string& filename : m_filenames) {
-		//g_debug("PCFile: filename: " << filename);
+		g_debug("Initializing: " << filename);
 		std::ifstream str(filename, std::ios::in | std::ios::binary);
 		liblas::Reader reader = f.CreateWithStream(str);
 		if(useHeader) {

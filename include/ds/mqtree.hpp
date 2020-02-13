@@ -154,7 +154,7 @@ public:
 				}
 				close(handle);
 			} else if(errno != ENOENT){
-				std::cerr << "Failed to open file for load: " << path << " (" << strerror(errno) << ")\n";
+				g_runerr("Failed to open file for load: " << path << " (" << strerror(errno) << ")");
 			}
 		}
 	}
@@ -172,13 +172,13 @@ public:
 					std::memcpy(m_buf.data, &size, sizeof(size_t));
 					std::memcpy(m_buf.data + sizeof(size_t), m_cache.data(), size * sizeof(T));
 					if(!write(handle, m_buf.data, BUF_SIZE))
-						std::cerr << "Failed to write cache.\n";
+						g_runerr("Failed to write cache.");
 					close(handle);
 				} else {
-					std::cerr << "Failed to open file for flush: " << m_path << " (" << strerror(errno) << ")\n";
+					g_runerr("Failed to open file for flush: " << m_path << " (" << strerror(errno) << ")");
 				}
 			} else {
-				std::cerr << "Failed to create dir for flush: " << m_path << " (" << strerror(errno) << ")\n";
+				g_runerr("Failed to create dir for flush: " << m_path << " (" << strerror(errno) << ")");
 			}
 
 			m_cache.resize(0);
@@ -227,7 +227,7 @@ public:
 	/**
 	 * \brief Create the LRU cache with the given maximum number of elements.
 	 */
-	lrucache(size_t size = 100, size_t blkSize = 4096) :
+	lrucache(size_t size = 1000, size_t blkSize = 4096) :
 		m_first(nullptr), m_last(nullptr),
 		m_size(size), m_blkSize(blkSize) {
 
@@ -638,7 +638,9 @@ public:
 		m_maxDepth = maxDepth;
 
 		// Create a root path.
-		m_rootPath = util::tmpdir("/tmp/mqtreeXXXXXX");
+		std::stringstream dirname;
+		dirname << "/tmp/mqtree_" << ::getpid() << "_XXXXXX";
+		m_rootPath = util::tmpdir(dirname.str().c_str());
 
 		// Get the side length of the table region.
 		double side = std::max(maxx - minx, maxy - miny);
@@ -717,7 +719,8 @@ public:
 	 * Clear the tree and remove all items.
 	 */
 	void clear() {
-		m_root->clear();
+		if(m_root)
+			m_root->clear();
 	}
 
 	/**

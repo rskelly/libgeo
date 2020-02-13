@@ -771,6 +771,9 @@ int BivariateSpline::init(double& smooth, const std::vector<double>& x, const st
 		if(ier == 1) {
 			std::cerr << "Smoothing parameter too small. Increasing: " << smooth << "->" << smooth * 2 << "\n";
 			smooth *= 2;
+		} else if(ier == 2) {
+			std::cerr << "Smoothing parameter probably too small. Increasing: " << smooth << "->" << smooth * 2 << "\n";
+			smooth *= 2;
 		} else if(ier == 4) {
 			std::cerr << "Too many knots. Increased smoothing parameter: " << smooth << "->" << smooth * 2 << "\n";
 			smooth *= 2;
@@ -797,15 +800,15 @@ int BivariateSpline::init(double& smooth, const std::vector<double>& x, const st
 
 int BivariateSpline::evaluate(const std::vector<double>& x, const std::vector<double>& y, std::vector<double>& z) {
 
-	int idim = 1;
-	int cols = x.size();
-	int rows = y.size();
-	int mf = cols * rows * idim;
+	int idim = 2;
+	int nx = x.size();
+	int ny = y.size();
+	int mf = nx* ny * idim;
 
-	int lwrk1 = cols * rows * 4;
+	int lwrk1 = (nx + ny) * 4;
 	std::vector<double> wrk1(lwrk1);
 
-	int liwrk = cols * rows;
+	int liwrk = nx + ny;
 	std::vector<int> iwrk(liwrk);
 
 	int ier;
@@ -813,7 +816,7 @@ int BivariateSpline::evaluate(const std::vector<double>& x, const std::vector<do
 	z.resize(mf);
 
 	surev_(&idim, m_tx.data(), &m_nx, m_ty.data(), &m_ny,
-			m_c.data(), x.data(), &cols, y.data(), &rows, z.data(), &mf,
+			m_c.data(), x.data(), &nx, y.data(), &ny, z.data(), &mf,
 			wrk1.data(), (int*) &lwrk1, iwrk.data(), (int*) &liwrk, &ier);
 
 	return ier;
@@ -823,11 +826,19 @@ int BivariateSpline::evaluate(const std::vector<double>& x, const std::vector<do
 using namespace geo::util::csv;
 
 int CSVValue::asInt() const {
-	return i;
+	if(t == Int) {
+		return i;
+	} else {
+		return (int) d;
+	}
 }
 
 double CSVValue::asDouble() const {
-	return d;
+	if(t == Double) {
+		return d;
+	} else {
+		return (double) i;
+	}
 }
 
 const std::string& CSVValue::asString() const {
@@ -839,7 +850,7 @@ bool CSV::isdouble(const std::string& s) {
 	if(s == "inf" || s == "-inf" || s == "NaN")
 		return true;
 	for(size_t i = 0; i < s.size(); ++i) {
-		if(!std::isdigit(s[i]) && s[i] != '.')
+		if(!std::isdigit(s[i]) && s[i] != '.' && s[i] != '+' && s[i] != '-' && s[i] != 'e')
 			return false;
 	}
 	return true;
@@ -879,6 +890,8 @@ void CSV::load(const std::string& file, bool header) {
 		} else {
 			int idx = 0;
 			while(std::getline(ss, cell, ',')) {
+				if(idx == colCount)
+					break;
 				if(doNames) {
 					names.push_back("col_" + std::to_string(++colCount));
 					values.resize(colCount);
@@ -911,6 +924,7 @@ void CSV::load(const std::string& file, bool header) {
 		m_values[i].type = types[i];
 		m_values[i].values.resize(values[i].size());
 		for(size_t j = 0; j < values[i].size(); ++j) {
+			m_values[i].values[j].t = types[i];
 			switch(types[i]) {
 			case Double:
 				m_values[i].values[j].d = atof(values[i][j].c_str());

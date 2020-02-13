@@ -15,24 +15,36 @@ Rasterizer* Computer::rasterizer() const {
 	return m_rasterizer;
 }
 
-int Computer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter) {
-	if(filter) {
-		std::vector<geo::pc::Point> filtered;
-		pointFilter(pts.begin(), pts.end(), std::back_inserter(filtered), filter);
-		return compute(x, y, pts, filtered, radius, out);
-	} else {
-		return compute(x, y, pts, pts, radius, out);
-	}
+void Computer::setFilters(const std::vector<PointFilter*>& filters) {
+	m_filters.assign(filters.begin(), filters.end());
 }
 
-int DensityComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter) {
-	if(filter) {
-		std::vector<geo::pc::Point> filtered;
-		pointFilter(pts.begin(), pts.end(), std::back_inserter(filtered), filter);
-		return compute(x, y, pts, filtered, radius, out);
+const std::vector<PointFilter*> Computer::filters() const {
+	return m_filters;
+}
+
+size_t Computer::filter(const std::vector<geo::pc::Point>& pts, std::vector<geo::pc::Point>& out) const {
+	size_t count = 0;
+	if(m_filters.empty()) {
+		count = pts.size();
+		out.assign(pts.begin(), pts.end());
 	} else {
-		return compute(x, y, pts, pts, radius, out);
+		bool keep;
+		for(const geo::pc::Point& pt : pts) {
+			keep = true;
+			for(const PointFilter* f : m_filters) {
+				if(!f->keep(pt)) {
+					keep = false;
+					break;
+				}
+			}
+			if(keep) {
+				out.push_back(pt);
+				++count;
+			}
+		}
 	}
+	return count;
 }
 
 int DensityComputer::compute(double, double, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out) {
@@ -49,5 +61,7 @@ int DensityComputer::bandCount() const {
 	return 1;
 }
 
-
+std::vector<std::string> DensityComputer::bandMeta() const {
+	return {"none"};
+}
 

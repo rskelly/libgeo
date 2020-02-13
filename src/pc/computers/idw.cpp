@@ -14,16 +14,6 @@ using namespace geo::pc::compute;
 
 IDWComputer::IDWComputer(double exponent) : exponent(exponent) {}
 
-int IDWComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter) {
-	if(filter) {
-		std::vector<geo::pc::Point> filtered;
-		pointFilter(pts.begin(), pts.end(), std::back_inserter(filtered), filter);
-		return compute(x, y, pts, filtered, radius, out);
-	} else {
-		return compute(x, y, pts, pts, radius, out);
-	}
-}
-
 int IDWComputer::compute(double x, double y, const std::vector<geo::pc::Point>&, const std::vector<geo::pc::Point>& filtered, double, std::vector<double>& out) {
 	if(!filtered.empty()) {
 		double result = 0;
@@ -50,3 +40,8 @@ int IDWComputer::compute(double x, double y, const std::vector<geo::pc::Point>&,
 int IDWComputer::bandCount() const {
 	return 1;
 }
+
+std::vector<std::string> IDWComputer::bandMeta() const {
+	return {"idw - exponent: " + std::to_string(exponent)};
+}
+

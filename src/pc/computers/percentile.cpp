@@ -22,16 +22,6 @@ void PercentileComputer::setPercentile(double percentile) {
 	m_percentile = percentile;
 }
 
-int PercentileComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, double radius, std::vector<double>& out, geo::pc::PCPointFilter* filter) {
-	if(filter) {
-		std::vector<geo::pc::Point> filtered;
-		pointFilter(pts.begin(), pts.end(), std::back_inserter(filtered), filter);
-		return compute(x, y, pts, filtered, radius, out);
-	} else {
-		return compute(x, y, pts, pts, radius, out);
-	}
-}
-
 int PercentileComputer::compute(double, double, const std::vector<geo::pc::Point>&, const std::vector<geo::pc::Point>& filtered, double, std::vector<double>& out) {
 	if(!filtered.empty()) {
 		std::vector<geo::pc::Point> _pts(filtered);
@@ -51,5 +41,9 @@ int PercentileComputer::compute(double, double, const std::vector<geo::pc::Point
 
 int PercentileComputer::bandCount() const {
 	return 1;
+}
+
+std::vector<std::string> PercentileComputer::bandMeta() const {
+	return {"percentile: " + std::to_string(m_percentile)};
 }
 
