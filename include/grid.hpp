@@ -2974,8 +2974,6 @@ namespace {
 
 }
 
-
-
 namespace {
 
 	using namespace geo::grid;
