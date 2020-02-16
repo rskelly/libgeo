@@ -125,9 +125,10 @@ namespace {
 	 */
 	GEOSGeometry* polyMakeGeom(double x0, double y0, double x1, double y1, int dims);
 
-	void polyWriteToFile(std::unordered_map<int, std::vector<GEOSGeometry*> >* geoms, std::set<int>* finalIds,
+	void polyWriteToFile(std::unordered_map<int, std::vector<GEOSGeometry*> >* geoms,
+				std::unordered_set<int>* finalIds,
 				const std::string* idField, OGRLayer* layer, GEOSContextHandle_t* gctx,
-				bool removeHoles, bool removeDangles, bool* running, bool* cancel);
+				bool removeHoles, bool removeDangles, bool* running, geo::Monitor* monitor);
 
 	/**
 	 * \brief Fix the given coordinates so that the source does not extend
@@ -1289,7 +1290,8 @@ public:
 	 * \param sigma The standard deviation.
 	 * \param mean The centre of the curve.
 	 */
-	static void gaussianWeights(T* weights, int size, double sigma, double mean = 0) {
+	template <class U>
+	static void gaussianWeights(U* weights, int size, U sigma, U mean = 0) {
 		// If size is an even number, bump it up.
 		if (size % 2 == 0) {
 			++size;
@@ -1409,7 +1411,7 @@ public:
 
 		for(int r = row, rr = 0; r < row + height; ++r, ++rr) {
 			for(int c = col, cc = 0; c < col + width; ++c, ++cc) {
-				if(r >= props().rows() || c >= props().cols()) {
+				if(r < 0 || c < 0 || r >= props().rows() || c >= props().cols()) {
 					tile[rr * width + cc] = props().nodata();
 				} else {
 					tile[rr * width + cc] = get(c, r, band);
@@ -1433,9 +1435,8 @@ public:
 
 		for(int r = row, rr = 0; r < row + height; ++r, ++rr) {
 			for(int c = col, cc = 0; c < col + width; ++c, ++cc) {
-				if(r >= props().rows() || c >= props().cols())
-					continue;
-				set(c, r, tile[rr * width + cc], band);
+				if(!(r < 0 || c < 0 || r >= props().rows() || c >= props().cols()))
+					set(c, r, tile[rr * width + cc], band);
 			}
 		}
 
@@ -2524,8 +2525,8 @@ public:
 
 		// Data containers.
 		std::unordered_map<int, std::vector<GEOSGeometry*> > geoms;
-		std::set<int> activeIds;
-		std::set<int> finalIds;
+		std::unordered_set<int> activeIds;
+		std::unordered_set<int> finalIds;
 
 		// Thread control features.
 		bool running = true;
@@ -2533,7 +2534,7 @@ public:
 
 		// Start output threads.
 		for(int i = 0; i < threads; ++i)
-			ths.emplace_back(&polyWriteToFile, &geoms, &finalIds, &idField, layer, &gctx, removeHoles, removeDangles, monitor);
+			polyWriteToFile(&geoms, &finalIds, &idField, layer, &gctx, removeHoles, removeDangles, &running, monitor);
 
 		// Process raster.
 		for(int r = 0; r < rows; ++r) {
@@ -2741,21 +2742,22 @@ namespace {
 	 * \param running If false, the operation is canceled.
 	 * \param cancel If true, the operation is cancelled.
 	 */
-	void polyWriteToFile(std::unordered_map<int, std::vector<GEOSGeometry*> >* geoms, std::set<int>* finalIds,
+	void polyWriteToFile(std::unordered_map<int, std::vector<GEOSGeometry*> >* geoms,
+			std::unordered_set<int>* finalIds,
 			const std::string* idField, OGRLayer* layer, GEOSContextHandle_t* gctx,
-			bool removeHoles, bool removeDangles, bool* running, bool* cancel) {
+			bool removeHoles, bool removeDangles, bool* running, geo::Monitor* monitor) {
 
 		std::vector<GEOSGeometry*> polys;
 		GEOSGeometry* geom = nullptr;
 		int id;
 
-		while(!*cancel && (*running || !finalIds->empty())) {
+		while(!monitor->canceled() && (*running || !finalIds->empty())) {
 
 			// Get an ID and the list of polys from the queue.
 			{
 				std::unique_lock<std::mutex> lk(poly_fmtx);
 				// Wait for a notification if the queue is empty.
-				while(!*cancel && *running && finalIds->empty())
+				while(!monitor->canceled() && *running && finalIds->empty())
 					poly_cv.wait(lk);
 				// If the wakeup is spurious, skip.
 				if(finalIds->empty())
@@ -2777,7 +2779,7 @@ namespace {
 			if(polys.empty())
 				continue;
 
-			if(*cancel) {
+			if(monitor->canceled()) {
 				for(GEOSGeometry* p : polys)
 					GEOSGeom_destroy(p);
 				continue;
@@ -2793,7 +2795,7 @@ namespace {
 			}
 			polys.clear();
 
-			if(*cancel) {
+			if(monitor->canceled()) {
 				GEOSGeom_destroy(geom);
 				continue;
 			}
@@ -2801,7 +2803,7 @@ namespace {
 			// If we're removing dangles, throw away all but the
 			// largest single polygon. If it was originally a polygon, there are no dangles.
 			size_t numGeoms;
-			if(!*cancel && removeDangles && (numGeoms = GEOSGetNumGeometries(geom)) > 1) {
+			if(!monitor->canceled() && removeDangles && (numGeoms = GEOSGetNumGeometries(geom)) > 1) {
 				size_t idx = 0;
 				double a, area = 0;
 				for(size_t i = 0; i < numGeoms; ++i) {
@@ -2818,7 +2820,7 @@ namespace {
 			}
 
 			// If we're removing holes, extract the exterior rings of all constituent polygons.
-			if(!*cancel && removeHoles) {
+			if(!monitor->canceled() && removeHoles) {
 				std::vector<GEOSGeometry*> geoms0;
 				for(int i = 0; i < GEOSGetNumGeometries(geom); ++i) {
 					const GEOSGeometry* p = GEOSGetGeometryN(geom, i);
@@ -2834,7 +2836,7 @@ namespace {
 			}
 
 			// If the result is not a multi, make it one.
-			if(!*cancel && GEOSGeomTypeId(geom) != GEOSGeomTypes::GEOS_MULTIPOLYGON) {
+			if(!monitor->canceled() && GEOSGeomTypeId(geom) != GEOSGeomTypes::GEOS_MULTIPOLYGON) {
 				std::vector<GEOSGeometry*> gs;
 				gs.push_back(geom);
 				geom = GEOSGeom_createCollection(GEOSGeomTypes::GEOS_MULTIPOLYGON, gs.data(), gs.size());
@@ -2843,7 +2845,7 @@ namespace {
 			if(!geom)
 				g_runerr("Null geometry.");
 
-			if(*cancel) {
+			if(monitor->canceled()) {
 				GEOSGeom_destroy(geom);
 				continue;
 			}
