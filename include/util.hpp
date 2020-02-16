@@ -161,14 +161,32 @@ bool isfile(const std::string& path);
 bool rem(const std::string& dir);
 
 /**
- * Create a temporary directory and return the path.
+ * Attempt to return the system temp dir. Falls back to ".".
  */
-std::string tmpdir(const std::string& tpl);
+std::string gettmpdir();
 
 /**
- * Create a temporary file name. No guarantees.
+ * Return the processid.
  */
-std::string tmpfile(const std::string& tpl);
+int pid();
+
+/**
+ * Create a temporary directory and return the path.
+ *
+ * Attempts to put the directory in dir, otherwise in the system temp dir.
+ *
+ * The process ID is added to the prefix to create the dir name. Subsequent
+ * calls from the same process with the same prefix return the same path.
+ */
+std::string tmpdir(const std::string& prefix, const std::string& dir = "");
+
+/**
+ * Create a temporary file name. A random string is added to the end of the prefix.
+ *
+ * If dir is empty, creates a file in the system temp dir. Otherwise attempts to build the
+ * directory if required and puts the file there.
+ */
+std::string tmpfile(const std::string& prefix, const std::string& dir = "");
 
 /**
  * Return the parent directory of the path.
@@ -651,6 +669,15 @@ namespace csv {
 void saveGrid(const std::string& file, const std::vector<double> grid,
 		int cols, int rows, double minx, double miny,
 		double xres, double yres, const std::string& proj);
+
+
+class Stopwatch {
+public:
+	void reset();
+	void start();
+	std::string time();
+
+};
 
 } // util
 } // geo
