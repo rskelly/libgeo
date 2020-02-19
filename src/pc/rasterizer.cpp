@@ -436,9 +436,11 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 
 		int fx0, fx1, fy0, fy1, fa;
 
+		// Make a mask based on the count layer.
 		TargetFillOperator<float, char> op1(&outrast, 0, &mask, 0, props.nodata(), 1);
 		TargetFillOperator<char, char> op2(&mask, 0, &mask, 0, 1, 2);
 
+		// Skip the first band which is always count.
 		for(int b = 1; b < props.bands(); ++b) {
 			std::cout << "Filling voids in band " << b << "\n";
 			for(int r = 0; r < rows; ++r) {
@@ -474,7 +476,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 								if(cc < 0 || cc >= cols || rr < 0 || rr >= rows || (cc == c && rr == r))
 									continue;
 								if((v0 = outrast.get(cc, rr, b)) != props.nodata()) {
-									w0 = 1 / (std::pow(props.toX(c) - props.toX(cc), 2.0) + std::pow(props.toY(r) - props.toY(rr), 2.0));	// not possible for d to be zero.
+									w0 = 1.0 / (std::pow(props.toX(c) - props.toX(cc), 2.0) + std::pow(props.toY(r) - props.toY(rr), 2.0));	// not possible for d to be zero.
 									w += w0;
 									v += w0 * v0;
 									found = true;
