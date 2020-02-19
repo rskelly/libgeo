@@ -19,18 +19,10 @@ set (CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set (CMAKE_INSTALL_RPATH "/usr/local/lib")
 set (CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
-set (Boost_DEBUG OFF)
-set (Boost_USE_STATIC_LIBS OFF)
-set (Boost_USE_STATIC_RUNTIME OFF)
-set (Boost_USE_MULTITHREADED ON)
-set (Boost_NO_SYSTEM_PATHS OFF)
-
 if (${APPLE})
 	set (CMAKE_LIBRARY_CREATE_CXX_FLAGS "${CMAKE_LIBRARY_CREATE_CXX_FLAGS} -undefined dynamic_lookup")
 elseif(${WIN32})
 	set (DEV_DIR "C:\\dev")
-	set (Boost_COMPILER -vc141)
-	set (BOOST_ROOT "${DEV_DIR}\\boost_1_67_0")
 	set (GIT_DIR "${DEV_DIR}\\git")
 	set (GIS_DIR "${DEV_DIR}\\gisinternals")
 	set (GEOS_LIBRARYDIR "${GIS_DIR}\\lib;${GIS_DIR}\\bin") #set (GEOS_LIBRARYDIR "${DEV_DIR}\\geos\\lib;${DEV_DIR}\\geos\\bin")
@@ -58,7 +50,6 @@ find_package (CGAL REQUIRED)
 find_package (PDAL REQUIRED)
 find_package (OpenSSL REQUIRED)
 find_package (Eigen3 REQUIRED)
-find_package (Boost 1.58 COMPONENTS system filesystem date_time REQUIRED)
 
 find_library (LIBLAS_LIBRARY las)
 find_library (JSONCPP_LIBRARY jsoncpp)
@@ -71,11 +62,18 @@ find_library (PROJ_LIBRARY proj)
 
 include_directories(BEFORE SYSTEM ./include ./ann/include 
 	${OPENSSL_INCLUDE_DIR}  
-	${GEOS_INCLUDEDIR} ${GIS_INCLUDEDIR} ${EIGEN3_INCLUDE_DIR} ${JSON_INCLUDEDIR}
-	${GDAL_INCLUDE_DIR} ${Boost_INCLUDE_DIRS})
+	${GEOS_INCLUDEDIR} 
+	${GIS_INCLUDEDIR} 
+	${EIGEN3_INCLUDE_DIR} 
+	${JSON_INCLUDEDIR}
+	${GDAL_INCLUDE_DIR}
+)
 	 
-link_directories(./build/lib ./build/bin ${GDAL_LIBRARYDIR} 
-	${GIS_LIBRARYDIR} ${Boost_LIBRARY_DIRS} ${PDAL_LIBRARY_DIRS})
+link_directories(./build/lib ./build/bin 
+	${GDAL_LIBRARYDIR} 
+	${GIS_LIBRARYDIR} 
+	${PDAL_LIBRARY_DIRS}
+)
 
 # Build support libraries ################################################################################
 
@@ -87,7 +85,7 @@ set (geoutilsrc src/geo.cpp src/util.cpp src/md5.cpp)
 add_library (geoutilobj OBJECT ${geoutilsrc})
 set_target_properties (geoutilobj PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_library(geoutil SHARED $<TARGET_OBJECTS:geoutilobj>)
-target_link_libraries (geoutil fitpack_mod ${Boost_LIBRARIES} ${GDAL_LIBRARY} ${CRYPTO_LIBRARY} ${SQLITE_LIBRARY} ${SPATIALITE_LIBRARY})
+target_link_libraries (geoutil fitpack_mod ${GDAL_LIBRARY} ${CRYPTO_LIBRARY} ${SQLITE_LIBRARY} ${SPATIALITE_LIBRARY})
 # is rt needed here doesn't work on windows.
 
 set (geodbsrc src/geo.cpp src/db.cpp)
@@ -122,13 +120,13 @@ target_link_libraries (geoann geoutil)
 if(${BUILD_APPS})
 
 	# add_executable (pc2tile src/apps/pc2tile.cpp)
-	# target_link_libraries (pc2tile geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY} ${GEOS_LIBRARY})
+	# target_link_libraries (pc2tile geoutil geopc ${LIBLAS_LIBRARY} ${GEOS_LIBRARY})
 
 	# add_executable (pcperturb src/apps/pcperturb.cpp)
-	# target_link_libraries (pcperturb geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY})
+	# target_link_libraries (pcperturb geoutil geopc ${LIBLAS_LIBRARY})
 
 	# add_executable (pcregister src/apps/pcregister.cpp src/pc/trajectory.cpp)
-	# target_link_libraries (pcregister geoutil geopc ${Boost_LIBRARIES} ${LIBLAS_LIBRARY} ${PCL_LIBRARIES})
+	# target_link_libraries (pcregister geoutil geopc ${LIBLAS_LIBRARY} ${PCL_LIBRARIES})
 
 	# add_executable (geoinfo src/apps/geoinfo.cpp)
 	# target_link_libraries (geoinfo geoutil ${GDAL_LIBRARY} ${LIBLAS_LIBRARY} ${JSONCPP_LIBRARY})
@@ -152,7 +150,7 @@ if(${BUILD_APPS})
 	# target_link_libraries (raster_test geoutil geoann geogrid ${GEOS_LIBRARY} ${GDAL_LIBRARY})
 
 	# add_executable (cloudmatch src/apps/cloudmatch.cpp)
-	# target_link_libraries (cloudmatch geoann ${Boost_LIBRARIES} ${GDAL_LIBRARY} ${PDAL_LIBRARIES} fitpack_mod)
+	# target_link_libraries (cloudmatch geoann ${GDAL_LIBRARY} ${PDAL_LIBRARIES} fitpack_mod)
 
 	# add_executable (rbf src/tests/rbf.cpp)
 	# target_link_libraries (rbf)

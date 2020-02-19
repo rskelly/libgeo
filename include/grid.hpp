@@ -125,9 +125,10 @@ namespace {
 	 */
 	GEOSGeometry* polyMakeGeom(double x0, double y0, double x1, double y1, int dims);
 
-	void polyWriteToFile(std::unordered_map<int, std::vector<GEOSGeometry*> >* geoms, std::set<int>* finalIds,
+	void polyWriteToFile(std::unordered_map<int, std::vector<GEOSGeometry*> >* geoms,
+				std::unordered_set<int>* finalIds,
 				const std::string* idField, OGRLayer* layer, GEOSContextHandle_t* gctx,
-				bool removeHoles, bool removeDangles, bool* running, bool* cancel);
+				bool removeHoles, bool removeDangles, bool* running, geo::Monitor* monitor);
 
 	/**
 	 * \brief Fix the given coordinates so that the source does not extend
@@ -920,11 +921,11 @@ public:
 	 */
 	Grid() :
 		m_ds(nullptr),
+		m_type(GDT_Unknown),
 		m_mapped(false),
 		m_size(0),
 		m_data(nullptr),
-		m_dirty(false),
-		m_type(GDT_Unknown) {}
+		m_dirty(false) {}
 
 	/**
 	 * \brief Create an anonymous grid of the given size with the given properties.
@@ -1289,7 +1290,8 @@ public:
 	 * \param sigma The standard deviation.
 	 * \param mean The centre of the curve.
 	 */
-	static void gaussianWeights(T* weights, int size, double sigma, double mean = 0) {
+	template <class U>
+	static void gaussianWeights(U* weights, int size, U sigma, U mean = 0) {
 		// If size is an even number, bump it up.
 		if (size % 2 == 0) {
 			++size;
@@ -1392,6 +1394,51 @@ public:
 
 		for(int b = 0; b < props().bands(); ++b)
 			buf[b] = get(col, row, b);
+
+	}
+
+	/**
+	 * \brief Copies the image data from a rectangular region into the buffer which must be pre-allocated.
+	 *
+	 * \param tile The buffer.
+	 * \param col The column index.
+	 * \param row The row index.
+	 * \param width The width of the tile.
+	 * \param height The height of the tile.
+	 * \param band The source band.
+	 */
+	void getTile(T* tile, int col, int row, int width, int height, int band) {
+
+		for(int r = row, rr = 0; r < row + height; ++r, ++rr) {
+			for(int c = col, cc = 0; c < col + width; ++c, ++cc) {
+				if(r < 0 || c < 0 || r >= props().rows() || c >= props().cols()) {
+					tile[rr * width + cc] = props().nodata();
+				} else {
+					tile[rr * width + cc] = get(c, r, band);
+				}
+			}
+		}
+
+	}
+
+	/**
+	 * \brief Copies the image data from a rectangular region into the buffer which must be pre-allocated.
+	 *
+	 * \param tile The buffer.
+	 * \param col The column index.
+	 * \param row The row index.
+	 * \param width The width of the tile.
+	 * \param height The height of the tile.
+	 * \param band The source band.
+	 */
+	void setTile(T* tile, int col, int row, int width, int height, int band) {
+
+		for(int r = row, rr = 0; r < row + height; ++r, ++rr) {
+			for(int c = col, cc = 0; c < col + width; ++c, ++cc) {
+				if(!(r < 0 || c < 0 || r >= props().rows() || c >= props().cols()))
+					set(c, r, tile[rr * width + cc], band);
+			}
+		}
 
 	}
 
@@ -1954,10 +2001,11 @@ public:
 	 * \param smoothed The smoothed grid.
 	 * \param sigma    The standard deviation.
 	 * \param size     The window size.
-	 * \param band     The target band.
+	 * \param srcband     The source band.
+	 * \param dstband     The target band.
 	 * \param monitor  A reference to the Monitor.
 	 */
-	void smooth(Grid<T>& smoothed, double sigma, int size, int band, geo::Monitor* monitor = nullptr) {
+	void smooth(Grid<T>& smoothed, double sigma, int size, int srcband, int dstband, geo::Monitor* monitor = nullptr) {
 
 		static Monitor _monitor;
 
@@ -1987,29 +2035,22 @@ public:
 
 		monitor->status(0.02);
 
-		std::mutex wmtx; // write mutex
-		std::mutex rmtx; // read mutex
-		int row = 0;
-
-		// Run the smoothing jobs.
-		int numThreads = 1;
-		std::vector<std::thread> threads;
-		std::vector<std::exception_ptr> exceptions(numThreads);
-		for(int i = 0; i < numThreads; ++i) {
-			threads.emplace_back(smooth, this, &smoothed, size, nodata, weights.data(), &row,
-					&rmtx, &wmtx, monitor, &exceptions[i]);
-		}
-
-		// Wait for jobs to complete.
-		for(int i = 0; i < numThreads; ++i) {
-			if(threads[i].joinable())
-				threads[i].join();
-		}
-
-		// Check if any exceptions were trapped. Raise the first one.
-		for(int i = 0; i < numThreads; ++i) {
-			if(exceptions[i])
-				std::rethrow_exception(exceptions[i]);
+		// TODO: This is much faster when done in 2 passes.
+		for(int r = 0; r < gp.rows(); ++r) {
+			for(int c = 0; c < gp.cols(); ++c) {
+				double s = 0;
+				for(int rr = r - size / 2; rr < r + size / 2 + 1; ++rr) {
+					for(int cc = c - size / 2; cc < c + size / 2 + 2; ++cc) {
+						if(rr < 0 || cc < 0 || rr >= gp.rows() || cc >= gp.cols())
+							continue;
+						double k = weights[(rr + size / 2) * size + (cc + size / 2)];
+						double v = get(cc, rr, srcband);
+						if(v != nodata)
+							s += v * k;
+					}
+				}
+				smoothed.set(c, r, s, dstband);
+			}
 		}
 
 		monitor->status(1.0);
@@ -2484,8 +2525,8 @@ public:
 
 		// Data containers.
 		std::unordered_map<int, std::vector<GEOSGeometry*> > geoms;
-		std::set<int> activeIds;
-		std::set<int> finalIds;
+		std::unordered_set<int> activeIds;
+		std::unordered_set<int> finalIds;
 
 		// Thread control features.
 		bool running = true;
@@ -2493,12 +2534,12 @@ public:
 
 		// Start output threads.
 		for(int i = 0; i < threads; ++i)
-			ths.emplace_back(&polyWriteToFile, &geoms, &finalIds, &idField, layer, &gctx, removeHoles, removeDangles, monitor);
+			polyWriteToFile(&geoms, &finalIds, &idField, layer, &gctx, removeHoles, removeDangles, &running, monitor);
 
 		// Process raster.
 		for(int r = 0; r < rows; ++r) {
 
-			if(monitor->cancel()) break;
+			if(monitor->canceled()) break;
 
 			monitor->status((float) r / rows, polyRowStatus(r, rows));
 
@@ -2520,7 +2561,7 @@ public:
 
 			for(int c = 1; c < cols; ++c) {
 
-				if(monitor->cancel()) break;
+				if(monitor->canceled()) break;
 
 				// If the current cell value differs from the previous one...
 				if((v1 = buf[c]) != v0) {
@@ -2538,7 +2579,7 @@ public:
 			}
 
 			// IDs that are in the geoms array and not in the current row are ready to be finalized.
-			if(!monitor->cancel()) {
+			if(!monitor->canceled()) {
 				std::lock_guard<std::mutex> lk0(poly_gmtx);
 				std::lock_guard<std::mutex> lk1(poly_fmtx);
 				for(const auto& it : geoms) {
@@ -2548,12 +2589,12 @@ public:
 			}
 			poly_cv.notify_all();
 
-			while(!monitor->cancel() && !finalIds.empty())
+			while(!monitor->canceled() && !finalIds.empty())
 				std::this_thread::yield();
 		}
 
 		// Finalize all remaining geometries.
-		if(!monitor->cancel()) {
+		if(!monitor->canceled()) {
 			std::lock_guard<std::mutex> lk0(poly_gmtx);
 			std::lock_guard<std::mutex> lk1(poly_fmtx);
 			for(auto& it : geoms)
@@ -2701,21 +2742,22 @@ namespace {
 	 * \param running If false, the operation is canceled.
 	 * \param cancel If true, the operation is cancelled.
 	 */
-	void polyWriteToFile(std::unordered_map<int, std::vector<GEOSGeometry*> >* geoms, std::set<int>* finalIds,
+	void polyWriteToFile(std::unordered_map<int, std::vector<GEOSGeometry*> >* geoms,
+			std::unordered_set<int>* finalIds,
 			const std::string* idField, OGRLayer* layer, GEOSContextHandle_t* gctx,
-			bool removeHoles, bool removeDangles, bool* running, bool* cancel) {
+			bool removeHoles, bool removeDangles, bool* running, geo::Monitor* monitor) {
 
 		std::vector<GEOSGeometry*> polys;
 		GEOSGeometry* geom = nullptr;
 		int id;
 
-		while(!*cancel && (*running || !finalIds->empty())) {
+		while(!monitor->canceled() && (*running || !finalIds->empty())) {
 
 			// Get an ID and the list of polys from the queue.
 			{
 				std::unique_lock<std::mutex> lk(poly_fmtx);
 				// Wait for a notification if the queue is empty.
-				while(!*cancel && *running && finalIds->empty())
+				while(!monitor->canceled() && *running && finalIds->empty())
 					poly_cv.wait(lk);
 				// If the wakeup is spurious, skip.
 				if(finalIds->empty())
@@ -2737,7 +2779,7 @@ namespace {
 			if(polys.empty())
 				continue;
 
-			if(*cancel) {
+			if(monitor->canceled()) {
 				for(GEOSGeometry* p : polys)
 					GEOSGeom_destroy(p);
 				continue;
@@ -2753,7 +2795,7 @@ namespace {
 			}
 			polys.clear();
 
-			if(*cancel) {
+			if(monitor->canceled()) {
 				GEOSGeom_destroy(geom);
 				continue;
 			}
@@ -2761,7 +2803,7 @@ namespace {
 			// If we're removing dangles, throw away all but the
 			// largest single polygon. If it was originally a polygon, there are no dangles.
 			size_t numGeoms;
-			if(!*cancel && removeDangles && (numGeoms = GEOSGetNumGeometries(geom)) > 1) {
+			if(!monitor->canceled() && removeDangles && (numGeoms = GEOSGetNumGeometries(geom)) > 1) {
 				size_t idx = 0;
 				double a, area = 0;
 				for(size_t i = 0; i < numGeoms; ++i) {
@@ -2778,7 +2820,7 @@ namespace {
 			}
 
 			// If we're removing holes, extract the exterior rings of all constituent polygons.
-			if(!*cancel && removeHoles) {
+			if(!monitor->canceled() && removeHoles) {
 				std::vector<GEOSGeometry*> geoms0;
 				for(int i = 0; i < GEOSGetNumGeometries(geom); ++i) {
 					const GEOSGeometry* p = GEOSGetGeometryN(geom, i);
@@ -2794,7 +2836,7 @@ namespace {
 			}
 
 			// If the result is not a multi, make it one.
-			if(!*cancel && GEOSGeomTypeId(geom) != GEOSGeomTypes::GEOS_MULTIPOLYGON) {
+			if(!monitor->canceled() && GEOSGeomTypeId(geom) != GEOSGeomTypes::GEOS_MULTIPOLYGON) {
 				std::vector<GEOSGeometry*> gs;
 				gs.push_back(geom);
 				geom = GEOSGeom_createCollection(GEOSGeomTypes::GEOS_MULTIPOLYGON, gs.data(), gs.size());
@@ -2803,7 +2845,7 @@ namespace {
 			if(!geom)
 				g_runerr("Null geometry.");
 
-			if(*cancel) {
+			if(monitor->canceled()) {
 				GEOSGeom_destroy(geom);
 				continue;
 			}
@@ -2934,82 +2976,7 @@ namespace {
 
 }
 
-
-
 namespace {
-
-	/**
-	 * \brief Parallel function for smoothing, called by smooth().
-	 *
-	 * \param iter A pointer to a TileIterator.
-	 * \param smoothed The grid to contain smoothed output.
-	 * \param status The status object.
-	 * \param size The size of the kernel.
-	 * \param nodata The nodata value from the original raster.
-	 * \param weights A list of Gaussian weights.
-	 * \param rmtx The read mutex.
-	 * \param wmtx The write mutex.
-	 * \param cancel If set to true during operation, cancels the operation.
-	 * \param ex If the function terminates with an exception, this pointer should point to it.
-	 */
-	template <class T>
-	void smooth(Grid<T>* source, Grid<T>* smoothed,
-			int size, double nodata, double* weights, int* row,
-			std::mutex* rmtx, std::mutex* wmtx, geo::Monitor* monitor = nullptr) {
-
-		/*
-		try {
-			std::unique_ptr<Tile<T>> tile;
-			int tileCount = iter->count();
-
-			while(!*cancel) {
-
-				{
-					std::lock_guard<std::mutex> lk(*rmtx);
-					tile.reset(iter->next());
-					if(!tile.get())
-						return;
-					++*curTile;
-				}
-
-				// Copy the tile to a buffer, process the buffer and write back to the grid.
-				Grid<T>& grid = tile->grid();
-				const GridProps& props = grid.props();
-				Grid<T> buf(props);
-				grid.writeTo(buf);
-
-				// Process the entire block, even the buffer parts.
-				double v, t;
-				for (int r = 0; !*cancel && r < props.rows(); ++r) {
-					for (int c = 0; !*cancel && c < props.cols(); ++c) {
-						t = 0.0;
-						for (int gr = 0; gr < size; ++gr) {
-							for (int gc = 0; gc < size; ++gc) {
-								int cc = c - size / 2 + gc;
-								int rr = r - size / 2 + gr;
-								if(props.hasCell(cc, rr) && (v = buf.get(cc, rr, 1)) != nodata)
-									t += weights[gr * size + gc] * v;
-							}
-						}
-						grid.set(c, r, t, 1);
-					}
-				}
-
-				if(*cancel)
-					break;
-
-				{
-					std::lock_guard<std::mutex> lk(*wmtx);
-					tile->writeTo(*smoothed);
-				}
-
-				status->update(g_min(0.99f, 0.2f + (float) *curTile / tileCount * 0.97f));
-			}
-		} catch(const std::exception& e) {
-			*p = std::current_exception();
-		}
-		*/
-	}
 
 	using namespace geo::grid;
 
@@ -3158,7 +3125,8 @@ namespace {
 		}
 	}
 
-	void fixWriteBounds(int& cols, int& rows, int& srcCol, int& srcRow, int& dstCol, int& dstRow, int rcols, int rrows, int gcols, int grows) {
+	void fixWriteBounds(int& cols, int& rows, int& srcCol, int& srcRow, int& dstCol,
+			int& dstRow, int rcols, int rrows, int gcols, int grows) {
 
 		if(cols <= 0)
 			cols = gcols;

@@ -198,6 +198,11 @@ std::string geo::util::parent(const std::string& path) {
 }
 
 std::string geo::util::join(const std::string& a, const std::string& b) {
+	if(b.empty()) {
+		return a.empty() ? "" : a;
+	} else if(a.empty()) {
+		return b.empty() ? "" : b;
+	}
 	std::string _a, _b;
 	for(size_t i = a.size() - 1; i < std::string::npos; --i) {
 		if(a[i] != pathsep) {
@@ -235,13 +240,59 @@ std::string geo::util::extension(const std::string& path) {
 	return path;
 }
 
-std::string geo::util::tmpdir(const std::string& tpl) {
+std::string geo::util::gettmpdir() {
+	std::string dir = ::getenv("TMP");
+	if(dir.empty())
+		dir = ::getenv("TMPDIR");
+	if(dir.empty()) {
+		g_warn("Temp directory not found. Storing in current directory.");
+		dir = ".";
+	}
+	return dir;
+}
+
+int geo::util::pid() {
+#ifdef _WIN32
+	return _getpid();
+#else
+	return getpid();
+#endif
+}
+
+std::string geo::util::tmpdir(const std::string& prefix, const std::string& dir) {
+	// Assemble the target directory, check and attempt to create if needed.
+	std::string tdir = join(gettmpdir(), dir);
+	if(!isdir(tdir)) {
+		if(!makedir(tdir))
+			g_runerr("Failed to make target dir: " << tdir);
+	}
+	std::string path = prefix + std::to_string(pid());
+	if(!makedir(path))
+		g_runerr("Failed to make directory: " << path);
+	return path;
+}
+
+std::string geo::util::tmpfile(const std::string& prefix, const std::string& dir) {
+	// Make a temp file in the system dir.
+	static std::string tpl = "XXXXXX";
+	// Assemble the target directory, check and attempt to create if needed.
+	std::string tdir = join(gettmpdir(), dir);
+	if(!isdir(tdir)) {
+		if(!makedir(tdir))
+			g_runerr("Failed to make target directory: " << tdir);
+	}
+	// Assemble the file path.
+	std::string path = join(tdir, prefix + tpl);
 	char tname[PATH_MAX];
-	std::strncpy(tname, tpl.c_str(), tpl.size());
-	tname[tpl.size()] = '\0';
-	if(!mkdtemp(tname))
-		g_runerr("Failed to make temporary dir " << tname << ": " << strerror(errno));
-	return std::string(tname);
+	std::strncpy(tname, path.c_str(), path.size());
+	tname[path.size()] = '\0';
+	// Attempto open, fail or return the path.
+	std::string ret;
+	if(mkstemp(tname) > 0)
+		ret = tname;
+	if(ret.empty())
+		g_runerr("Failed to make temporary file name " << path << ": " << strerror(errno));
+	return ret;
 }
 
 bool geo::util::makedir(const std::string& filename) {
@@ -973,6 +1024,14 @@ CSVType CSV::columnType(size_t i) const {
 	if(i < m_values.size())
 		return m_values[i].type;
 	throw std::runtime_error("No column with index " + i);
+}
+
+void Stopwatch::start() {}
+
+void Stopwatch::reset() {}
+
+std::string Stopwatch::time() {
+	return "[no time]";
 }
 
 
