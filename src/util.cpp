@@ -800,6 +800,7 @@ int BivariateSpline::init(double& smooth, const std::vector<double>& x, const st
 	std::vector<int> iwrk(kwrk);
 
 	int ier, iter = 0;
+	std::cout << "X: " << x.size() << "; Y: " << y.size() << "\n";
 	do {
 		std::cout << "Smoothing with " << smooth << "\n";
 		surfit_(&iopt, &m, x.data(), y.data(), z.data(), weights.data(),
@@ -840,11 +841,16 @@ int BivariateSpline::init(double& smooth, const std::vector<double>& x, const st
 }
 
 int BivariateSpline::evaluate(const std::vector<double>& x, const std::vector<double>& y, std::vector<double>& z) {
+	return evaluate(x.data(), x.size(), y.data(), y.size(), z.data(), z.size());
+}
+
+int BivariateSpline::evaluate(const double* x, int nx, const double* y, int ny, double* z, int nz) {
 
 	int idim = 2;
-	int nx = x.size();
-	int ny = y.size();
 	int mf = nx* ny * idim;
+
+	if(nz < mf)
+		g_runerr("Z array is too small at " << nz << "; " << mf << " required.")
 
 	int lwrk1 = (nx + ny) * 4;
 	std::vector<double> wrk1(lwrk1);
@@ -854,10 +860,8 @@ int BivariateSpline::evaluate(const std::vector<double>& x, const std::vector<do
 
 	int ier;
 
-	z.resize(mf);
-
 	surev_(&idim, m_tx.data(), &m_nx, m_ty.data(), &m_ny,
-			m_c.data(), x.data(), &nx, y.data(), &ny, z.data(), &mf,
+			m_c.data(), x, &nx, y, &ny, z, &mf,
 			wrk1.data(), (int*) &lwrk1, iwrk.data(), (int*) &liwrk, &ier);
 
 	return ier;
