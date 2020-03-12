@@ -541,6 +541,8 @@ public:
 	 */
 	int evaluate(const std::vector<double>& x, const std::vector<double>& y, std::vector<double>& z);
 
+	int evaluate(const double* x, int nx, const double* y, int ny, double* z, int nz);
+
 	double stddev(const std::vector<double>& v) const;
 
 };
