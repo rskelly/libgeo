@@ -1408,13 +1408,15 @@ public:
 	 * \param band The source band.
 	 */
 	void getTile(T* tile, int col, int row, int width, int height, int band) {
-
+		int maxSize = width * height;
 		for(int r = row, rr = 0; r < row + height; ++r, ++rr) {
 			for(int c = col, cc = 0; c < col + width; ++c, ++cc) {
 				if(r < 0 || c < 0 || r >= props().rows() || c >= props().cols()) {
 					tile[rr * width + cc] = props().nodata();
 				} else {
 					tile[rr * width + cc] = get(c, r, band);
+					if(--maxSize == 0)
+						std::cout << "oops";
 				}
 			}
 		}
@@ -2031,25 +2033,24 @@ public:
 		std::vector<double> weights(size * size * getTypeSize(DataType::Float64));
 		Grid::gaussianWeights(weights.data(), size, sigma);
 
-		double nodata = gp.nodata();
-
 		monitor->status(0.02);
+
+		double k, v, nodata = gp.nodata();
 
 		// TODO: This is much faster when done in 2 passes.
 		for(int r = 0; r < gp.rows(); ++r) {
 			for(int c = 0; c < gp.cols(); ++c) {
 				double s = 0;
-				for(int rr = r - size / 2; rr < r + size / 2 + 1; ++rr) {
-					for(int cc = c - size / 2; cc < c + size / 2 + 2; ++cc) {
-						if(rr < 0 || cc < 0 || rr >= gp.rows() || cc >= gp.cols())
-							continue;
-						double k = weights[(rr + size / 2) * size + (cc + size / 2)];
-						double v = get(cc, rr, srcband);
-						if(v != nodata)
+				for(int rr = -size / 2; rr < size / 2 + 1; ++rr) {
+					for(int cc = -size / 2; cc < size / 2 + 1; ++cc) {
+						if(!(r + rr < 0 || c + cc < 0 || r + rr >= gp.rows() || c + cc >= gp.cols())
+								&& (v = get(c + cc, r + rr, srcband - 1)) != nodata) {
+							k = weights[(rr + size / 2) * size + (cc + size / 2)];
 							s += v * k;
+						}
 					}
 				}
-				smoothed.set(c, r, s, dstband);
+				smoothed.set(c, r, s, dstband - 1);
 			}
 		}
 
