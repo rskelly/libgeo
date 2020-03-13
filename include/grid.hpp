@@ -2554,7 +2554,7 @@ public:
 
 		// Start output threads.
 		for(int i = 0; i < threads; ++i) {
-			polyWriteToFile(&geoms, &finalIds, &idField, layer, &gctx,
+			ths.emplace_back(polyWriteToFile, &geoms, &finalIds, &idField, layer, &gctx,
 					removeHoles, removeDangles, &running, monitor,
 					&poly_fid, &poly_gmtx, &poly_fmtx, &poly_omtx, &poly_cv);
 		}

@@ -182,17 +182,28 @@ void geo::grid::detail::polyWriteToFile(std::unordered_map<int, std::vector<GEOS
 GEOSGeometry* geo::grid::detail::polyMakeGeom(double x0, double y0, double x1, double y1, int dims) {
 
 	// Build the geometry.
+	// TODO: Necessary to give z coord here?
 	GEOSCoordSequence* seq = GEOSCoordSeq_create(5, dims);
 	GEOSCoordSeq_setX(seq, 0, x0);
 	GEOSCoordSeq_setY(seq, 0, y0);
+	if(dims == 3)
+		GEOSCoordSeq_setZ(seq, 0, 0);
 	GEOSCoordSeq_setX(seq, 1, x0);
 	GEOSCoordSeq_setY(seq, 1, y1);
+	if(dims == 3)
+		GEOSCoordSeq_setZ(seq, 0, 0);
 	GEOSCoordSeq_setX(seq, 2, x1);
 	GEOSCoordSeq_setY(seq, 2, y1);
+	if(dims == 3)
+		GEOSCoordSeq_setZ(seq, 0, 0);
 	GEOSCoordSeq_setX(seq, 3, x1);
 	GEOSCoordSeq_setY(seq, 3, y0);
+	if(dims == 3)
+		GEOSCoordSeq_setZ(seq, 0, 0);
 	GEOSCoordSeq_setX(seq, 4, x0);
 	GEOSCoordSeq_setY(seq, 4, y0);
+	if(dims == 3)
+		GEOSCoordSeq_setZ(seq, 0, 0);
 	GEOSGeometry* ring = GEOSGeom_createLinearRing(seq);
 	GEOSGeometry* poly = GEOSGeom_createPolygon(ring, 0, 0);
 	return poly;
