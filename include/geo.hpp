@@ -133,6 +133,13 @@ public:
 
 };
 
+/**
+ * \brief Return a default Monitor object if none is available elsewhere.
+ *
+ * \return A pointer to a global Monitor object.
+ */
+Monitor* getDefaultMonitor();
+
 } // geo
 
 

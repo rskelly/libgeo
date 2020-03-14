@@ -197,6 +197,25 @@ std::string geo::util::parent(const std::string& path) {
 
 }
 
+bool geo::util::rename(const std::string& from, const std::string& to) {
+	if(isdir(to))
+		g_runerr(to << " is a directory.")
+	struct stat s1, s2;
+    if(!lstat(from.c_str(), &s1) && !lstat(to.c_str(), &s2) && s1.st_dev == s2.st_dev) {
+    	// Device IDs are the same, use rename.
+    	::rename(from.c_str(), to.c_str());
+    } else {
+    	if(isfile(to))
+    		rem(to);
+    	std::ofstream out(to, std::ios::binary|std::ios::trunc);
+    	std::ifstream in(from, std::ios::binary);
+    	char buf[4096];
+    	while(in.read(buf, 4096))
+    		out.write(buf, in.gcount());
+    }
+    return true;
+}
+
 std::string geo::util::join(const std::string& a, const std::string& b) {
 	if(b.empty()) {
 		return a.empty() ? "" : a;
@@ -246,6 +265,20 @@ std::string geo::util::gettmpdir() {
 	if(!tmp)
 		tmp = ::getenv("TMPDIR");
 	if(!tmp) {
+#ifdef _WIN32
+#include <windows.h>
+#include <tchar.h>
+		TCHAR buf[MAX_PATH];
+		DWORD ret = GetTempPath(MAX_PATH, buf);
+		if (ret > 0 && ret <= MAX_PATH)
+			dir = std::string(buf, ret);
+#else
+		dir = P_tmpdir;
+#endif
+	} else {
+		dir = tmp;
+	}
+	if(dir.empty()) {
 		g_warn("Temp directory not found. Storing in current directory.");
 		dir = ".";
 	} else {
