@@ -41,6 +41,13 @@ extern "C" {
 	void surev_(int* idim, double* tu, int* nu, double* tv, int* nv,
 			double* c, const double* u, int* mu, const double* v, int* mv, double* f, int* mf,
 			double* wrk, int* lwrk, int* iwrk, int* kwrk, int* ier);
+
+	void curfit_(int* iopt, int* m, const double* x, const double* y, const double* w,
+			double* xb, double* xe, int* k, double* s, int* nest, int* n, double* t, double* c,
+			double* fp, double* wrk, int* lwrk, int* iwrk, int* ier);
+
+	void curev_(int* idim, double* t, int* n, double* c, int* nc, int* k,
+			const double* u, int* m, double* x, int* mx, int* ier);
 }
 
 namespace {
@@ -863,6 +870,124 @@ int BivariateSpline::evaluate(const std::vector<double>& x, const std::vector<do
 	return ier;
 }
 
+
+double SmoothingSpline::stddev(const std::vector<double>& v) const {
+	double mean = 0, var = 0;
+	for(const double& vv : v)
+		mean += vv;
+	mean /= v.size();
+	for(const double& vv : v)
+		var += std::pow(vv - mean, 2.0);
+	return std::sqrt(var / v.size());
+}
+
+int SmoothingSpline::init(double& smooth, const std::vector<double>& x, const std::vector<double>& y,
+		std::vector<double>& weights,
+		double x0, double x1) {
+
+	if(smooth <= 0) {
+		smooth = x.size();
+		std::cout << "Setting smooth value to " << smooth << "\n";
+	}
+
+	if(weights.empty()) {
+		std::cout << "Using std. dev. for weights.\n";
+		double s = 1.0 / stddev(y);
+		weights.resize(x.size());
+		for(size_t i = 0; i < x.size(); ++i)
+			weights[i] = s;
+	}
+
+	int iopt = 0;
+	int k = 3;
+	double eps = std::pow(10.0, -15.0);
+
+	int m = x.size();
+	if(m < k + 1)
+		throw std::runtime_error("x array size must be greater than or equal to (kx + 1).");
+
+	int nest = m + k + 1;
+	int nmax = std::max(m, nest);
+
+	m_c.resize(nest);
+	m_tx.resize(nest);
+
+	double fp;
+
+	int lwrk = (m * (k + 1) + nest * (7 + 3 * k));
+	std::vector<double> wrk(lwrk);
+
+	int kwrk = nest;
+	std::vector<int> iwrk(kwrk);
+
+	int n;
+	int ier, iter = 0;
+	do {
+		std::cout << "Smoothing with " << smooth << "\n";
+		curfit_(&iopt, &m, x.data(), y.data(), weights.data(),
+				&x0, &x1, &k, &smooth, &nest, &n, m_tx.data(), m_c.data(),
+				&fp, wrk.data(), &lwrk, iwrk.data(), &ier);
+
+		m_tx.resize(n);
+		m_c.resize(n - k - 1);
+
+		if(ier == 1) {
+			std::cerr << "Smoothing parameter too small. Increasing: " << smooth << "->" << smooth * 2 << "\n";
+			smooth *= 2;
+		} else if(ier == 2) {
+			std::cerr << "Smoothing parameter probably too small. Increasing: " << smooth << "->" << smooth * 2 << "\n";
+			smooth *= 2;
+		} else if(ier == 4) {
+			std::cerr << "Too many knots. Increased smoothing parameter: " << smooth << "->" << smooth * 2 << "\n";
+			smooth *= 2;
+		} else if(ier == 5) {
+			std::cerr << "Can't add more knots. Increased smoothing parameter: " << smooth << "->" << smooth * 2 << "\n";
+			smooth *= 2;
+		} else if(ier == -2) {
+			std::cerr << "Output is the least squares fit. Smoothing should be no larger than " << fp << " (" << smooth << ")\n";
+			smooth *= 0.5;
+		} else if(ier < 0) {
+			std::cerr << "The coefficients are the minimal norm least-squares solution of a rank deficient system (" << ier << ")\n";
+			break;
+		} else if(ier > 5) {
+			throw std::runtime_error("Smoothing failed");
+		} else if(ier == 0) {
+			break;
+		}
+		++iter;
+	} while(iter < 100);
+
+	return ier;
+
+}
+
+int SmoothingSpline::evaluate(const std::vector<double>& x, std::vector<double>& y) {
+
+	int idim = 1;
+	int nx = x.size();
+	int n = m_tx.size();
+	int nc = m_c.size();
+	int k = 3;
+	int mx = nx * idim;
+
+	int ier;
+
+	y.resize(x.size());
+
+	curev_(&idim, m_tx.data(), &n, m_c.data(), &nc, &k,
+			x.data(), &nx, y.data(), &mx, &ier);
+
+
+	return ier;
+}
+
+const std::vector<double>& SmoothingSpline::knots() const {
+	return m_tx;
+}
+
+const std::vector<double>& SmoothingSpline::coefficients() const {
+	return m_c;
+}
 
 using namespace geo::util::csv;
 
