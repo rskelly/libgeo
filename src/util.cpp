@@ -241,12 +241,15 @@ std::string geo::util::extension(const std::string& path) {
 }
 
 std::string geo::util::gettmpdir() {
-	std::string dir = ::getenv("TMP");
-	if(dir.empty())
-		dir = ::getenv("TMPDIR");
-	if(dir.empty()) {
+	std::string dir;
+	char* tmp = ::getenv("TMP");
+	if(!tmp)
+		tmp = ::getenv("TMPDIR");
+	if(!tmp) {
 		g_warn("Temp directory not found. Storing in current directory.");
 		dir = ".";
+	} else {
+		dir = tmp;
 	}
 	return dir;
 }
