@@ -204,6 +204,25 @@ std::string geo::util::parent(const std::string& path) {
 
 }
 
+bool geo::util::rename(const std::string& from, const std::string& to) {
+	if(isdir(to))
+		g_runerr(to << " is a directory.")
+	struct stat s1, s2;
+    if(!lstat(from.c_str(), &s1) && !lstat(to.c_str(), &s2) && s1.st_dev == s2.st_dev) {
+    	// Device IDs are the same, use rename.
+    	::rename(from.c_str(), to.c_str());
+    } else {
+    	if(isfile(to))
+    		rem(to);
+    	std::ofstream out(to, std::ios::binary|std::ios::trunc);
+    	std::ifstream in(from, std::ios::binary);
+    	char buf[4096];
+    	while(in.read(buf, 4096))
+    		out.write(buf, in.gcount());
+    }
+    return true;
+}
+
 std::string geo::util::join(const std::string& a, const std::string& b) {
 	if(b.empty()) {
 		return a.empty() ? "" : a;
@@ -248,12 +267,29 @@ std::string geo::util::extension(const std::string& path) {
 }
 
 std::string geo::util::gettmpdir() {
-	std::string dir = ::getenv("TMP");
-	if(dir.empty())
-		dir = ::getenv("TMPDIR");
+	std::string dir;
+	char* tmp = ::getenv("TMP");
+	if(!tmp)
+		tmp = ::getenv("TMPDIR");
+	if(!tmp) {
+#ifdef _WIN32
+#include <windows.h>
+#include <tchar.h>
+		TCHAR buf[MAX_PATH];
+		DWORD ret = GetTempPath(MAX_PATH, buf);
+		if (ret > 0 && ret <= MAX_PATH)
+			dir = std::string(buf, ret);
+#else
+		dir = P_tmpdir;
+#endif
+	} else {
+		dir = tmp;
+	}
 	if(dir.empty()) {
 		g_warn("Temp directory not found. Storing in current directory.");
 		dir = ".";
+	} else {
+		dir = tmp;
 	}
 	return dir;
 }
@@ -807,6 +843,7 @@ int BivariateSpline::init(double& smooth, const std::vector<double>& x, const st
 	std::vector<int> iwrk(kwrk);
 
 	int ier, iter = 0;
+	std::cout << "X: " << x.size() << "; Y: " << y.size() << "\n";
 	do {
 		std::cout << "Smoothing with " << smooth << "\n";
 		surfit_(&iopt, &m, x.data(), y.data(), z.data(), weights.data(),
@@ -847,11 +884,16 @@ int BivariateSpline::init(double& smooth, const std::vector<double>& x, const st
 }
 
 int BivariateSpline::evaluate(const std::vector<double>& x, const std::vector<double>& y, std::vector<double>& z) {
+	return evaluate(x.data(), x.size(), y.data(), y.size(), z.data(), z.size());
+}
+
+int BivariateSpline::evaluate(const double* x, int nx, const double* y, int ny, double* z, int nz) {
 
 	int idim = 2;
-	int nx = x.size();
-	int ny = y.size();
 	int mf = nx* ny * idim;
+
+	if(nz < mf)
+		g_runerr("Z array is too small at " << nz << "; " << mf << " required.")
 
 	int lwrk1 = (nx + ny) * 4;
 	std::vector<double> wrk1(lwrk1);
@@ -861,10 +903,8 @@ int BivariateSpline::evaluate(const std::vector<double>& x, const std::vector<do
 
 	int ier;
 
-	z.resize(mf);
-
 	surev_(&idim, m_tx.data(), &m_nx, m_ty.data(), &m_ny,
-			m_c.data(), x.data(), &nx, y.data(), &ny, z.data(), &mf,
+			m_c.data(), x, &nx, y, &ny, z, &mf,
 			wrk1.data(), (int*) &lwrk1, iwrk.data(), (int*) &liwrk, &ier);
 
 	return ier;

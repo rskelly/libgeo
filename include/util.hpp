@@ -189,6 +189,18 @@ std::string tmpdir(const std::string& prefix, const std::string& dir = "");
 std::string tmpfile(const std::string& prefix, const std::string& dir = "");
 
 /**
+ * \brief Renames or moves the file, across device boundaries if necessary.
+ *
+ * Uses rename for files on the same device. Throws an exception if the destination
+ * is an extant directory; overwrites an extant file.
+ *
+ * \param from The existing file.
+ * \param to The destination file.
+ * \return True on success.
+ */
+bool rename(const std::string& from, const std::string& to);
+
+/**
  * Return the parent directory of the path.
  */
 std::string parent(const std::string& path);
@@ -528,6 +540,8 @@ public:
 	 * \brief Evaluate.
 	 */
 	int evaluate(const std::vector<double>& x, const std::vector<double>& y, std::vector<double>& z);
+
+	int evaluate(const double* x, int nx, const double* y, int ny, double* z, int nz);
 
 	double stddev(const std::vector<double>& v) const;
 

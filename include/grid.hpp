@@ -50,18 +50,7 @@ namespace grid {
 	 */
 	Interleave interleaveFromString(const std::string& str);
 
-} // grid
-} // geo
-
-namespace {
-
-	using namespace geo::grid;
-
-	size_t poly_fid(0);					///<! A feature ID for geometries.
-	std::mutex poly_gmtx;  				///<! For the geoms map.
-	std::mutex poly_fmtx; 				///<! For the final list.
-	std::mutex poly_omtx;  				///<! For OGR writes.
-	std::condition_variable poly_cv;	///<! For waiting on the queue.
+namespace detail {
 
 	/**
 	 * \brief Get the size (in bytes) of the given DataType.
@@ -125,10 +114,32 @@ namespace {
 	 */
 	GEOSGeometry* polyMakeGeom(double x0, double y0, double x1, double y1, int dims);
 
+	/**
+	 * \brief Write to the file from the map of geometry lists.
+	 *
+	 * On each loop, extracts a single finalized poly ID and loads those polys for unioning.
+	 *
+	 * \param geoms The map of geometries.
+	 * \param finalIds The set of IDs that are ready for finalization.
+	 * \param idField The name of the field for storing IDs.
+	 * \param layer The OGRLayer for output.
+	 * \param gctx The GEOS context object.
+	 * \param removeHoles If true, removes holes from polygons.
+	 * \param removeDangles If true, removes degeneracies from the edges of polygons.
+	 * \param running If false, the operation is canceled.
+	 * \param cancel If true, the operation is cancelled.
+	 * \param poly_fid A feature ID for geometries.
+	 * \param poly_gmtx For the geoms map.
+	 * \param poly_fmtx For the final list.
+	 * \param poly_omtx For OGR writes.
+	 * \param poly_cv For waiting on the queue.
+	 */
 	void polyWriteToFile(std::unordered_map<int, std::vector<GEOSGeometry*> >* geoms,
 				std::unordered_set<int>* finalIds,
 				const std::string* idField, OGRLayer* layer, GEOSContextHandle_t* gctx,
-				bool removeHoles, bool removeDangles, bool* running, geo::Monitor* monitor);
+				bool removeHoles, bool removeDangles, bool* running, geo::Monitor* monitor,
+				size_t* poly_fid, std::mutex* poly_gmtx, std::mutex* poly_fmtx,
+				std::mutex* poly_omtx, std::condition_variable* poly_cv);
 
 	/**
 	 * \brief Fix the given coordinates so that the source does not extend
@@ -149,21 +160,29 @@ namespace {
 			int& cols, int& rows, int srcCols, int srcRows, int dstCols, int dstRows);
 
 	/**
+	 * \brief Fix the boundaries so that the write isn't too large for the
+	 * destination.
+	 *
+	 * \param[inout] cols The number of columns to operate on.
+	 * \param[inout] rows The number of rows to operate on.
+	 * \param[inout] srcCol The source column.
+	 * \param[inout] srcRow The source column.
+	 * \param[inout] dstCol The destination column.
+	 * \param[inout] dstRow The destination column.
+	 * \param rcols
+	 * \param rrows
+	 * \param gcols
+	 * \param grows
+	 */
+	void fixWriteBounds(int& cols, int& rows, int& srcCol, int& srcRow,
+			int& dstCol, int& dstRow, int rcols, int rrows, int gcols, int grows);
+
+	/**
 	 * \brief Return the key for the minimum value in the given map.
 	 *
 	 * \return The key for the minimum value in the given map.
 	 */
-	size_t minValue(std::unordered_map<size_t, double>& m) {
-		double min = std::numeric_limits<double>::max();
-		size_t key = 0;
-		for(const auto& it : m) {
-			if(it.second < min) {
-				min = it.second;
-				key = it.first;
-			}
-		}
-		return key;
-	}
+	size_t minValue(std::unordered_map<size_t, double>& m);
 
 	/**
 	 * \brief Writes an ordered path to the iterator from the map of cells.
@@ -183,12 +202,9 @@ namespace {
 		}
 	}
 
-} // anon
+} // detail
 
-
-
-namespace geo {
-namespace grid {
+using namespace geo::grid::detail;
 
 /**
  * \brief A class containing the properties of a raster.
@@ -1021,7 +1037,8 @@ public:
 
 		rem(filename);
 
-		m_ds = drv->Create(filename.c_str(), m_props.cols(), m_props.rows(), m_props.bands(), dataType2GDT(m_props.dataType()), opts);
+		m_ds = drv->Create(filename.c_str(), m_props.cols(), m_props.rows(), m_props.bands(),
+				dataType2GDT(m_props.dataType()), opts);
 
 		if(opts)
 			CSLDestroy(opts);
@@ -1408,13 +1425,15 @@ public:
 	 * \param band The source band.
 	 */
 	void getTile(T* tile, int col, int row, int width, int height, int band) {
-
+		int maxSize = width * height;
 		for(int r = row, rr = 0; r < row + height; ++r, ++rr) {
 			for(int c = col, cc = 0; c < col + width; ++c, ++cc) {
 				if(r < 0 || c < 0 || r >= props().rows() || c >= props().cols()) {
 					tile[rr * width + cc] = props().nodata();
 				} else {
 					tile[rr * width + cc] = get(c, r, band);
+					if(--maxSize == 0)
+						std::cout << "oops";
 				}
 			}
 		}
@@ -2007,10 +2026,8 @@ public:
 	 */
 	void smooth(Grid<T>& smoothed, double sigma, int size, int srcband, int dstband, geo::Monitor* monitor = nullptr) {
 
-		static Monitor _monitor;
-
 		if(!monitor)
-			monitor = &_monitor;
+			monitor = getDefaultMonitor();
 
 		m_dirty = true;
 
@@ -2031,25 +2048,24 @@ public:
 		std::vector<double> weights(size * size * getTypeSize(DataType::Float64));
 		Grid::gaussianWeights(weights.data(), size, sigma);
 
-		double nodata = gp.nodata();
-
 		monitor->status(0.02);
+
+		double k, v, nodata = gp.nodata();
 
 		// TODO: This is much faster when done in 2 passes.
 		for(int r = 0; r < gp.rows(); ++r) {
 			for(int c = 0; c < gp.cols(); ++c) {
 				double s = 0;
-				for(int rr = r - size / 2; rr < r + size / 2 + 1; ++rr) {
-					for(int cc = c - size / 2; cc < c + size / 2 + 2; ++cc) {
-						if(rr < 0 || cc < 0 || rr >= gp.rows() || cc >= gp.cols())
-							continue;
-						double k = weights[(rr + size / 2) * size + (cc + size / 2)];
-						double v = get(cc, rr, srcband);
-						if(v != nodata)
+				for(int rr = -size / 2; rr < size / 2 + 1; ++rr) {
+					for(int cc = -size / 2; cc < size / 2 + 1; ++cc) {
+						if(!(r + rr < 0 || c + cc < 0 || r + rr >= gp.rows() || c + cc >= gp.cols())
+								&& (v = get(c + cc, r + rr, srcband - 1)) != nodata) {
+							k = weights[(rr + size / 2) * size + (cc + size / 2)];
 							s += v * k;
+						}
 					}
 				}
-				smoothed.set(c, r, s, dstband);
+				smoothed.set(c, r, s, dstband - 1);
 			}
 		}
 
@@ -2423,10 +2439,8 @@ public:
 			const std::vector<std::pair<std::string, OGRFieldType> >& fields = {},
 			Monitor* monitor = nullptr) {
 
-		static Monitor _monitor;
-
 		if(!monitor)
-			monitor = &_monitor;
+			monitor = getDefaultMonitor();
 
 		OGRSpatialReference sr;
 		sr.importFromEPSG(srid);
@@ -2465,9 +2479,8 @@ public:
 			const std::vector<std::pair<std::string, OGRFieldType> >& fields = {},
 			Monitor* monitor = nullptr) {
 
-		static Monitor _monitor;
-
-		if(!monitor) monitor = &_monitor;
+		if(!monitor)
+			monitor = getDefaultMonitor();
 
 		if(isFloat())
 			g_runerr("Only int rasters can be polygonized.");
@@ -2504,7 +2517,8 @@ public:
 
 		GDALDataset* ds;
 		OGRLayer* layer;
-		polyMakeDataset(filename, driver, layerName, idField, sr, d3 ? wkbMultiPolygon25D : wkbMultiPolygon, &ds, &layer);
+		polyMakeDataset(filename, driver, layerName, idField, sr,
+				d3 ? wkbMultiPolygon25D : wkbMultiPolygon, &ds, &layer);
 
 		if(sr)
 			sr->Release();
@@ -2532,9 +2546,18 @@ public:
 		bool running = true;
 		std::list<std::thread> ths;
 
+		size_t poly_fid = 0;
+		std::mutex poly_gmtx;
+		std::mutex poly_fmtx;
+		std::mutex poly_omtx;
+		std::condition_variable poly_cv;
+
 		// Start output threads.
-		for(int i = 0; i < threads; ++i)
-			polyWriteToFile(&geoms, &finalIds, &idField, layer, &gctx, removeHoles, removeDangles, &running, monitor);
+		for(int i = 0; i < threads; ++i) {
+			ths.emplace_back(polyWriteToFile, &geoms, &finalIds, &idField, layer, &gctx,
+					removeHoles, removeDangles, &running, monitor,
+					&poly_fid, &poly_gmtx, &poly_fmtx, &poly_omtx, &poly_cv);
+		}
 
 		// Process raster.
 		for(int r = 0; r < rows; ++r) {
@@ -2722,332 +2745,7 @@ public:
 };
 
 
-} // grid
-} // geo
-
-namespace {
-
-	/**
-	 * \brief Write to the file from the map of geometry lists.
-	 *
-	 * On each loop, extracts a single finalized poly ID and loads those polys for unioning.
-	 *
-	 * \param geoms The map of geometries.
-	 * \param finalIds The set of IDs that are ready for finalization.
-	 * \param idField The name of the field for storing IDs.
-	 * \param layer The OGRLayer for output.
-	 * \param gctx The GEOS context object.
-	 * \param removeHoles If true, removes holes from polygons.
-	 * \param removeDangles If true, removes degeneracies from the edges of polygons.
-	 * \param running If false, the operation is canceled.
-	 * \param cancel If true, the operation is cancelled.
-	 */
-	void polyWriteToFile(std::unordered_map<int, std::vector<GEOSGeometry*> >* geoms,
-			std::unordered_set<int>* finalIds,
-			const std::string* idField, OGRLayer* layer, GEOSContextHandle_t* gctx,
-			bool removeHoles, bool removeDangles, bool* running, geo::Monitor* monitor) {
-
-		std::vector<GEOSGeometry*> polys;
-		GEOSGeometry* geom = nullptr;
-		int id;
-
-		while(!monitor->canceled() && (*running || !finalIds->empty())) {
-
-			// Get an ID and the list of polys from the queue.
-			{
-				std::unique_lock<std::mutex> lk(poly_fmtx);
-				// Wait for a notification if the queue is empty.
-				while(!monitor->canceled() && *running && finalIds->empty())
-					poly_cv.wait(lk);
-				// If the wakeup is spurious, skip.
-				if(finalIds->empty())
-					continue;
-				// Get the ID.
-				id = *(finalIds->begin());
-				finalIds->erase(id);
-			}
-			// Get the list of polys and remove the list from the map.
-			{
-				std::lock_guard<std::mutex> lk(poly_gmtx);
-				// If the geoms list is still here, grab it.
-				if(geoms->find(id) == geoms->end())
-					continue;
-				polys = geoms->at(id);
-				geoms->erase(id);
-			}
-
-			if(polys.empty())
-				continue;
-
-			if(monitor->canceled()) {
-				for(GEOSGeometry* p : polys)
-					GEOSGeom_destroy(p);
-				continue;
-			}
-
-			// Union the polys.
-			geom = polys.front();
-			for(size_t i = 1; i < polys.size(); ++i) {
-				GEOSGeometry* tmp = GEOSUnion_r(*gctx, geom, polys[i]); //
-				GEOSGeom_destroy(geom);
-				GEOSGeom_destroy(polys[i]);
-				geom = tmp;
-			}
-			polys.clear();
-
-			if(monitor->canceled()) {
-				GEOSGeom_destroy(geom);
-				continue;
-			}
-
-			// If we're removing dangles, throw away all but the
-			// largest single polygon. If it was originally a polygon, there are no dangles.
-			size_t numGeoms;
-			if(!monitor->canceled() && removeDangles && (numGeoms = GEOSGetNumGeometries(geom)) > 1) {
-				size_t idx = 0;
-				double a, area = 0;
-				for(size_t i = 0; i < numGeoms; ++i) {
-					const GEOSGeometry* p = GEOSGetGeometryN(geom, i);
-					GEOSArea(p, &a);
-					if(a > area) {
-						area = a;
-						idx = i;
-					}
-				}
-				GEOSGeometry *g = GEOSGeom_clone(GEOSGetGeometryN(geom, idx)); // Force copy.
-				GEOSGeom_destroy(geom);
-				geom = g;
-			}
-
-			// If we're removing holes, extract the exterior rings of all constituent polygons.
-			if(!monitor->canceled() && removeHoles) {
-				std::vector<GEOSGeometry*> geoms0;
-				for(int i = 0; i < GEOSGetNumGeometries(geom); ++i) {
-					const GEOSGeometry* p = GEOSGetGeometryN(geom, i);
-					const GEOSGeometry* l = GEOSGetExteriorRing(p);
-					const GEOSCoordSequence* seq = GEOSGeom_getCoordSeq(l);
-					GEOSGeometry* r = GEOSGeom_createLinearRing(GEOSCoordSeq_clone(seq));
-					GEOSGeometry* npoly = GEOSGeom_createPolygon(r, 0, 0);
-					geoms0.push_back(npoly);
-				}
-				GEOSGeometry* g = GEOSGeom_createCollection(GEOSGeomTypes::GEOS_MULTIPOLYGON, geoms0.data(), geoms0.size()); // Do not copy -- take ownership.
-				GEOSGeom_destroy(geom);
-				geom = g;
-			}
-
-			// If the result is not a multi, make it one.
-			if(!monitor->canceled() && GEOSGeomTypeId(geom) != GEOSGeomTypes::GEOS_MULTIPOLYGON) {
-				std::vector<GEOSGeometry*> gs;
-				gs.push_back(geom);
-				geom = GEOSGeom_createCollection(GEOSGeomTypes::GEOS_MULTIPOLYGON, gs.data(), gs.size());
-			}
-
-			if(!geom)
-				g_runerr("Null geometry.");
-
-			if(monitor->canceled()) {
-				GEOSGeom_destroy(geom);
-				continue;
-			}
-
-			// Create and write the OGR geometry.
-			OGRGeometry* ogeom = OGRGeometryFactory::createFromGEOS(*gctx, (GEOSGeom) geom);
-			GEOSGeom_destroy(geom);
-
-			// Create and configure the feature. Feature owns the OGRGeometry.
-			OGRFeatureDefn* fdef = layer->GetLayerDefn();
-			OGRFeature* feat = OGRFeature::CreateFeature(fdef); // Creates on the OGR heap.
-			feat->SetGeometryDirectly(ogeom);
-			feat->SetField(idField->c_str(), (GIntBig) id);
-			feat->SetFID(++poly_fid);
-
-			// Write to the output file.
-			int err;
-			{
-				std::lock_guard<std::mutex> lk(poly_omtx);
-				err = layer->CreateFeature(feat);
-			}
-
-			OGRFeature::DestroyFeature(feat);
-
-			if(OGRERR_NONE != err)
-				g_runerr("Failed to add geometry.");
-		}
-	}
-
-	/**
-	 * \brief Produce a rectangular polygon from the four corners.
-	 *
-	 * \param x0 The top left corner x-coordinate.
-	 * \param y0 The top left corner y-coordinate.
-	 * \param x1 The top left corner x-coordinate.
-	 * \param y1 The top left corner y-coordinate.
-	 * \param dims The number of dimensions.
-	 */
-	GEOSGeometry* polyMakeGeom(double x0, double y0, double x1, double y1, int dims) {
-
-		// Build the geometry.
-		GEOSCoordSequence* seq = GEOSCoordSeq_create(5, dims);
-		GEOSCoordSeq_setX(seq, 0, x0);
-		GEOSCoordSeq_setY(seq, 0, y0);
-		GEOSCoordSeq_setX(seq, 1, x0);
-		GEOSCoordSeq_setY(seq, 1, y1);
-		GEOSCoordSeq_setX(seq, 2, x1);
-		GEOSCoordSeq_setY(seq, 2, y1);
-		GEOSCoordSeq_setX(seq, 3, x1);
-		GEOSCoordSeq_setY(seq, 3, y0);
-		GEOSCoordSeq_setX(seq, 4, x0);
-		GEOSCoordSeq_setY(seq, 4, y0);
-		GEOSGeometry* ring = GEOSGeom_createLinearRing(seq);
-		GEOSGeometry* poly = GEOSGeom_createPolygon(ring, 0, 0);
-		return poly;
-	}
-
-	/**
-	 * \brief Make or open an OGR database to write the polygons to.
-	 *
-	 * \param filename The output filename.
-	 * \param driver The output driver.
-	 * \param layerName The layer name.
-	 * \param idField The field for the geometry ID.
-	 * \param sr The spatial reference object.
-	 * \param gType The geometry type.
-	 * \param ds The dataset.
-	 * \param layer the layer.
-	 */
-	void polyMakeDataset(const std::string& filename, const std::string& driver, const std::string& layerName,
-			const std::string& idField,
-			OGRSpatialReference* sr, OGRwkbGeometryType gType,
-			GDALDataset** ds, OGRLayer** layer) {
-
-		*ds = (GDALDataset*) GDALOpenEx(filename.c_str(), GDAL_OF_VECTOR | GDAL_OF_UPDATE, nullptr, nullptr, nullptr);
-
-		std::string drvl = lowercase(driver);
-
-		if(!*ds) {
-			// Get the vector driver.
-			GDALDriver *drv = GetGDALDriverManager()->GetDriverByName(driver.c_str());
-			if(!drv)
-				g_runerr("Failed to find driver for " << driver << ".");
-
-			// Create an output dataset for the polygons.
-			char** dopts = NULL;
-			if(drvl == "sqlite")
-				dopts = CSLSetNameValue(dopts, "SPATIALITE", "YES");
-
-			*ds = drv->Create(filename.c_str(), 0, 0, 0, GDT_Unknown, dopts);
-			CPLFree(dopts);
-			if(!*ds)
-				g_runerr("Failed to create dataset " << filename << ".");
-
-		}
-
-		// Create the layer.
-		char** lopts = NULL;
-		if(drvl == "sqlite") {
-			lopts = CSLSetNameValue(lopts, "FORMAT", "SPATIALITE");
-		} else if(drvl == "esri shapefile") {
-			lopts = CSLSetNameValue(lopts, "2GB_LIMIT", "YES");
-		}
-		*layer = (*ds)->CreateLayer(layerName.c_str(), sr, gType, lopts);
-		CPLFree(lopts);
-
-		if(!*layer)
-			g_runerr("Failed to create layer " << layerName << ".");
-
-		// There's only one field -- an ID.
-		OGRFieldDefn field(idField.c_str(), OFTInteger);
-		(*layer)->CreateField(&field, TRUE);
-
-	}
-
-	/**
-	 * \brief Produce a status message from the current and total row counds.
-	 *
-	 * \param r The current row.
-	 * \param rows The total number of rows.
-	 * \return The new status message.
-	 */
-	std::string polyRowStatus(int r, int rows) {
-		std::stringstream ss;
-		ss << "Polygonizing row " << (r + 1) << " of " << rows;
-		return ss.str();
-	}
-
-}
-
-namespace {
-
-	using namespace geo::grid;
-
-	/**
-	 * \brief Return the number of bytes required to store each type.
-	 *
-	 * \param type The libgeo data type.
-	 * \return The number of bytes required to store each type.
-	 */
-	int getTypeSize(DataType type) {
-		switch(type) {
-		case DataType::Byte: return sizeof(uint8_t);
-		case DataType::Float32: return sizeof(float);
-		case DataType::Float64: return sizeof(double);
-		case DataType::Int16: return sizeof(int16_t);
-		case DataType::Int32: return sizeof(int32_t);
-		case DataType::UInt16: return sizeof(uint16_t);
-		case DataType::UInt32: return sizeof(uint32_t);
-		default:
-			g_runerr("No size for type: " << (int) type);
-		}
-	}
-
-	/**
-	 * \brief Convert the libgeo data type to a GDAL data type.
-	 *
-	 * \param The libgeo data type.
-	 * \return type The GDAL data type.
-	 */
-	GDALDataType dataType2GDT(DataType type) {
-		switch(type) {
-		case DataType::Byte:  	return GDT_Byte;
-		case DataType::UInt16: 	return GDT_UInt16;
-		case DataType::UInt32:	return GDT_UInt32;
-		case DataType::Int16:	return GDT_Int16;
-		case DataType::Int32:	return GDT_Int32;
-		case DataType::Float64:	return GDT_Float64;
-		case DataType::Float32:	return GDT_Float32;
-		case DataType::None:
-		default:
-			break;
-		}
-		return GDT_Unknown;
-	}
-
-	/**
-	 * \brief Convert the GDAL data type to a libgeo data type.
-	 *
-	 * \param type The GDAL data type.
-	 * \return The libgeo data type.
-	 */
-	DataType gdt2DataType(GDALDataType type) {
-		switch(type) {
-		case GDT_Byte:	  	return DataType::Byte;
-		case GDT_UInt16: 	return DataType::UInt16;
-		case GDT_UInt32:	return DataType::UInt32;
-		case GDT_Int16:		return DataType::Int16;
-		case GDT_Int32:		return DataType::Int32;
-		case GDT_Float64:	return DataType::Float64;
-		case GDT_Float32:	return DataType::Float32;
-		case GDT_Unknown:
-		case GDT_CInt16:
-		case GDT_CInt32:
-		case GDT_CFloat32:
-		case GDT_CFloat64:
-		case GDT_TypeCount:
-		default:
-			break;
-		}
-		return DataType::None;
-	}
+namespace detail {
 
 	/**
 	 * \brief Write typed data to the un-typed GDAL block.
@@ -3058,7 +2756,7 @@ namespace {
 	 * \param idx The offset into the output buffer. (Already appropriate size for the type.)
 	 */
 	template <class T>
-	inline void writeToBlock(void *block, GDALDataType type, T value, int idx) {
+	void writeToBlock(void *block, GDALDataType type, T value, int idx) {
 		switch (type) {
 		case GDT_Float32:
 			*(((float *)block) + idx) = (float)value;
@@ -3096,7 +2794,7 @@ namespace {
 	 * \param idx The offset into the output buffer. (Already appropriate size for the type.)
 	 */
 	template <class T>
-	inline void readFromBlock(void* block, GDALDataType type, T* value, int idx) {
+	void readFromBlock(void* block, GDALDataType type, T* value, int idx) {
 		switch (type) {
 		case GDT_Float32:
 			*value = (double) *(((float *)block) + idx);
@@ -3125,91 +2823,10 @@ namespace {
 		}
 	}
 
-	void fixWriteBounds(int& cols, int& rows, int& srcCol, int& srcRow, int& dstCol,
-			int& dstRow, int rcols, int rrows, int gcols, int grows) {
+} // detail
 
-		if(cols <= 0)
-			cols = gcols;
-		if(rows <= 0)
-			rows = grows;
-
-		if(srcCol < 0) {
-			dstCol -= srcCol;
-			cols += srcCol;
-			srcCol = 0;
-		}
-		if(srcRow < 0) {
-			dstRow -= srcRow;
-			rows += srcRow;
-			srcRow = 0;
-		}
-		if(dstCol < 0) {
-			cols -= dstCol;
-			dstCol = 0;
-		}
-		if(dstRow < 0) {
-			rows -= dstRow;
-			dstRow = 0;
-		}
-
-		if(srcCol + cols >= rcols)
-			cols = rcols - srcCol;
-		if(srcRow + rows >= rrows)
-			rows = rrows - srcRow;
-
-		if(dstCol + cols > gcols)
-			cols = gcols - dstCol;
-		if(dstRow + rows > grows)
-			rows = grows - dstRow;
-
-	}
-
-	bool fixCoords(int& srcCol, int& srcRow, int& dstCol, int& dstRow, int& cols, int& rows, int srcCols, int srcRows, int dstCols, int dstRows) {
-
-		if(cols <= 0) cols = srcCols;
-		if(rows <= 0) rows = srcRows;
-
-		if(srcCol >= srcCols || srcRow >= srcRows || srcCol + cols < 0 || srcRow + rows < 0) {
-			g_warn("Col/row out of range." << srcCol << ", " << srcRow << ", " << srcCols << ", " << srcRows << ", " << cols << ", " << rows);
-			return false;
-		}
-		if(srcCol < 0) {
-			cols += srcCol;
-			srcCol = 0;
-		}
-		if(srcRow < 0) {
-			rows += srcRow;
-			srcRow = 0;
-		}
-		if(srcCol + cols > srcCols) {
-			cols = srcCols - srcCol;
-		}
-		if(srcRow + rows > srcRows) {
-			rows = srcRows - srcRow;
-		}
-		if(dstCol < 0) {
-			cols += dstCol;
-			dstCol = 0;
-		}
-		if(dstRow < 0) {
-			rows += dstRow;
-			dstRow = 0;
-		}
-		if(dstCol + cols > dstCols) {
-			cols = dstCols - dstCol;
-		}
-		if(dstRow + rows > dstRows) {
-			rows = dstRows - dstRow;
-		}
-		if(cols <= 0 || rows <= 0) {
-			g_warn("Zero copy area.")
-			return false;
-		}
-		return true;
-	}
-
-
-} // anonymous
+} // grid
+} // geo
 
 
 
