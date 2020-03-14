@@ -313,7 +313,7 @@ int geo::util::pid() {
 
 std::string geo::util::tmpdir(const std::string& prefix, const std::string& dir) {
 	// Assemble the target directory, check and attempt to create if needed.
-	std::string tdir = join(join(gettmpdir(), dir), std::to_string(pid()));
+	std::string tdir = join(gettmpdir(), dir);
 	if(!isdir(tdir)) {
 		if(!makedir(tdir))
 			g_runerr("Failed to make target dir: " << tdir);
@@ -327,7 +327,7 @@ std::string geo::util::tmpdir(const std::string& prefix, const std::string& dir)
 
 std::string geo::util::tmpfile(const std::string& prefix, const std::string& dir) {
 	// Make a temp file in the system dir.
-	static std::string tpl = "XXXXXX";
+	static std::string tpl = "_XXXXXX";
 	// Assemble the target directory, check and attempt to create if needed.
 	std::string tdir = join(gettmpdir(), dir);
 	if(!isdir(tdir)) {

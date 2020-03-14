@@ -638,9 +638,8 @@ public:
 		m_maxDepth = maxDepth;
 
 		// Create a root path.
-		std::stringstream dirname;
-		dirname << "mqtree_" << geo::util::pid() << "_XXXXXX";
-		m_rootPath = util::tmpdir(dirname.str().c_str());
+		std::string dirname = "mqtree_" + std::to_string(geo::util::pid());
+		m_rootPath = util::tmpdir(dirname.c_str());
 
 		// Get the side length of the table region.
 		double side = std::max(maxx - minx, maxy - miny);
