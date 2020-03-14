@@ -639,7 +639,7 @@ public:
 
 		// Create a root path.
 		std::stringstream dirname;
-		dirname << "/tmp/mqtree_" << ::getpid() << "_XXXXXX";
+		dirname << "mqtree_" << geo::util::pid() << "_XXXXXX";
 		m_rootPath = util::tmpdir(dirname.str().c_str());
 
 		// Get the side length of the table region.

@@ -62,6 +62,17 @@ namespace {
 		return 0;
 	}
 
+	void formattmp(std::string& path) {
+		char tname[PATH_MAX];
+		std::strncpy(tname, path.c_str(), path.size());
+		tname[path.size()] = '\0';
+		// Attempto open, fail or return the path.
+		if(mkstemp(tname) > 0)
+			path = tname;
+		if(path.empty())
+			g_runerr("Failed to make temporary file name " << path << ": " << strerror(errno));
+	}
+
 } // anon
 
 
@@ -288,8 +299,6 @@ std::string geo::util::gettmpdir() {
 	if(dir.empty()) {
 		g_warn("Temp directory not found. Storing in current directory.");
 		dir = ".";
-	} else {
-		dir = tmp;
 	}
 	return dir;
 }
@@ -304,12 +313,13 @@ int geo::util::pid() {
 
 std::string geo::util::tmpdir(const std::string& prefix, const std::string& dir) {
 	// Assemble the target directory, check and attempt to create if needed.
-	std::string tdir = join(gettmpdir(), dir);
+	std::string tdir = join(join(gettmpdir(), dir), std::to_string(pid()));
 	if(!isdir(tdir)) {
 		if(!makedir(tdir))
 			g_runerr("Failed to make target dir: " << tdir);
 	}
-	std::string path = prefix + std::to_string(pid());
+	std::string path = join(tdir, prefix);
+	formattmp(path);
 	if(!makedir(path))
 		g_runerr("Failed to make directory: " << path);
 	return path;
@@ -326,16 +336,8 @@ std::string geo::util::tmpfile(const std::string& prefix, const std::string& dir
 	}
 	// Assemble the file path.
 	std::string path = join(tdir, prefix + tpl);
-	char tname[PATH_MAX];
-	std::strncpy(tname, path.c_str(), path.size());
-	tname[path.size()] = '\0';
-	// Attempto open, fail or return the path.
-	std::string ret;
-	if(mkstemp(tname) > 0)
-		ret = tname;
-	if(ret.empty())
-		g_runerr("Failed to make temporary file name " << path << ": " << strerror(errno));
-	return ret;
+	formattmp(path);
+	return path;
 }
 
 bool geo::util::makedir(const std::string& filename) {
@@ -940,14 +942,14 @@ int SmoothingSpline::init(double& smooth, const std::vector<double>& x, const st
 
 	int iopt = 0;
 	int k = 3;
-	double eps = std::pow(10.0, -15.0);
+	//double eps = std::pow(10.0, -15.0);
 
 	int m = x.size();
 	if(m < k + 1)
 		throw std::runtime_error("x array size must be greater than or equal to (kx + 1).");
 
 	int nest = m + k + 1;
-	int nmax = std::max(m, nest);
+	//int nmax = std::max(m, nest);
 
 	m_c.resize(nest);
 	m_tx.resize(nest);
