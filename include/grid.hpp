@@ -261,11 +261,11 @@ public:
 			g_runerr("Invalid band: " << band);
 		switch(m_interleave) {
 		case Interleave::BIL:
-			return row * m_cols * m_bands + band * m_cols + col;
+			return (size_t) row * (size_t) m_cols * (size_t) m_bands + (size_t) band * (size_t) m_cols + (size_t) col;
 		case Interleave::BSQ:
-			return band * m_cols * m_rows + row * m_cols + col;
+			return (size_t) band * (size_t) m_cols * (size_t) m_rows + (size_t) row * (size_t) m_cols + (size_t) col;
 		case Interleave::BIP:
-			return row * m_cols * m_bands + col * m_bands + band;
+			return (size_t) row * (size_t) m_cols * (size_t) m_bands + (size_t) col * (size_t) m_bands + (size_t) band;
 		default:
 			g_runerr("Invalid interleave: "  << (int) m_interleave);
 		}
@@ -846,7 +846,7 @@ private:
 	void initMapped() {
 		if(m_data)
 			destroy();
-		m_size = props().cols() * props().rows() * props().bands() * sizeof(T);
+		m_size = (size_t) props().cols() * (size_t) props().rows() * (size_t) props().bands() * (size_t) sizeof(T); // TODO: Casting to prevent roll over.
 		m_mapFile.reset(new TmpFile(m_size));
 		m_data = (T*) mmap(0, m_size, PROT_READ|PROT_WRITE, MAP_SHARED, m_mapFile->fd, 0);
 		if(!m_data)
@@ -860,7 +860,7 @@ private:
 	void initMem() {
 		if(m_data)
 			destroy();
-		m_size = props().cols() * props().rows() * props().bands() * sizeof(T);
+		m_size = (size_t) props().cols() * (size_t) props().rows() * (size_t) props().bands() * (size_t) sizeof(T); // TODO: Casting to prevent roll over.
 		m_data = (T*) malloc(m_size);
 		if(!m_data)
 			g_runerr("Failed to allocate " << m_size << " bytes for grid.");
