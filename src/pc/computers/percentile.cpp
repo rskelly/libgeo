@@ -28,10 +28,16 @@ int PercentileComputer::compute(double, double, const std::vector<geo::pc::Point
 		std::sort(_pts.begin(), _pts.end(), pointSort);
 		int count = _pts.size();
 		if(count % 2 == 0) {
-			size_t idx = (size_t) (count * m_percentile) - 1;
-			out.push_back((_pts[idx + 1].value() + _pts[idx].value()) / 2.0);
+			int idx1 = (int) (count * m_percentile) - 1;
+			int idx2 = idx1 + 1;
+			if(idx1 < 0) ++idx1;
+			if(idx2 >= (int) _pts.size()) --idx2;
+			out.push_back((_pts[idx1].value() + _pts[idx2].value()) / 2.0);
 		} else {
-			out.push_back(_pts[(size_t) (count * m_percentile)].value());
+			int idx = (int) (count * m_percentile) - 1;
+			if(idx < 0) ++idx;
+			if(idx >= (int) _pts.size()) --idx;
+			out.push_back(_pts[idx].value());
 		}
 	} else {
 		out.push_back(std::nan(""));
