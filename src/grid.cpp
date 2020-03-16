@@ -38,7 +38,7 @@ void geo::grid::detail::polyWriteToFile(std::unordered_map<int, std::vector<GEOS
 		std::unordered_set<int>* finalIds,
 		const std::string* idField, OGRLayer* layer, GEOSContextHandle_t* gctx,
 		bool removeHoles, bool removeDangles, bool* running, geo::Monitor* monitor,
-		size_t* poly_fid, std::mutex* poly_gmtx, std::mutex* poly_fmtx,
+		std::atomic<size_t>* poly_fid, std::mutex* poly_gmtx, std::mutex* poly_fmtx,
 		std::mutex* poly_omtx, std::condition_variable* poly_cv) {
 
 

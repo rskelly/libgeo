@@ -24,6 +24,7 @@
 #include <type_traits>
 #include <condition_variable>
 #include <thread>
+#include <atomic>
 
 #include <geos_c.h>
 
@@ -138,7 +139,7 @@ namespace detail {
 				std::unordered_set<int>* finalIds,
 				const std::string* idField, OGRLayer* layer, GEOSContextHandle_t* gctx,
 				bool removeHoles, bool removeDangles, bool* running, geo::Monitor* monitor,
-				size_t* poly_fid, std::mutex* poly_gmtx, std::mutex* poly_fmtx,
+				std::atomic<size_t>* poly_fid, std::mutex* poly_gmtx, std::mutex* poly_fmtx,
 				std::mutex* poly_omtx, std::condition_variable* poly_cv);
 
 	/**
@@ -2546,7 +2547,7 @@ public:
 		bool running = true;
 		std::list<std::thread> ths;
 
-		size_t poly_fid = 0;
+		std::atomic<size_t> poly_fid(0);
 		std::mutex poly_gmtx;
 		std::mutex poly_fmtx;
 		std::mutex poly_omtx;
