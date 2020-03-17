@@ -4,10 +4,10 @@
  *  Created on: Jun 4, 2019
  *      Author: rob
  */
-
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/time.h>
+#include <fcntl.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -400,9 +400,10 @@ std::string geo::util::projectionFromSRID(int srid) {
 
 TmpFile::TmpFile(size_t size) :
 	fd(0), size(0) {
-	char tpl[] = {"/tmp/geo_util_XXXXXX"};
-	fd = mkstemp(tpl);
-	filename = tpl;
+	filename = geo::util::tmpfile("geo_util");
+	fd = ::open(filename.c_str(), O_CREAT|O_LARGEFILE|O_RDWR);
+	if(fd <= 0)
+		g_runerr("Failed to open temp file: " << strerror(errno));
 	resize(size);
 }
 

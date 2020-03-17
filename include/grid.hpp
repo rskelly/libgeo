@@ -844,27 +844,35 @@ private:
 	/**
 	 * \brief Initialize file-backed mapped memory.
 	 */
-	void initMapped() {
+	bool initMapped() {
 		if(m_data)
 			destroy();
+		m_mapped = false;
 		m_size = (size_t) props().cols() * (size_t) props().rows() * (size_t) props().bands() * (size_t) sizeof(T); // TODO: Casting to prevent roll over.
 		m_mapFile.reset(new TmpFile(m_size));
 		m_data = (T*) mmap(0, m_size, PROT_READ|PROT_WRITE, MAP_SHARED, m_mapFile->fd, 0);
-		if(!m_data)
-			g_runerr("Failed to map " << m_size << " bytes for grid.");
+		if(!m_data) {
+			g_warn("Failed to map " << m_size << " bytes for grid.");
+			return false;
+		}
 		m_mapped = true;
+		return true;
 	}
 
 	/**
 	 * \brief Initialize raster memory in physical RAM.
 	 */
-	void initMem() {
+	bool initMem() {
 		if(m_data)
 			destroy();
+		m_mapped = false;
 		m_size = (size_t) props().cols() * (size_t) props().rows() * (size_t) props().bands() * (size_t) sizeof(T); // TODO: Casting to prevent roll over.
 		m_data = (T*) malloc(m_size);
-		if(!m_data)
-			g_runerr("Failed to allocate " << m_size << " bytes for grid.");
+		if(!m_data) {
+			g_warn("Failed to allocate " << m_size << " bytes for grid.");
+			return false;
+		}
+		return true;
 	}
 
 	/**
@@ -950,7 +958,14 @@ public:
 	 * \param props The properties of the grid.
 	 * \param mapped If true, the grid is created in a mapped memory segment.
 	 */
-	Grid(const GridProps& props, bool mapped = false) : Grid() {
+	Grid(const GridProps& props, bool mapped = false) :
+		m_ds(nullptr),
+		m_type(GDT_Unknown),
+		m_mapped(false),
+		m_size(0),
+		m_data(nullptr),
+		m_dirty(false) {
+
 		init(props, mapped);
 	}
 
@@ -962,10 +977,9 @@ public:
 	 */
 	void init(const GridProps& props, bool mapped = false) {
 		m_props = props;
-		if(mapped) {
-			initMapped();
-		} else {
-			initMem();
+		if(mapped || !initMem()) {
+			if(!initMapped())
+				g_runerr("Could not allocate memory and failed to map memory.");
 		}
 	}
 
@@ -975,7 +989,14 @@ public:
 	 * \param filename The path to the file.
 	 * \param props A GridProps instance containing a descriptor for the raster.
 	 */
-	Grid(const std::string& filename, const GridProps& props) : Grid() {
+	Grid(const std::string& filename, const GridProps& props) :
+		m_ds(nullptr),
+		m_type(GDT_Unknown),
+		m_mapped(false),
+		m_size(0),
+		m_data(nullptr),
+		m_dirty(false) {
+
 		init(filename, props);
 	}
 
@@ -1072,7 +1093,8 @@ public:
 
 		// Map the raster into virtual memory.
 
-		initMapped();
+		if(!initMapped())
+			g_runerr("Failed to map memory.")
 	}
 
 
@@ -1082,7 +1104,13 @@ public:
 	 * \param filename The path to the file.
 	 * \param writable True if the file is to be writable.
 	 */
-	Grid(const std::string& filename, bool writable = false) : Grid() {
+	Grid(const std::string& filename, bool writable = false) :
+		m_ds(nullptr),
+		m_type(GDT_Unknown),
+		m_mapped(false),
+		m_size(0),
+		m_data(nullptr),
+		m_dirty(false) {
 
 		init(filename, writable);
 
@@ -1150,10 +1178,9 @@ public:
 		}
 		m_props.setBandMetadata(bandMeta);
 
-		if(mapped()) {
-			initMapped();
-		} else {
-			initMem();
+		if(mapped() || !initMem()) {
+			if(!initMapped())
+				g_runerr("Could not allocate memory and failed to switch to mapped memory.");
 		}
 
 		std::vector<T> row(props().cols());
@@ -2055,6 +2082,8 @@ public:
 
 		// TODO: This is much faster when done in 2 passes.
 		for(int r = 0; r < gp.rows(); ++r) {
+			if(r % 100 == 0)
+				monitor->status(0.02 + ((float) r / gp.rows() - 0.02));
 			for(int c = 0; c < gp.cols(); ++c) {
 				double s = 0;
 				for(int rr = -size / 2; rr < size / 2 + 1; ++rr) {
