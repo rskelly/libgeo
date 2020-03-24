@@ -30,59 +30,65 @@ using namespace geo::util;
 
 namespace {
 
-/**
- * \brief Recursively create the directory with the given mode.
- *
- * \param file_path The path to the directory.
- * \param mode The folder permissions.
- * \return 0 on success.
- */
-int mkpath(const char* file_path, mode_t mode) {
-    //assert(file_path && *file_path);
-    for (char* p = strchr((char*) file_path + 1, '/'); p; p = strchr(p + 1, '/')) {
-        *p = '\0';
-        if (mkdir(file_path, mode) == -1) {
-            if (errno != EEXIST) {
-                *p = '/';
-                return -1;
-            }
-        }
-        *p = '/';
-    }
-    return 0;
-}
-
-template <class T>
-class Buffer {
-public:
-	T* data;
-	size_t size;
-	Buffer(size_t s = 0) :
-		data(nullptr), size(0) {
-		if(s)
-			init(s);
-	}
-
-	void init(size_t s) {
-		if(s > size) {
-			if(size)
-				free(data);
-			size = s;
-			data = (T*) calloc(size, sizeof(T));
+	/**
+	 * \brief Recursively create the directory with the given mode.
+	 *
+	 * \param file_path The path to the directory.
+	 * \param mode The folder permissions.
+	 * \return 0 on success.
+	 */
+	int mkpath(const char* file_path, mode_t mode) {
+		//assert(file_path && *file_path);
+		for (char* p = strchr((char*) file_path + 1, '/'); p; p = strchr(p + 1, '/')) {
+			*p = '\0';
+			if (mkdir(file_path, mode) == -1) {
+				if (errno != EEXIST) {
+					*p = '/';
+					return -1;
+				}
+			}
+			*p = '/';
 		}
+		return 0;
 	}
-	~Buffer() {
-		if(data)
-			free(data);
-	}
-};
 
-}
+	/**
+	 * \brief Manages a buffer of allocated data, resizing if necessary.
+	 */
+	template <class T>
+	class Buffer {
+	public:
+		T* data;
+		size_t size;
+		Buffer(size_t s = 0) :
+			data(nullptr), size(0) {
+			if(s)
+				init(s);
+		}
+
+		void init(size_t s) {
+			if(s > size) {
+				if(size)
+					free(data);
+				size = s;
+				data = (T*) calloc(size, sizeof(T));
+			}
+		}
+		~Buffer() {
+			if(data)
+				free(data);
+		}
+	};
+
+} // anon
 
 
 namespace geo {
 namespace ds {
 
+/**
+ * \brief Loads/stores cached elements for the lrucache.
+ */
 template <class T>
 class lrunode {
 private:
@@ -151,6 +157,7 @@ public:
 					std::memcpy(&size, m_buf.data, sizeof(size_t));
 					m_cache.resize(size);
 					std::memcpy(m_cache.data(), m_buf.data + sizeof(size_t), size * sizeof(T));
+					// Offset by sizeof(size_t) because the size is the first element in the file.
 				}
 				close(handle);
 			} else if(errno != ENOENT){
@@ -185,8 +192,16 @@ public:
 		}
 	}
 
+	~lrunode() {
+		util::rem(m_path);
+	}
+
 };
 
+/**
+ * \brief Maintains a cache of elements based on age of last use. Oldest elements are expired to make
+ * way for new ones.
+ */
 template <class T>
 class lrucache {
 private:
@@ -199,6 +214,8 @@ private:
 
 	/**
 	 * \brief Move the given node to the end of the list.
+	 *
+	 * This is done when a node is accessed to mark it as recently-used.
 	 */
 	void movelast(lrunode<T>* node) {
 		if(!m_last) {
@@ -242,6 +259,28 @@ public:
 	size_t blkSize() const {
 		return m_blkSize;
 	}
+
+	/**
+	 * \brief Return a copy of the cache and destroy the lrunode.
+	 */
+	std::vector<T> detach(size_t key, const std::string& path) {
+		lrunode<T>* n = get(key, path);
+		std::vector<T> cache;
+		if(n) {
+			cache = std::move(n->cache());
+			if(n->left) {
+				n->left->right = nullptr;
+				m_last = n->left;
+			} else {
+				m_last = m_first = nullptr;
+			}
+			m_nodes.erase(key);
+			remove(path);
+			delete n;
+		}
+		return cache;
+	}
+
 
 	/**
 	 * \brief Get the cache array for the given node.
@@ -478,12 +517,9 @@ public:
 	void split() {
 		if(m_depth >= m_tree->maxDepth())
 			std::cerr << "Max depth exceeded: " << m_depth << "\n";
-		lrunode<T>* n = m_tree->lru().get(m_key, path());
-		std::vector<T>& c = n->cache();
-		m_tree->lru().remove(this->path()); // The file is removed before being replaced with a directory.
+		std::vector<T> c = m_tree->lru().detach(m_key, path());
 		for(T& item : c)
 			node(idx(item))->add(item);
-		n->unlock();
 		m_split = true;
 		m_iter = 0;
 	}
@@ -557,9 +593,11 @@ public:
 				// Get the list and return the ndex item in it.
 				lrunode<T>* n = m_tree->lru().get(m_key, path());
 				const std::vector<T>& c = n->cache();
-				item = c[m_iter];
-				++m_iter;
-				return true;
+				if(!c.empty()) {
+					item = c[m_iter];
+					++m_iter;
+					return true;
+				}
 			}
 		} else {
 			// Check each node in turn, if it returns false,
