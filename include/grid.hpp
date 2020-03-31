@@ -37,6 +37,9 @@
 #include "geo.hpp"
 #include "util.hpp"
 
+// Debug. Forces grid to use file-backed mapping regardless of file size.
+#define GRID_FORCE_MAPPED 1
+
 using namespace geo::util;
 
 namespace geo {
@@ -2725,6 +2728,11 @@ private:
 	 * \brief Initialize raster memory in physical RAM.
 	 */
 	bool initMem() {
+#ifdef GRID_FORCE_MAPPED
+		// Debug: force file-backed mapping by returning false here.
+		g_warn("GRID_FORCE_MAPPED enabled. Defaulting to file-backed mapping.");
+		return false;
+#else
 		if(m_data)
 			destroy();
 		m_mapped = false;
@@ -2735,6 +2743,7 @@ private:
 			return false;
 		}
 		return true;
+#endif
 	}
 
 	/**
