@@ -242,7 +242,7 @@ void geo::grid::detail::polyMakeDataset(const std::string& filename, const std::
 			dopts = CSLSetNameValue(dopts, "SPATIALITE", "YES");
 
 		*ds = drv->Create(filename.c_str(), 0, 0, 0, GDT_Unknown, dopts);
-		CPLFree(dopts);
+		CSLDestroy(dopts);
 		if(!*ds)
 			g_runerr("Failed to create dataset " << filename << ".");
 
@@ -256,7 +256,7 @@ void geo::grid::detail::polyMakeDataset(const std::string& filename, const std::
 		lopts = CSLSetNameValue(lopts, "2GB_LIMIT", "YES");
 	}
 	*layer = (*ds)->CreateLayer(layerName.c_str(), sr, gType, lopts);
-	CPLFree(lopts);
+	CSLDestroy(lopts);
 
 	if(!*layer)
 		g_runerr("Failed to create layer " << layerName << ".");
