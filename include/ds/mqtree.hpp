@@ -75,7 +75,7 @@ namespace {
 			}
 		}
 		~Buffer() {
-			if(data)
+			if(size)
 				free(data);
 		}
 	};
@@ -106,6 +106,11 @@ public:
 	lrunode() :
 		m_locked(false), m_key(0),
 		left(nullptr), right(nullptr) {
+	}
+
+	static size_t bufSize() {
+		// The buffer size is proportional to the size of T + plus the length variable.
+		return sizeof(T) * BUF_SIZE + sizeof(size_t);
 	}
 
 	void key(size_t key) {
@@ -142,22 +147,18 @@ public:
 
 	void load(const std::string& path) {
 		if(path != m_path) {
-
 			flush();
-
 			m_path = path;
-
 			int handle;
 			size_t size;
-
-			m_buf.init(BUF_SIZE);
-
+			m_buf.init(bufSize());
 			if((handle = open(path.c_str(), O_RDWR, 0777)) > 0) {
-				if(read(handle, m_buf.data, BUF_SIZE) > sizeof(T)) {
+				if(read(handle, m_buf.data, m_buf.size) > sizeof(T)) {
 					std::memcpy(&size, m_buf.data, sizeof(size_t));
 					m_cache.resize(size);
-					std::memcpy(m_cache.data(), m_buf.data + sizeof(size_t), size * sizeof(T));
-					// Offset by sizeof(size_t) because the size is the first element in the file.
+					std::memcpy(m_cache.data(), static_cast<char*>(m_buf.data) + sizeof(size_t), size * sizeof(T));
+					// Offset by sizeof(size_t) because the size is the first element in the file;
+					// cast to char* because the offset is in bytes.
 				}
 				close(handle);
 			} else if(errno != ENOENT){
@@ -168,17 +169,15 @@ public:
 
 	void flush() {
 		if(!m_cache.empty()) {
-
 			int handle;
 			size_t size = m_cache.size();
-
-			m_buf.init(BUF_SIZE);
-
+			m_buf.init(bufSize());
 			if(!mkpath(m_path.c_str(), 0777)) {
 				if((handle = open(m_path.c_str(), O_RDWR|O_CREAT|O_TRUNC, 0777)) > 0) {
 					std::memcpy(m_buf.data, &size, sizeof(size_t));
-					std::memcpy(m_buf.data + sizeof(size_t), m_cache.data(), size * sizeof(T));
-					if(!write(handle, m_buf.data, BUF_SIZE))
+					std::memcpy(static_cast<char*>(m_buf.data) + sizeof(size_t), m_cache.data(), size * sizeof(T));
+					// Cast to char* because the offset is in bytes.
+					if(!write(handle, m_buf.data, m_buf.size))
 						g_runerr("Failed to write cache.");
 					close(handle);
 				} else {
@@ -187,7 +186,6 @@ public:
 			} else {
 				g_runerr("Failed to create dir for flush: " << m_path << " (" << strerror(errno) << ")");
 			}
-
 			m_cache.resize(0);
 		}
 	}
@@ -252,6 +250,10 @@ public:
 			m_stats[i] = 0;
 	}
 
+	void size(size_t size) {
+		m_size = size;
+	}
+
 	void blkSize(size_t blkSize) {
 		m_blkSize = blkSize;
 	}
@@ -277,6 +279,7 @@ public:
 			m_nodes.erase(key);
 			remove(path);
 			delete n;
+			m_size -= cache.size();
 		}
 		return cache;
 	}
@@ -668,12 +671,13 @@ public:
 	 * \param maxDepth The maximum depth of the tree. Zero is no limit.
 	 * \param mode Determines whether file-backed storage is used, or memory.
 	 */
-	mqtree<T>(double minx, double miny, double maxx, double maxy, int maxDepth = 100) {
-		init(minx, miny, maxx, maxy, maxDepth);
+	mqtree<T>(double minx, double miny, double maxx, double maxy, int maxDepth = 100, int cacheSize = 1000) {
+		init(minx, miny, maxx, maxy, maxDepth , cacheSize);
 	}
 
-	void init(double minx, double miny, double maxx, double maxy, int maxDepth = 100) {
+	void init(double minx, double miny, double maxx, double maxy, int maxDepth = 100, int cacheSize = 1000) {
 		m_maxDepth = maxDepth;
+		m_lru.size(cacheSize);
 
 		// Create a root path.
 		std::string dirname = "mqtree_" + std::to_string(geo::util::pid());
@@ -687,12 +691,8 @@ public:
 		stat(m_rootPath.c_str(), &st);
 		m_blkSize = st.st_blksize;
 
-		// The max count takes the block size into consideration. It should
-		// be a multipl of the ideal block size, as near as possible.
-		// The size of a size_t is subtracted because that's the space
-		// required for the count at the start of the file.
-		m_maxCount = (BUF_SIZE - sizeof(size_t)) / sizeof(T);
-
+		// The max count takes the block size into consideration.
+		m_maxCount = (lrunode<T>::bufSize() - sizeof(size_t)) / sizeof(T);
 		m_root = new mqnode<T>(0, minx, miny, minx + side, miny + side, 0, nullptr, this);
 	}
 
