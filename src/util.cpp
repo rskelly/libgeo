@@ -526,15 +526,15 @@ void Bounds::cube() {
 }
 
 double Bounds::midx() const {
-	return m_minx + (m_maxx - m_minx) / 2.0;
+	return (m_maxx + m_minx) / 2.0;
 }
 
 double Bounds::midy() const {
-	return m_miny + (m_maxy - m_miny) / 2.0;
+	return (m_maxy + m_miny) / 2.0;
 }
 
 double Bounds::midz() const {
-	return m_minz + (m_maxz - m_minz) / 2.0;
+	return (m_maxz + m_minz) / 2.0;
 }
 
 
