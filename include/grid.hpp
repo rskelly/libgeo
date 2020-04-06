@@ -223,7 +223,6 @@ private:
 	double m_nodata;			///<! The nodata value.
 	bool m_nodataSet;			///<! True if nodata is set.
 	bool m_compress;			///<! True if the file is a TIF and will be compressed.
-	bool m_bigTiff;				///<! Use bigtiff.
 	DataType m_type;			///<! The data type.
 	Interleave m_interleave;	///<! The interleave method.
 	std::string m_filename;		///<! The grid filename.
@@ -245,7 +244,6 @@ public:
 		m_nodata(0),
 		m_nodataSet(false),
 		m_compress(false),
-		m_bigTiff(false),
 		m_type(DataType::None),
 		m_interleave(Interleave::BIL),
 		m_bandMetaName("name") {
@@ -321,19 +319,10 @@ public:
 	/**
 	 * \brief Use Big Tiff setting.
 	 *
-	 * \param bigTuff True to use Big Tiff setting.
-	 */
-	void setBigTiff(bool bigTiff) {
-		m_bigTiff = bigTiff;
-	}
-
-	/**
-	 * \brief Use Big Tiff setting.
-	 *
 	 * \return True to use Big Tiff setting.
 	 */
 	bool bigTiff() const {
-		return m_bigTiff;
+		return (size_t) cols() * (size_t) rows() * (size_t) getTypeSize(dataType()) >= 4L * 1024 * 1024 * 1024;
 	}
 
 	/**
@@ -2886,8 +2875,8 @@ public:
 			opts = CSLSetNameValue(opts, "COMPRESS", "LZW");
 			opts = CSLSetNameValue(opts, "PREDICTOR", "2");
 		}
-		if(m_props.bigTiff())
-			opts = CSLSetNameValue(opts, "BIGTIFF", "YES");
+		// if(m_props.bigTiff())
+		opts = CSLSetNameValue(opts, "BIGTIFF", "IF_NEEDED");
 		if(m_props.interleave() == Interleave::BIL) {
 			opts = CSLSetNameValue(opts, "INTERLEAVE", "BAND");
 		} else if(m_props.interleave() == Interleave::BIP){
@@ -2979,6 +2968,9 @@ public:
 		if (filename.empty())
 			g_argerr("Filename must be given.");
 
+		if(!monitor)
+			monitor = getDefaultMonitor();
+
 		GDALAllRegister();
 
 		// Attempt to open the dataset.
@@ -3040,26 +3032,16 @@ public:
 		}
 
 		// Read the raster by rows equivalent in height to the block height.
-		if(monitor)
-			monitor->status(0.0f, "Loading raster from file...");
+		monitor->status(0.0f, "Loading raster from file...");
 
 		int cols = props().cols();
 		int rows = props().rows();
 		GDALRasterBand* bnd = m_ds->GetRasterBand(band + 1);
 
-		int bc, br;
-		bnd->GetBlockSize(&bc, &br);
-		if(monitor)
-			monitor->status(0.0f, "Loading file...");
-		for(int r = 0; r < rows; r += br) {
-			int rc = std::min(br, rows - r);
-			size_t idx = (size_t) r * (size_t) cols;
-			if(CE_None != bnd->RasterIO(GF_Read, 0, r, cols, rc,
-					m_data + idx, cols, rc, m_type, 0, 0, 0))
-				g_runerr("Failed to copy raster row.");
-			if(monitor)
-				monitor->status((float) r / rows);
-		}
+		if(CE_None != bnd->RasterIO(GF_Read, 0, 0, cols, rows,
+				m_data, cols, rows, m_type, 0, 0, 0))
+			g_runerr("Failed to copy raster row.");
+
 		m_props.setWritable(writable);
 	}
 
@@ -3290,21 +3272,49 @@ public:
 	 * \param row The row index.
 	 * \param width The width of the tile.
 	 * \param height The height of the tile.
+	 * \param cb The column buffer.
+	 * \param ro The row buffer.
 	 */
-	void getTile(T* tile, int col, int row, int width, int height) {
+	void getTile(T* tile, int col, int row, int width, int height, int cb = 0, int rb = 0) {
 		int cols = props().cols();
 		int rows = props().rows();
 		T nodata = props().nodata();
-		for(int r = row, rr = 0; r < row + height; ++r, ++rr) {
-			for(int c = col, cc = 0; c < col + width; ++c, ++cc) {
-				if(r < 0 || c < 0 || r >= rows || c >= cols) {
-					tile[rr * width + cc] = nodata;
-				} else {
-					tile[rr * width + cc] = get(c, r);
-				}
-			}
+		if(col >= cols || row >= rows) {
+			g_warn("Col/row out of bands.");
+			return;
 		}
-
+		if(cb < 0) cb = -cb;
+		if(rb < 0) rb = -rb;
+		if(col - cb < 0) {
+			col = 0;
+		} else {
+			col -= cb;
+			cb = 0;
+		}
+		if(row - rb < 0) {
+			row = 0;
+		} else {
+			row -= rb;
+			rb = 0;
+		}
+		int w = width + cb * 2;
+		int h = height + rb * 2;
+		if(col + w > cols) w = cols - col;
+		if(row + h > rows) h = rows - row;
+		static std::vector<T> buf;
+		buf.resize(width);
+		// Fill the buffer with nodata for empty rows/ends.
+		std::fill(buf.begin(), buf.end(), nodata);
+		int endr = std::min(row + h, rows);
+		for(int r = row, rr = 0; r < endr; ++r, ++rr) {
+			// Only read valid rows.
+			if(r >= 0 && r < rows)
+				std::memcpy(buf.data() + cb, m_data + r * cols + col, w * sizeof(T));
+			// If r goes past rows, re-fill the buffer with nodata.
+			if(r == rows)
+				std::fill(buf.begin(), buf.end(), nodata);
+			std::memcpy(tile + (rr + rb) * width, buf.data(), width * sizeof(T));
+		}
 	}
 
 	/**
@@ -3315,13 +3325,26 @@ public:
 	 * \param row The row index.
 	 * \param width The width of the tile.
 	 * \param height The height of the tile.
+	 * \param cb The column buffer.
+	 * \param ro The row buffer.
 	 */
-	void setTile(T* tile, int col, int row, int width, int height) {
-		for(int r = row, rr = 0; r < row + height; ++r, ++rr) {
-			for(int c = col, cc = 0; c < col + width; ++c, ++cc) {
-				if(!(r < 0 || c < 0 || r >= props().rows() || c >= props().cols()))
-					set(c, r, tile[rr * width + cc]);
-			}
+	void setTile(T* tile, int col, int row, int width, int height, int cb = 0, int rb = 0) {
+		int cols = props().cols();
+		int rows = props().rows();
+		T nodata = props().nodata();
+		if(col >= cols || row >= rows) {
+			g_warn("Col/row out of bands.");
+			return;
+		}
+		if(cb < 0) cb = -cb;
+		if(rb < 0) rb = -rb;
+		int w = width - cb * 2;
+		int h = height - rb * 2;
+		if(col + width > cols) width = cols - col;
+		if(row + height > rows) height = rows - row;
+		int endr = std::min(row + height, rows);
+		for(int r = row, rr = rb; r < endr; ++r, ++rr) {
+			std::memcpy(m_data + r * cols + col, tile + rr * width + cb, w * sizeof(T));
 		}
 	}
 
@@ -4093,29 +4116,23 @@ public:
 		if(!m_dirty || !m_ds || !props().writable())
 			return;
 
+		if(!monitor)
+			monitor = getDefaultMonitor();
+
 		static std::mutex mtx;
 		{
+			monitor->status(0.0f, "Flushing to file...");
 			std::lock_guard<std::mutex> lk(mtx);
-			if(monitor)
-				monitor->status(0.0f, "Flushing to file...");
 			int cols = props().cols();
 			int rows = props().rows();
+
 			GDALRasterBand* band = m_ds->GetRasterBand(m_band + 1);
-			int bc, br;
-			band->GetBlockSize(&bc, &br);
-			if(monitor)
-				monitor->status(0.0f, "Flushing file...");
-			for(int r = 0; r < rows; r += br) {
-				int rc = std::min(br, rows - r);
-				size_t idx = (size_t) r * (size_t) cols;
-				if(CE_None != band->RasterIO(GF_Write, 0, r, cols, rc,
-						m_data + idx, cols, rc, gdalType(), 0, 0)) {
-					if(monitor)
-						monitor->error("Failed to write to raster.");
-				}
-				if(monitor)
-					monitor->status((float) r / rows);
+
+			if(CE_None != band->RasterIO(GF_Write, 0, 0, cols, rows,
+					m_data, cols, rows, gdalType(), 0, 0)) {
+				monitor->error("Failed to write to raster.");
 			}
+
 			band->FlushCache();
 			m_dirty = false;
 		}
@@ -4277,9 +4294,6 @@ public:
 		double resY = props().resY();
 		const Bounds& bounds = props().bounds();
 
-		// Create a buffer for the row.
-		std::vector<T> buf(cols);
-
 		// The starting corner coordinates.
 		double startX = resX > 0 ? bounds.minx() : bounds.maxx();
 		double startY = resY > 0 ? bounds.miny() : bounds.maxy();
@@ -4335,61 +4349,68 @@ public:
 					&poly_fid, &poly_gmtx, &poly_fmtx, &poly_omtx, &poly_cv);
 		}
 
+		int tileRows = (4 * 1024 * 1024) / sizeof(T) / cols + 1;
+		// Create a buffer for the row.
+		std::vector<T> buf(cols * tileRows);
+
 		// Process raster.
-		for(int r = 0; r < rows; ++r) {
+		for(int tr = 0; tr < rows; tr += tileRows) {
 
 			if(monitor->canceled()) break;
 
-			monitor->status((float) r / rows, polyRowStatus(r, rows));
+			monitor->status((float) tr / rows, polyRowStatus(tr, rows));
 
 			// Load the row buffer.
-			getRow(r, buf.data());
+			getTile(buf.data(), 0, tr, cols, tileRows);
 
-			// Initialize the corner coordinates.
-			double x0 = startX;
-			double y0 = startY + r * resY;
-			double x1 = x0;
-			double y1 = y0 + resY;
+			for(int r = 0; r < tileRows; ++r) {
 
-			// For tracking cell values. TODO: An unsigned int is possible here: overflow.
-			int v0 = buf[0];
-			int v1 = -1;
+				// Initialize the corner coordinates.
+				double x0 = startX;
+				double y0 = startY + (tr + r) * resY;
+				double x1 = x0;
+				double y1 = y0 + resY;
 
-			// Reset the list of IDs extant in the current row.
-			activeIds.clear();
+				// For tracking cell values. TODO: An unsigned int is possible here: overflow.
+				int v0 = buf[r * cols];
+				int v1 = -1;
 
-			for(int c = 1; c < cols; ++c) {
+				// Reset the list of IDs extant in the current row.
+				activeIds.clear();
 
-				if(monitor->canceled()) break;
+				for(int c = 1; c < cols; ++c) {
 
-				// If the current cell value differs from the previous one...
-				if((v1 = buf[c]) != v0) {
-					// Update the right x coordinate.
-					x1 = startX + c * resX;
-					// If the value is a valid ID, create and the geometry and save it for writing.
-					if(v0 > 0) {
-						geoms[v0].push_back(polyMakeGeom(x0, y0, x1 + xeps, y1 + yeps, d3 ? 3 : 2));
-						activeIds.insert(v0);
+					if(monitor->canceled()) break;
+
+					// If the current cell value differs from the previous one...
+					if((v1 = buf[r * cols + c]) != v0) {
+						// Update the right x coordinate.
+						x1 = startX + c * resX;
+						// If the value is a valid ID, create and the geometry and save it for writing.
+						if(v0 > 0) {
+							geoms[v0].push_back(polyMakeGeom(x0, y0, x1 + xeps, y1 + yeps, d3 ? 3 : 2));
+							activeIds.insert(v0);
+						}
+						// Update values for next loop.
+						v0 = v1;
+						x0 = x1;
 					}
-					// Update values for next loop.
-					v0 = v1;
-					x0 = x1;
 				}
-			}
 
-			// IDs that are in the geoms array and not in the current row are ready to be finalized.
-			if(!monitor->canceled()) {
-				std::lock_guard<std::mutex> lk0(poly_gmtx);
-				std::lock_guard<std::mutex> lk1(poly_fmtx);
-				for(const auto& it : geoms) {
-					if(activeIds.find(it.first) == activeIds.end())
-						finalIds.insert(it.first);
+				// IDs that are in the geoms array and not in the current row are ready to be finalized.
+				if(!monitor->canceled()) {
+					std::lock_guard<std::mutex> lk0(poly_gmtx);
+					std::lock_guard<std::mutex> lk1(poly_fmtx);
+					for(const auto& it : geoms) {
+						if(activeIds.find(it.first) == activeIds.end())
+							finalIds.insert(it.first);
+					}
 				}
-			}
-			poly_cv.notify_all();
+				poly_cv.notify_all();
 
-			while(!monitor->canceled() && !finalIds.empty())
-				std::this_thread::yield();
+				while(!monitor->canceled() && !finalIds.empty())
+					std::this_thread::yield();
+			}
 		}
 
 		// Finalize all remaining geometries.
