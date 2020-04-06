@@ -81,15 +81,6 @@ namespace detail {
 	DataType gdt2DataType(GDALDataType type);
 
 	/**
-	 * \brief Update the polygonization row status.
-	 *
-	 * \param r The current row.
-	 * \param rows The total number of rows.
-	 * \return A status message.
-	 */
-	std::string polyRowStatus(int r, int rows);
-
-	/**
 	 * \brief Make a dataset to contain the polygons.
 	 *
 	 * \param filename The output filename of the dataset.
@@ -2586,7 +2577,7 @@ public:
 
 			if(monitor->canceled()) break;
 
-			monitor->status((float) r / rows, polyRowStatus(r, rows));
+			monitor->status((float) r / rows, "Polygonizing...");
 
 			// Load the row buffer.
 			getRow(r, band, buf.data());
@@ -3270,8 +3261,8 @@ public:
 	 * \param tile The buffer.
 	 * \param col The column index.
 	 * \param row The row index.
-	 * \param width The width of the tile.
-	 * \param height The height of the tile.
+	 * \param width The width of the tile including the buffer pixels.
+	 * \param height The height of the tile including the buffer pixels.
 	 * \param cb The column buffer.
 	 * \param ro The row buffer.
 	 */
@@ -3285,35 +3276,39 @@ public:
 		}
 		if(cb < 0) cb = -cb;
 		if(rb < 0) rb = -rb;
-		if(col - cb < 0) {
-			col = 0;
+		int c = col - cb;
+		int r = row - rb;
+		int w = width;
+		int h = height;
+		if(c < 0) {
+			c = 0;
+			w -= cb;
 		} else {
-			col -= cb;
+			c -= cb;
 			cb = 0;
 		}
-		if(row - rb < 0) {
-			row = 0;
+		if(r < 0) {
+			r = 0;
+			h -= rb;
 		} else {
-			row -= rb;
+			r -= rb;
 			rb = 0;
 		}
-		int w = width + cb * 2;
-		int h = height + rb * 2;
-		if(col + w > cols) w = cols - col;
-		if(row + h > rows) h = rows - row;
+		if(c + w > cols)
+			w = cols - c;
+		if(r + h > rows)
+			h = rows - r;
+
 		static std::vector<T> buf;
-		buf.resize(width);
+		buf.resize(width + cb * 2);
+
 		// Fill the buffer with nodata for empty rows/ends.
 		std::fill(buf.begin(), buf.end(), nodata);
+
 		int endr = std::min(row + h, rows);
-		for(int r = row, rr = 0; r < endr; ++r, ++rr) {
-			// Only read valid rows.
-			if(r >= 0 && r < rows)
-				std::memcpy(buf.data() + cb, m_data + r * cols + col, w * sizeof(T));
-			// If r goes past rows, re-fill the buffer with nodata.
-			if(r == rows)
-				std::fill(buf.begin(), buf.end(), nodata);
-			std::memcpy(tile + (rr + rb) * width, buf.data(), width * sizeof(T));
+		for(int rr = 0; rr < h; ++rr, ++r) {
+			std::memcpy(buf.data() + cb, m_data + r * cols + c, w * sizeof(T));
+			std::memcpy(tile + (rr + rb) * width, buf.data(), w * sizeof(T));
 		}
 	}
 
@@ -3402,12 +3397,11 @@ public:
 	 */
 	template <class U>
 	void fill(U value) {
-		int cols = props().cols();
-		int rows = props().rows();
+		size_t cols = props().cols();
+		size_t rows = props().rows();
 		std::vector<T> buf(cols);
 		std::fill(buf.begin(), buf.end(), (T) value);
-		size_t end = (size_t) rows * (size_t) cols;
-		for(size_t idx = 0; idx < end; idx += cols)
+		for(size_t idx = 0; idx < rows * cols; idx += cols)
 			std::memcpy(m_data + idx, buf.data(), (size_t) cols * (size_t) sizeof(T));
 		m_dirty = true;
 	}
@@ -4349,7 +4343,8 @@ public:
 					&poly_fid, &poly_gmtx, &poly_fmtx, &poly_omtx, &poly_cv);
 		}
 
-		int tileRows = (4 * 1024 * 1024) / sizeof(T) / cols + 1;
+		int tileRows = 64;
+
 		// Create a buffer for the row.
 		std::vector<T> buf(cols * tileRows);
 
@@ -4358,7 +4353,7 @@ public:
 
 			if(monitor->canceled()) break;
 
-			monitor->status((float) tr / rows, polyRowStatus(tr, rows));
+			monitor->status((float) tr / rows, "Polygonizing...");
 
 			// Load the row buffer.
 			getTile(buf.data(), 0, tr, cols, tileRows);

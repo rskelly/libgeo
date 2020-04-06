@@ -268,19 +268,6 @@ void geo::grid::detail::polyMakeDataset(const std::string& filename, const std::
 }
 
 /**
- * \brief Produce a status message from the current and total row counds.
- *
- * \param r The current row.
- * \param rows The total number of rows.
- * \return The new status message.
- */
-std::string geo::grid::detail::polyRowStatus(int r, int rows) {
-	std::stringstream ss;
-	ss << "Polygonizing row " << (r + 1) << " of " << rows;
-	return ss.str();
-}
-
-/**
  * \brief Return the number of bytes required to store each type.
  *
  * \param type The libgeo data type.
