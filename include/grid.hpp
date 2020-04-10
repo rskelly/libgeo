@@ -3258,11 +3258,13 @@ public:
 	/**
 	 * \brief Copies the image data from a rectangular region into the buffer which must be pre-allocated.
 	 *
+	 * Note: The tile buffer must be pre-allocated to include pixels that may be used for buffered regions.
+	 *
 	 * \param tile The buffer.
 	 * \param col The column index.
 	 * \param row The row index.
-	 * \param width The width of the tile including the buffer pixels.
-	 * \param height The height of the tile including the buffer pixels.
+	 * \param width The width of the tile NOT including the buffer pixels.
+	 * \param height The height of the tile NOT including the buffer pixels.
 	 * \param cb The column buffer.
 	 * \param ro The row buffer.
 	 */
@@ -3274,24 +3276,29 @@ public:
 			g_warn("Col/row out of bands.");
 			return;
 		}
-		if(cb < 0) cb = -cb;
+		if(cb < 0) cb = -cb;		// Set buffers positive.
 		if(rb < 0) rb = -rb;
-		int c = col - cb;
+		int c = col - cb;			// Start col/row is input minus the buffer.
 		int r = row - rb;
-		int w = width;
-		int h = height;
+		int w = width + cb * 2;		// Preliminary tile width with buffers.
+		int h = height + rb * 2;
+		const int tw = w;			// Tile width for writing.
+
+		static std::vector<T> buf;
+		buf.resize(w);
+
 		if(c < 0) {
+			w += c;
+			cb -= cb + c;
 			c = 0;
-			w -= cb;
 		} else {
-			c -= cb;
 			cb = 0;
 		}
 		if(r < 0) {
+			h += r;
+			rb -= rb + r;
 			r = 0;
-			h -= rb;
 		} else {
-			r -= rb;
 			rb = 0;
 		}
 		if(c + w > cols)
@@ -3299,16 +3306,13 @@ public:
 		if(r + h > rows)
 			h = rows - r;
 
-		static std::vector<T> buf;
-		buf.resize(width + cb * 2);
-
 		// Fill the buffer with nodata for empty rows/ends.
 		std::fill(buf.begin(), buf.end(), nodata);
 
 		int endr = std::min(row + h, rows);
 		for(int rr = 0; rr < h; ++rr, ++r) {
 			std::memcpy(buf.data() + cb, m_data + r * cols + c, w * sizeof(T));
-			std::memcpy(tile + (rr + rb) * width, buf.data(), w * sizeof(T));
+			std::memcpy(tile + (rr + rb) * tw, buf.data(), w * sizeof(T));
 		}
 	}
 
@@ -3836,6 +3840,7 @@ public:
 		monitor->status(0.02);
 
 		double k, v, nodata = gp.nodata();
+		std::vector<T> buf(size * size);
 		int gc = gp.cols();
 		int gr = gp.rows();
 		// TODO: This is much faster when done in 2 passes.
@@ -3844,13 +3849,11 @@ public:
 				monitor->status(0.02 + ((float) r / gr - 0.02));
 			for(int c = 0; c < gc; ++c) {
 				double s = 0;
-				for(int rr = -size / 2; rr < size / 2 + 1; ++rr) {
-					for(int cc = -size / 2; cc < size / 2 + 1; ++cc) {
-						if(!(r + rr < 0 || c + cc < 0 || r + rr >= gr || c + cc >= gc)
-								&& (v = get(c + cc, r + rr)) != nodata) {
-							k = weights[(rr + size / 2) * size + (cc + size / 2)];
-							s += v * k;
-						}
+				getTile(buf.data(), c - size / 2, r - size / 2, size, size);
+				for(int rr = 0; rr < size; ++rr) {
+					for(int cc = 0; cc < size; ++cc) {
+						if((v = buf[rr * size + cc]) != nodata)
+							s += v * weights[rr * size + cc];
 					}
 				}
 				smoothed.set(c, r, s);
