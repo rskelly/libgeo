@@ -272,6 +272,57 @@ public:
 	}
 
 	/**
+	 * \brief Return the number of elements to skip to retrieve the next pixel in the row, given the interleave.
+	 * \return The row step.
+	 */
+	size_t rowStep() const {
+		switch(m_interleave) {
+		case Interleave::BIL:
+			return 1;
+		case Interleave::BSQ:
+			return 1;
+		case Interleave::BIP:
+			return m_bands;
+		default:
+			g_runerr("Invalid interleave: "  << (int) m_interleave);
+		}
+	}
+
+	/**
+	 * \brief Return the number of elements to skip to retrieve the next pixel in the column, given the interleave.
+	 * \return The row step.
+	 */
+	size_t colStep() const {
+		switch(m_interleave) {
+		case Interleave::BIL:
+			return m_cols * m_bands;
+		case Interleave::BSQ:
+			return m_cols;
+		case Interleave::BIP:
+			return m_bands;
+		default:
+			g_runerr("Invalid interleave: "  << (int) m_interleave);
+		}
+	}
+
+	/**
+	 * \brief Return the number of elements to skip to retrieve the next band in the same pixel, given the interleave.
+	 * \return The row step.
+	 */
+	size_t bandStep() const {
+		switch(m_interleave) {
+		case Interleave::BIL:
+			return m_cols;
+		case Interleave::BSQ:
+			return m_cols * m_rows;
+		case Interleave::BIP:
+			return 1;
+		default:
+			g_runerr("Invalid interleave: "  << (int) m_interleave);
+		}
+	}
+
+	/**
 	 * \brief Return the geographic bounds of the raster.
 	 *
 	 * \return The geographic bounds of the raster.
@@ -961,10 +1012,9 @@ public:
 	 */
 	void init(const GridProps& props, bool mapped = false) {
 		m_props = props;
-		if(mapped) {
-			initMapped();
-		} else {
-			initMem();
+		if(mapped || !initMem()) {
+			if(!initMapped())
+				g_runerr("Failed to allocate or map memory for raster.");
 		}
 	}
 
@@ -1071,7 +1121,8 @@ public:
 
 		// Map the raster into virtual memory.
 
-		initMapped();
+		if(!initMapped())
+			g_runerr("Failed to map memory for raster.");
 	}
 
 
@@ -1149,10 +1200,9 @@ public:
 		}
 		m_props.setBandMetadata(bandMeta);
 
-		if(mapped()) {
-			initMapped();
-		} else {
-			initMem();
+		if(mapped() || !initMem()) {
+			if(!initMapped())
+				g_runerr("Failed to allocate or map memory for raster.");
 		}
 
 		std::vector<T> row(props().cols());
@@ -1350,10 +1400,8 @@ public:
 	 * \param buf A pre-allocated buffer to store the data.
 	 */
 	void getRow(int row, int band, T* buf) {
-
 		for(int c = 0; c < props().cols(); ++c)
 			buf[c] = get(c, row, band);
-
 	}
 
 	/**
@@ -1364,10 +1412,8 @@ public:
 	 * \param buf A pre-allocated buffer to store the data.
 	 */
 	void setRow(int row, int band, T* buf) {
-
 		for(int c = 0; c < props().cols(); ++c)
 			set(c, row, buf[c], band);
-
 	}
 
 	/**
@@ -1378,10 +1424,8 @@ public:
 	 * \param buf A pre-allocated buffer to store the data.
 	 */
 	void getColumn(int col, int band, T* buf) {
-
 		for(int r = 0; r < props().rows(); ++r)
 			buf[r] = get(col, r, band);
-
 	}
 
 	/**
@@ -1392,10 +1436,8 @@ public:
 	 * \param buf A pre-allocated buffer to store the data.
 	 */
 	void setColumn(int col, int band, T* buf) {
-
 		for(int r = 0; r < props().rows(); ++r)
 			set(col, r, buf[r], band);
-
 	}
 
 	/**
@@ -1408,10 +1450,8 @@ public:
 	 * \param buf A pre-allocated buffer to store the data.
 	 */
 	void getPixel(int col, int row, T* buf) {
-
 		for(int b = 0; b < props().bands(); ++b)
 			buf[b] = get(col, row, b);
-
 	}
 
 	/**
@@ -1437,7 +1477,6 @@ public:
 				}
 			}
 		}
-
 	}
 
 	/**
@@ -1526,28 +1565,43 @@ public:
 	/**
 	 * \brief Fill the entire dataset with the given value.
 	 *
+	 * The given value is cast to the raster's type.
+	 *
 	 * \param value The value to fill the raster with.
 	 * \param band The band to fill.
 	 */
 	template <class U>
 	void fill(U value, int band) {
-
-		if(band >= 0 && band < props().bands()){
-
-			int cols = props().cols();
-			int rows = props().rows();
-
-			for(int r = 0; r < rows; ++r) {
-				for(int c = 0; c < cols; ++c)
-					set<U>(c, r, value, band);
-			}
-
-		} else {
-
+		if(band < 0 && band >= props().bands())
 			g_runerr("Invalid fill band: " << band);
-
+		T v = (T) value;
+		size_t rows = m_props.rows();
+		size_t cols = m_props.cols();
+		size_t bands = m_props.bands();
+		size_t offset, step, size;
+		switch(m_props.interleave()) {
+		case Interleave::BIL:
+			offset = (size_t) band * cols;
+			step = bands * cols;
+			for(size_t i = offset; i < m_size; i += step) {
+				for(size_t c = 0; c < cols; ++c)
+					*(m_data + i + c) = v;
+			}
+			break;
+		case Interleave::BSQ:
+			size = cols * rows;
+			offset = (size_t) band * size;
+			for(size_t i = offset; i < offset + size; ++i)
+				*(m_data + i) = v;
+			break;
+		case Interleave::BIP:
+			for(size_t i = 0; i < m_size; i += bands) {
+				*(m_data + i + band) = v;
+			}
+			break;
+		default:
+			g_runerr("Unknown interleave: " << (int) m_props.interleave());
 		}
-
 	}
 
 	/**
@@ -1566,10 +1620,8 @@ public:
 	 * \param value The fill value.
 	 */
 	void fill(T value) {
-
-		for(int i = 0; i < props().bands(); ++i)
+		for(int i = 0; i < m_props.bands(); ++i)
 			fill(value, i);
-
 	}
 
 	/**
@@ -1582,7 +1634,6 @@ public:
 	 */
 	template <class U>
 	U get(int col, int row, int band) {
-
 		size_t idx = props().index(col, row, band);
 		return (U) m_data[idx];
 
@@ -1590,9 +1641,7 @@ public:
 
 	template <class U>
 	U get(double x, double y, int band) {
-
 		return get<U>(props().toCol(x), props().toRow(y), band);
-
 	}
 
 	/**
@@ -1605,15 +1654,11 @@ public:
 	 */
 	template <class U>
 	void set(int col, int row, U value, int band) {
-
 		if (!m_props.writable())
 			g_runerr("This raster is not writable.");
-
 		size_t idx = props().index(col, row, band);
 		m_data[idx] =(T) value;
-
 		m_dirty = true;
-
 	}
 
 	/**
@@ -1626,9 +1671,7 @@ public:
 	 */
 	template <class U>
 	void set(double x, double y, U value, int band) {
-
 		set<U>(m_props.toCol(x), m_props.toRow(y), value, band);
-
 	}
 
 	/**
@@ -1640,9 +1683,7 @@ public:
 	 * \return The value held at the given index in the grid.
 	 */
 	T get(int col, int row, int band) {
-
 		return get<T>(col, row, band);
-
 	}
 
 	/**
@@ -1654,9 +1695,7 @@ public:
 	 * \return The value held at the given index in the grid.
 	 */
 	T get(double x, double y, int band) {
-
 		return get(props().toCol(x), props().toRow(y), band);
-
 	}
 
 	/**
@@ -1668,9 +1707,7 @@ public:
 	 * \param band The band.
 	 */
 	void set(int col, int row, T value, int band) {
-
 		set<T>(col, row, value, band);
-
 	}
 
 	/**
@@ -1682,9 +1719,7 @@ public:
 	 * \param band The band.
 	 */
 	void set(double x, double y, T value, int band) {
-
 		set(m_props.toCol(x), m_props.toRow(y), value, band);
-
 	}
 
 	/**
@@ -1810,19 +1845,14 @@ public:
 	 * \return The pixel values as a vector, for the given band.
 	 */
 	std::vector<T> asVector(int band) {
-
 		int cols = props().cols();
 		int rows = props().rows();
-
 		std::vector<T> data(cols * rows);
-
 		for(int r = 0; r < rows; ++r) {
 			for(int c = 0; c < cols; ++c)
 				data[r * cols + c] = get(c, r, band);
 		}
-
 		return data;
-
 	}
 
 	/**
