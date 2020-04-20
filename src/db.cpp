@@ -126,7 +126,7 @@ DB::DB(const std::string& file, const std::string& layer, const std::string& dri
 	m_ds = drv->Create(m_file.c_str(), 0, 0, 0, GDT_Unknown, dopts);
 
 	if(dopts)
-		CPLFree(dopts);
+		CSLDestroy(dopts);
 
 	if(!m_ds)
         g_runerr("Failed to create data set for " << m_file);
@@ -149,7 +149,7 @@ DB::DB(const std::string& file, const std::string& layer, const std::string& dri
 		sr->Release();
 
 	if(dopts)
-		CPLFree(dopts);
+		CSLDestroy(dopts);
 
 	if (!m_layer) {
 		GDALClose(m_ds);
@@ -232,7 +232,7 @@ DB::DB(const std::string& file, const std::string& layer, const std::string& dri
 	m_ds = drv->Create(m_file.c_str(), 0, 0, 0, GDT_Unknown, dopts);
 
 	if(dopts)
-		CPLFree(dopts);
+		CSLDestroy(dopts);
 
 	if(!m_ds)
         g_runerr("Failed to create data set for " << m_file);
@@ -257,7 +257,7 @@ DB::DB(const std::string& file, const std::string& layer, const std::string& dri
 		sr->Release();
 
 	if(dopts)
-		CPLFree(dopts);
+		CSLDestroy(dopts);
 
 	if (!m_layer) {
 		GDALClose(m_ds);
@@ -481,7 +481,7 @@ void DB::convert(const std::string& filename, const std::string& driver) {
 		GDALDataset* ds = drv->Create(filename.c_str(), 0, 0, 0, GDT_Unknown, dopts);
 
 		if(dopts)
-			CPLFree(dopts);
+			CSLDestroy(dopts);
 
 		if(!ds)
 			g_runerr("Failed to create data set for " << filename);
@@ -503,7 +503,7 @@ void DB::convert(const std::string& filename, const std::string& driver) {
 		OGRLayer* newLayer = ds->CopyLayer(layer, m_layerName.c_str(), dopts);
 
 		if(dopts)
-			CPLFree(dopts);
+			CSLDestroy(dopts);
 
 		if(!newLayer) {
 			GDALClose(ds);

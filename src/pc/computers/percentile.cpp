@@ -27,6 +27,7 @@ int PercentileComputer::compute(double, double, const std::vector<geo::pc::Point
 		static std::vector<geo::pc::Point> _pts;
 		_pts.assign(filtered.begin(), filtered.end());
 		std::sort(_pts.begin(), _pts.end(), pointSort);
+
 		int idx = (_pts.size() - 1) * m_percentile;
 		out.push_back(_pts[idx].z());
 		_pts.clear();

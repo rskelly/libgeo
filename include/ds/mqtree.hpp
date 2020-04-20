@@ -30,59 +30,65 @@ using namespace geo::util;
 
 namespace {
 
-/**
- * \brief Recursively create the directory with the given mode.
- *
- * \param file_path The path to the directory.
- * \param mode The folder permissions.
- * \return 0 on success.
- */
-int mkpath(const char* file_path, mode_t mode) {
-    //assert(file_path && *file_path);
-    for (char* p = strchr((char*) file_path + 1, '/'); p; p = strchr(p + 1, '/')) {
-        *p = '\0';
-        if (mkdir(file_path, mode) == -1) {
-            if (errno != EEXIST) {
-                *p = '/';
-                return -1;
-            }
-        }
-        *p = '/';
-    }
-    return 0;
-}
-
-template <class T>
-class Buffer {
-public:
-	T* data;
-	size_t size;
-	Buffer(size_t s = 0) :
-		data(nullptr), size(0) {
-		if(s)
-			init(s);
+	/**
+	 * \brief Recursively create the directory with the given mode.
+	 *
+	 * \param file_path The path to the directory.
+	 * \param mode The folder permissions.
+	 * \return 0 on success.
+	 */
+	int mkpath(const char* file_path, mode_t mode) {
+		//assert(file_path && *file_path);
+		for (char* p = strchr((char*) file_path + 1, '/'); p; p = strchr(p + 1, '/')) {
+			*p = '\0';
+			if (mkdir(file_path, mode) == -1) {
+				if (errno != EEXIST) {
+					*p = '/';
+					return -1;
+				}
+			}
+			*p = '/';
+		}
+		return 0;
 	}
 
-	void init(size_t s) {
-		if(s > size) {
+	/**
+	 * \brief Manages a buffer of allocated data, resizing if necessary.
+	 */
+	template <class T>
+	class Buffer {
+	public:
+		T* data;
+		size_t size;
+		Buffer(size_t s = 0) :
+			data(nullptr), size(0) {
+			if(s)
+				init(s);
+		}
+
+		void init(size_t s) {
+			if(s > size) {
+				if(size)
+					free(data);
+				size = s;
+				data = (T*) calloc(size, sizeof(T));
+			}
+		}
+		~Buffer() {
 			if(size)
 				free(data);
-			size = s;
-			data = (T*) calloc(size, sizeof(T));
 		}
-	}
-	~Buffer() {
-		if(data)
-			free(data);
-	}
-};
+	};
 
-}
+} // anon
 
 
 namespace geo {
 namespace ds {
 
+/**
+ * \brief Loads/stores cached elements for the lrucache.
+ */
 template <class T>
 class lrunode {
 private:
@@ -100,6 +106,11 @@ public:
 	lrunode() :
 		m_locked(false), m_key(0),
 		left(nullptr), right(nullptr) {
+	}
+
+	static size_t bufSize() {
+		// The buffer size is proportional to the size of T + plus the length variable.
+		return sizeof(T) * BUF_SIZE + sizeof(size_t);
 	}
 
 	void key(size_t key) {
@@ -136,21 +147,18 @@ public:
 
 	void load(const std::string& path) {
 		if(path != m_path) {
-
 			flush();
-
 			m_path = path;
-
 			int handle;
 			size_t size;
-
-			m_buf.init(BUF_SIZE);
-
+			m_buf.init(bufSize());
 			if((handle = open(path.c_str(), O_RDWR, 0777)) > 0) {
-				if(read(handle, m_buf.data, BUF_SIZE) > sizeof(T)) {
+				if(read(handle, m_buf.data, m_buf.size) > sizeof(T)) {
 					std::memcpy(&size, m_buf.data, sizeof(size_t));
 					m_cache.resize(size);
-					std::memcpy(m_cache.data(), m_buf.data + sizeof(size_t), size * sizeof(T));
+					std::memcpy(m_cache.data(), static_cast<char*>(m_buf.data) + sizeof(size_t), size * sizeof(T));
+					// Offset by sizeof(size_t) because the size is the first element in the file;
+					// cast to char* because the offset is in bytes.
 				}
 				close(handle);
 			} else if(errno != ENOENT){
@@ -161,17 +169,15 @@ public:
 
 	void flush() {
 		if(!m_cache.empty()) {
-
 			int handle;
 			size_t size = m_cache.size();
-
-			m_buf.init(BUF_SIZE);
-
+			m_buf.init(bufSize());
 			if(!mkpath(m_path.c_str(), 0777)) {
 				if((handle = open(m_path.c_str(), O_RDWR|O_CREAT|O_TRUNC, 0777)) > 0) {
 					std::memcpy(m_buf.data, &size, sizeof(size_t));
-					std::memcpy(m_buf.data + sizeof(size_t), m_cache.data(), size * sizeof(T));
-					if(!write(handle, m_buf.data, BUF_SIZE))
+					std::memcpy(static_cast<char*>(m_buf.data) + sizeof(size_t), m_cache.data(), size * sizeof(T));
+					// Cast to char* because the offset is in bytes.
+					if(!write(handle, m_buf.data, m_buf.size))
 						g_runerr("Failed to write cache.");
 					close(handle);
 				} else {
@@ -180,13 +186,20 @@ public:
 			} else {
 				g_runerr("Failed to create dir for flush: " << m_path << " (" << strerror(errno) << ")");
 			}
-
 			m_cache.resize(0);
 		}
 	}
 
+	~lrunode() {
+		util::rem(m_path);
+	}
+
 };
 
+/**
+ * \brief Maintains a cache of elements based on age of last use. Oldest elements are expired to make
+ * way for new ones.
+ */
 template <class T>
 class lrucache {
 private:
@@ -199,6 +212,8 @@ private:
 
 	/**
 	 * \brief Move the given node to the end of the list.
+	 *
+	 * This is done when a node is accessed to mark it as recently-used.
 	 */
 	void movelast(lrunode<T>* node) {
 		if(!m_last) {
@@ -235,6 +250,10 @@ public:
 			m_stats[i] = 0;
 	}
 
+	void size(size_t size) {
+		m_size = size;
+	}
+
 	void blkSize(size_t blkSize) {
 		m_blkSize = blkSize;
 	}
@@ -242,6 +261,29 @@ public:
 	size_t blkSize() const {
 		return m_blkSize;
 	}
+
+	/**
+	 * \brief Return a copy of the cache and destroy the lrunode.
+	 */
+	std::vector<T> detach(size_t key, const std::string& path) {
+		lrunode<T>* n = get(key, path);
+		std::vector<T> cache;
+		if(n) {
+			cache = std::move(n->cache());
+			if(n->left) {
+				n->left->right = nullptr;
+				m_last = n->left;
+			} else {
+				m_last = m_first = nullptr;
+			}
+			m_nodes.erase(key);
+			remove(path);
+			delete n;
+			m_size -= cache.size();
+		}
+		return cache;
+	}
+
 
 	/**
 	 * \brief Get the cache array for the given node.
@@ -478,12 +520,9 @@ public:
 	void split() {
 		if(m_depth >= m_tree->maxDepth())
 			std::cerr << "Max depth exceeded: " << m_depth << "\n";
-		lrunode<T>* n = m_tree->lru().get(m_key, path());
-		std::vector<T>& c = n->cache();
-		m_tree->lru().remove(this->path()); // The file is removed before being replaced with a directory.
+		std::vector<T> c = m_tree->lru().detach(m_key, path());
 		for(T& item : c)
 			node(idx(item))->add(item);
-		n->unlock();
 		m_split = true;
 		m_iter = 0;
 	}
@@ -557,9 +596,11 @@ public:
 				// Get the list and return the ndex item in it.
 				lrunode<T>* n = m_tree->lru().get(m_key, path());
 				const std::vector<T>& c = n->cache();
-				item = c[m_iter];
-				++m_iter;
-				return true;
+				if(!c.empty()) {
+					item = c[m_iter];
+					++m_iter;
+					return true;
+				}
 			}
 		} else {
 			// Check each node in turn, if it returns false,
@@ -630,12 +671,13 @@ public:
 	 * \param maxDepth The maximum depth of the tree. Zero is no limit.
 	 * \param mode Determines whether file-backed storage is used, or memory.
 	 */
-	mqtree<T>(double minx, double miny, double maxx, double maxy, int maxDepth = 100) {
-		init(minx, miny, maxx, maxy, maxDepth);
+	mqtree<T>(double minx, double miny, double maxx, double maxy, int maxDepth = 100, int cacheSize = 1000) {
+		init(minx, miny, maxx, maxy, maxDepth , cacheSize);
 	}
 
-	void init(double minx, double miny, double maxx, double maxy, int maxDepth = 100) {
+	void init(double minx, double miny, double maxx, double maxy, int maxDepth = 100, int cacheSize = 1000) {
 		m_maxDepth = maxDepth;
+		m_lru.size(cacheSize);
 
 		// Create a root path.
 		std::string dirname = "mqtree_" + std::to_string(geo::util::pid());
@@ -649,12 +691,8 @@ public:
 		stat(m_rootPath.c_str(), &st);
 		m_blkSize = st.st_blksize;
 
-		// The max count takes the block size into consideration. It should
-		// be a multipl of the ideal block size, as near as possible.
-		// The size of a size_t is subtracted because that's the space
-		// required for the count at the start of the file.
-		m_maxCount = (BUF_SIZE - sizeof(size_t)) / sizeof(T);
-
+		// The max count takes the block size into consideration.
+		m_maxCount = (lrunode<T>::bufSize() - sizeof(size_t)) / sizeof(T);
 		m_root = new mqnode<T>(0, minx, miny, minx + side, miny + side, 0, nullptr, this);
 	}
 

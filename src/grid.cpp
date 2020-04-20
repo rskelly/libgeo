@@ -38,7 +38,7 @@ void geo::grid::detail::polyWriteToFile(std::unordered_map<int, std::vector<GEOS
 		std::unordered_set<int>* finalIds,
 		const std::string* idField, OGRLayer* layer, GEOSContextHandle_t* gctx,
 		bool removeHoles, bool removeDangles, bool* running, geo::Monitor* monitor,
-		size_t* poly_fid, std::mutex* poly_gmtx, std::mutex* poly_fmtx,
+		std::atomic<size_t>* poly_fid, std::mutex* poly_gmtx, std::mutex* poly_fmtx,
 		std::mutex* poly_omtx, std::condition_variable* poly_cv) {
 
 
@@ -242,7 +242,7 @@ void geo::grid::detail::polyMakeDataset(const std::string& filename, const std::
 			dopts = CSLSetNameValue(dopts, "SPATIALITE", "YES");
 
 		*ds = drv->Create(filename.c_str(), 0, 0, 0, GDT_Unknown, dopts);
-		CPLFree(dopts);
+		CSLDestroy(dopts);
 		if(!*ds)
 			g_runerr("Failed to create dataset " << filename << ".");
 
@@ -256,7 +256,7 @@ void geo::grid::detail::polyMakeDataset(const std::string& filename, const std::
 		lopts = CSLSetNameValue(lopts, "2GB_LIMIT", "YES");
 	}
 	*layer = (*ds)->CreateLayer(layerName.c_str(), sr, gType, lopts);
-	CPLFree(lopts);
+	CSLDestroy(lopts);
 
 	if(!*layer)
 		g_runerr("Failed to create layer " << layerName << ".");
@@ -265,19 +265,6 @@ void geo::grid::detail::polyMakeDataset(const std::string& filename, const std::
 	OGRFieldDefn field(idField.c_str(), OFTInteger);
 	(*layer)->CreateField(&field, TRUE);
 
-}
-
-/**
- * \brief Produce a status message from the current and total row counds.
- *
- * \param r The current row.
- * \param rows The total number of rows.
- * \return The new status message.
- */
-std::string geo::grid::detail::polyRowStatus(int r, int rows) {
-	std::stringstream ss;
-	ss << "Polygonizing row " << (r + 1) << " of " << rows;
-	return ss.str();
 }
 
 /**
