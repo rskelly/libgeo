@@ -4,10 +4,10 @@
  *  Created on: Jun 4, 2019
  *      Author: rob
  */
-
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/time.h>
+#include <fcntl.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -400,9 +400,10 @@ std::string geo::util::projectionFromSRID(int srid) {
 
 TmpFile::TmpFile(size_t size) :
 	fd(0), size(0) {
-	char tpl[] = {"/tmp/geo_util_XXXXXX"};
-	fd = mkstemp(tpl);
-	filename = tpl;
+	filename = geo::util::tmpfile("geo_util");
+	fd = ::open(filename.c_str(), O_CREAT|O_LARGEFILE|O_RDWR, 0777);
+	if(fd <= 0)
+		g_runerr("Failed to open temp file: " << strerror(errno));
 	resize(size);
 }
 
@@ -525,15 +526,15 @@ void Bounds::cube() {
 }
 
 double Bounds::midx() const {
-	return m_minx + (m_maxx - m_minx) / 2.0;
+	return (m_maxx + m_minx) / 2.0;
 }
 
 double Bounds::midy() const {
-	return m_miny + (m_maxy - m_miny) / 2.0;
+	return (m_maxy + m_miny) / 2.0;
 }
 
 double Bounds::midz() const {
-	return m_minz + (m_maxz - m_minz) / 2.0;
+	return (m_maxz + m_minz) / 2.0;
 }
 
 

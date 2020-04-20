@@ -103,7 +103,7 @@ public:
 	/**
 	 * \brief Return true if the cancel flag is set.
 	 */
-	bool canceled() const {
+	virtual bool canceled() const {
 		if(m_monitor) {
 			return m_monitor->canceled();
 		} else {
@@ -111,7 +111,7 @@ public:
 		}
 	}
 
-	void cancel() {
+	virtual void cancel() {
 		if(m_monitor) {
 			m_monitor->cancel();
 		} else {
@@ -119,18 +119,19 @@ public:
 		}
 	}
 
-	void status(float status, const std::string& message = "") {
+	virtual void status(float status, const std::string& message = "") {
 		std::cout << std::setprecision(1) << std::fixed << message << " " << (m_start + status * (m_end - m_start)) * 100.0f << "%\n";
 	}
 
-	void error(const std::string& err) {
+	virtual void error(const std::string& err) {
 		std::cerr << err << "\n";
 	}
 
-	void exception(const std::exception* ex) {
+	virtual void exception(const std::exception* ex) {
 		error(ex == nullptr ? "Unknown exception" : ex->what());
 	}
 
+	virtual ~Monitor() {}
 };
 
 /**
