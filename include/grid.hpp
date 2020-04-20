@@ -210,7 +210,7 @@ namespace detail {
 
 			if(pc->monitor->canceled()) {
 				for(GEOSGeometry* p : polys)
-					GEOSGeom_destroy(p);
+					GEOSGeom_destroy_r(pc->gctx, p);
 				continue;
 			}
 
@@ -218,16 +218,14 @@ namespace detail {
 			geom = polys.front();
 			for(size_t i = 1; i < polys.size(); ++i) {
 				GEOSGeometry* tmp = GEOSUnion_r(pc->gctx, geom, polys[i]);
-				printGEOSGeom(geom, pc->gctx);
-				printGEOSGeom(tmp, pc->gctx);
-				GEOSGeom_destroy(geom);
-				GEOSGeom_destroy(polys[i]);
+				GEOSGeom_destroy_r(pc->gctx, geom);
+				GEOSGeom_destroy_r(pc->gctx, polys[i]);
 				geom = tmp;
 			}
 			polys.clear();
 
 			if(pc->monitor->canceled()) {
-				GEOSGeom_destroy(geom);
+				GEOSGeom_destroy_r(pc->gctx, geom);
 				continue;
 			}
 
@@ -235,40 +233,40 @@ namespace detail {
 			// largest single polygon. If it was originally a polygon, there are no dangles.
 			int numGeoms;
 			if(!pc->monitor->canceled() && pc->removeDangles
-					&& (numGeoms = GEOSGetNumGeometries(geom)) > 1) {
+					&& (numGeoms = GEOSGetNumGeometries_r(pc->gctx, geom)) > 1) {
 				size_t idx = 0;
 				double a, area = 0;
 				for(size_t i = 0; i < numGeoms; ++i) {
-					const GEOSGeometry* p = GEOSGetGeometryN(geom, i);
-					GEOSArea(p, &a);
+					const GEOSGeometry* p = GEOSGetGeometryN_r(pc->gctx, geom, i);
+					GEOSArea_r(pc->gctx, p, &a);
 					if(a > area) {
 						area = a;
 						idx = i;
 					}
 				}
-				GEOSGeometry *g = GEOSGeom_clone(GEOSGetGeometryN(geom, idx)); // Force copy.
-				GEOSGeom_destroy(geom);
+				GEOSGeometry *g = GEOSGeom_clone_r(pc->gctx, GEOSGetGeometryN_r(pc->gctx, geom, idx)); // Force copy.
+				GEOSGeom_destroy_r(pc->gctx, geom);
 				geom = g;
 			}
 
 			// If we're removing holes, extract the exterior rings of all constituent polygons.
 			if(!pc->monitor->canceled() && pc->removeHoles) {
 				std::vector<GEOSGeometry*> geoms0;
-				for(int i = 0; i < GEOSGetNumGeometries(geom); ++i) {
-					const GEOSGeometry* p = GEOSGetGeometryN(geom, i);
-					const GEOSGeometry* l = GEOSGetExteriorRing(p);
-					const GEOSCoordSequence* seq = GEOSGeom_getCoordSeq(l);
-					GEOSGeometry* r = GEOSGeom_createLinearRing(GEOSCoordSeq_clone(seq));
-					GEOSGeometry* npoly = GEOSGeom_createPolygon(r, 0, 0);
+				for(int i = 0; i < GEOSGetNumGeometries_r(pc->gctx, geom); ++i) {
+					const GEOSGeometry* p = GEOSGetGeometryN_r(pc->gctx, geom, i);
+					const GEOSGeometry* l = GEOSGetExteriorRing_r(pc->gctx, p);
+					const GEOSCoordSequence* seq = GEOSGeom_getCoordSeq_r(pc->gctx, l);
+					GEOSGeometry* r = GEOSGeom_createLinearRing_r(pc->gctx, GEOSCoordSeq_clone_r(pc->gctx, seq));
+					GEOSGeometry* npoly = GEOSGeom_createPolygon_r(pc->gctx, r, 0, 0);
 					geoms0.push_back(npoly);
 				}
-				GEOSGeometry* g = GEOSGeom_createCollection(GEOSGeomTypes::GEOS_MULTIPOLYGON, geoms0.data(), geoms0.size()); // Do not copy -- take ownership.
-				GEOSGeom_destroy(geom);
+				GEOSGeometry* g = GEOSGeom_createCollection_r(pc->gctx, GEOSGeomTypes::GEOS_MULTIPOLYGON, geoms0.data(), geoms0.size()); // Do not copy -- take ownership.
+				GEOSGeom_destroy_r(pc->gctx, geom);
 				geom = g;
 			}
 
 			// If the result is not a multi, make it one.
-			if(!pc->monitor->canceled() && GEOSGeomTypeId(geom) != GEOSGeomTypes::GEOS_MULTIPOLYGON)
+			if(!pc->monitor->canceled() && GEOSGeomTypeId_r(pc->gctx, geom) != GEOSGeomTypes::GEOS_MULTIPOLYGON)
 				geom = GEOSGeom_createCollection_r(pc->gctx, GEOSGeomTypes::GEOS_MULTIPOLYGON, &geom, 1);
 
 			if(!geom) {
