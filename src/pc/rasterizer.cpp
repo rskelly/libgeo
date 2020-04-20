@@ -29,21 +29,10 @@ using namespace geo::pc::compute;
 const std::unordered_map<std::string, std::string> computerNames = {
 		{"min", "The minimum value"},
 		{"max", "The maximum value"},
-		{"percentile-5", "The 5th percentile"},
-		{"decile-1", "The 1st decile"},
-		{"decile-2", "The 2nd decile"},
-		{"quartile-1", "The 1st quartile"},
-		{"decile-3", "The 3rd decile"},
-		{"decile-4", "The 4th decile"},
-		{"decile-5", "The 4th decile"},
-		{"quartile-2", "The 2nd quartile"},
+		{"percentile-n", "The percentile"},
+		{"decile-n", "The decile"},
+		{"quartile-n", "The quartile"},
 		{"median", "The median value"},
-		{"decile-6", "The 6th decile"},
-		{"decile-7", "The 7th decile"},
-		{"quantile-3", "The 3rd quantile"},
-		{"decile-8", "The 8th decile"},
-		{"decile-9", "The 9th decile"},
-		{"percentile-95", "The 95th percentile"},
 		{"mean", "The mean value"},
 		{"variance", "The variance with n-1"},
 		{"std-dev", "The standard deviation with n-1"},
@@ -53,29 +42,32 @@ const std::unordered_map<std::string, std::string> computerNames = {
 };
 
 Computer* getComputer(const std::string& name) {
-	if(name == "min") { 						return new MinComputer();
-	} else if(name == "max") { 					return new MaxComputer();
-	} else if(name == "percentile-5") { 		return new PercentileComputer(0.05);
-	} else if(name == "decile-1") { 			return new PercentileComputer(0.1);
-	} else if(name == "decile-2") { 			return new PercentileComputer(0.2);
-	} else if(name == "quartile-1") { 			return new PercentileComputer(0.25);
-	} else if(name == "decile-3") { 			return new PercentileComputer(0.3);
-	} else if(name == "decile-4") { 			return new PercentileComputer(0.4);
-	} else if(name == "decile-5") { 			return new PercentileComputer(0.5);
-	} else if(name == "quartile-2") { 			return new PercentileComputer(0.5);
-	} else if(name == "median") { 				return new PercentileComputer(0.5);
-	} else if(name == "decile-6") { 			return new PercentileComputer(0.6);
-	} else if(name == "decile-7") { 			return new PercentileComputer(0.7);
-	} else if(name == "quartile-3") { 			return new PercentileComputer(0.75);
-	} else if(name == "decile-8") { 			return new PercentileComputer(0.8);
-	} else if(name == "decile-9") { 			return new PercentileComputer(0.9);
-	} else if(name == "percentile-95") { 		return new PercentileComputer(0.95);
-	} else if(name == "mean") { 				return new MeanComputer();
-	} else if(name == "variance") { 			return new VarianceComputer();
-	} else if(name == "std-dev") { 				return new StdDevComputer();
-	} else if(name == "rugosity-acr") { 		return new RugosityComputer();
-	} else if(name == "idw-2") {				return new IDWComputer();
-	} else if(name == "hlrg-bio") {				return new HLRGBiometricsComputer(20, 75);
+	if(name.find("percentile") == 0) {
+		size_t len = std::string("percentile-").size();
+		int p  = std::stoi(name.substr(len));
+		std::cout << "Percentile: " << p << "\n";
+		return new PercentileComputer((double) p / 100.0);
+	} else if(name.find("quartile") == 0) {
+		size_t len = std::string("percentile-").size();
+		int p = std::stoi(name.substr(len));
+		std::cout << "Decile: " << p << "\n";
+		return new PercentileComputer((double) (p * 25) / 100.0);
+	} else if(name.find("decile") == 0) {
+		size_t len = std::string("decile-").size();
+		int p = std::stoi(name.substr(len));
+		std::cout << "Decile: " << p << "\n";
+		return new PercentileComputer((double) (p * 10) / 100.0);
+	} else {
+		if(name == "min") { 				return new MinComputer();
+		} else if(name == "max") { 			return new MaxComputer();
+		} else if(name == "median") { 			return new PercentileComputer(0.5);
+		} else if(name == "mean") { 			return new MeanComputer();
+		} else if(name == "variance") { 		return new VarianceComputer();
+		} else if(name == "std-dev") { 			return new StdDevComputer();
+		} else if(name == "rugosity-acr") { 		return new RugosityComputer();
+		} else if(name == "idw-2") {			return new IDWComputer();
+		} else if(name == "hlrg-bio") {			return new HLRGBiometricsComputer(20, 75);
+		}
 	}
 	g_runerr("Unknown computer name (" << name << ")");
 }
@@ -351,7 +343,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 
 		std::cout << "Rows: " << rows << "\n";
 		for(int r = 0; r < rows; ++r) {
-			if(r % 10 == 0)
+			if(r % 100 == 0)
 				std::cout << "Row " << r << " of " << rows << " ("<< ((float) r / rows * 100) << "%)\n";
 			for(int c = 0; c < cols; ++c) {
 

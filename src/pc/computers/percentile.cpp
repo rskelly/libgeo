@@ -24,15 +24,12 @@ void PercentileComputer::setPercentile(double percentile) {
 
 int PercentileComputer::compute(double, double, const std::vector<geo::pc::Point>&, const std::vector<geo::pc::Point>& filtered, double, std::vector<double>& out) {
 	if(!filtered.empty()) {
-		std::vector<geo::pc::Point> _pts(filtered);
+		static std::vector<geo::pc::Point> _pts;
+		_pts.assign(filtered.begin(), filtered.end());
 		std::sort(_pts.begin(), _pts.end(), pointSort);
-		int count = _pts.size();
-		if(count % 2 == 0) {
-			size_t idx = (size_t) (count * m_percentile) - 1;
-			out.push_back((_pts[idx + 1].value() + _pts[idx].value()) / 2.0);
-		} else {
-			out.push_back(_pts[(size_t) (count * m_percentile)].value());
-		}
+		int idx = (_pts.size() - 1) * m_percentile;
+		out.push_back(_pts[idx].z());
+		_pts.clear();
 	} else {
 		out.push_back(std::nan(""));
 	}
