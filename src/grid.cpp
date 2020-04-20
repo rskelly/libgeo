@@ -67,7 +67,7 @@ void geo::grid::detail::polyWriteToFile(std::list<std::pair<int, GEOSGeometry*>>
 
 		// Create and write the OGR geometry.
 		OGRGeometry* ogeom = OGRGeometryFactory::createFromGEOS(gctx, (GEOSGeom) geom);
-		GEOSGeom_destroy(geom);
+		GEOSGeom_destroy_r(gctx, geom);
 
 		// Create and configure the feature. Feature owns the OGRGeometry.
 		OGRFeatureDefn* fdef = layer->GetLayerDefn();

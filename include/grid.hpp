@@ -77,6 +77,13 @@ namespace grid {
 		std::mutex gmtx;
 		std::condition_variable gcv;
 
+		PolygonContext() :
+			gctx(nullptr),
+			running(false), monitor(nullptr),
+			cols(0), rows(0), resX(0), resY(0),
+			startX(0), startY(0), xeps(0), yeps(0),
+			removeHoles(false), removeDangles(false) {
+		}
 
 	};
 
@@ -272,7 +279,7 @@ namespace detail {
 			if(!geom) {
 				g_warn("Null geometry.");
 			} else {
-				(*callback)(id, geom);
+				(*callback)(id, geom, pc->gctx);
 			}
 		}
 	}
@@ -4387,18 +4394,13 @@ public:
 	 * \param srid The SRID of the projection for the database.
 	 * \param removeHoles Remove holes from the polygons.
 	 * \param removeDangles Remove small polygons attached to larger ones diagonally.
-	 * \param mask The name of a raster file that will be used to set the bounds for vectorization.
-	 * \param maskBand The band from the mask raster.
-	 * \param threads The number of threads to use.
 	 * \param d3 Set to true for 3D geometries; 2D otherwise.
 	 * \param fields A list of fields to add to the dataset.
-	 * \param status A Status object to receive progress updates.
-	 * \param cancel A boolean that will be set to true if the algorithm should quit.
+	 * \param status A Monitor object to receive progress updates and cancel.
 	 */
 	void polygonizeToFile(const std::string& filename, const std::string& layerName, const std::string& idField,
 			const std::string& driver, int srid,
-			bool removeHoles = false, bool removeDangles = false,
-			const std::string& mask = "", int maskBand = 0, int threads = 1, bool d3 = false,
+			bool removeHoles = false, bool removeDangles = false, bool d3 = false,
 			const std::vector<std::pair<std::string, OGRFieldType> >& fields = {},
 			Monitor* monitor = nullptr) {
 
@@ -4426,13 +4428,9 @@ public:
 	 * \param projection The WKT projection for the database.
 	 * \param removeHoles Remove holes from the polygons.
 	 * \param removeDangles Remove small polygons attached to larger ones diagonally.
-	 * \param mask The name of a raster file that will be used to set the bounds for vectorization.
-	 * \param maskBand The band from the mask raster.
-	 * \param threads The number of threads to use.
 	 * \param d3 Set to true for 3D geometries; 2D otherwise.
 	 * \param fields A list of fields to add to the dataset.
-	 * \param status A Status object to receive progress updates.
-	 * \param cancel A boolean that will be set to true if the algorithm should quit.
+	 * \param status A Monitor object to receive progress updates and cancel.
 	 */
 	void polygonizeToFile(const std::string& filename, const std::string& layerName, const std::string& idField,
 			const std::string& driver, const std::string& projection,
@@ -4448,18 +4446,9 @@ public:
 		if(!projection.empty())
 			sr = new OGRSpatialReference(projection.c_str());
 
-		// Create the output dataset.
+		// Create the output dataset
 		GDALDataset* ds;
 		OGRLayer* layer;
-		std::atomic<int> fid(0);
-		bool running = true;
-		std::mutex gmtx;
-
-		PolygonContext pc;
-		pc.gctx = gctx;
-		pc.removeDangles = removeDangles;
-		pc.removeHoles = removeHoles;
-		pc.monitor = monitor != nullptr ? monitor : getDefaultMonitor();
 
 		polyMakeDataset(filename, driver, layerName, idField, sr,
 				d3 ? wkbMultiPolygon25D : wkbMultiPolygon, &ds, &layer);
@@ -4467,6 +4456,18 @@ public:
 		// Dispose of the spatial reference object.
 		if(sr)
 			sr->Release();
+
+		// Thread control objects.
+		std::atomic<int> fid(0);
+		bool running = true;
+		std::mutex gmtx;
+
+		// The polygonization context will be passed into the poly threads.
+		PolygonContext pc;
+		pc.gctx = gctx;
+		pc.removeDangles = removeDangles;
+		pc.removeHoles = removeHoles;
+		pc.monitor = monitor != nullptr ? monitor : getDefaultMonitor();
 
 		// Create the field set for the database.
 		if(!fields.empty()) {
@@ -4480,33 +4481,37 @@ public:
 			}
 		}
 
+		// Start a transaction on the layer.
 		if(OGRERR_NONE != layer->StartTransaction())
 			g_runerr("Failed to start transaction.");
 
+		// Start the writer thread.
 		std::thread th(polyWriteToFile, &pc.geoms, layer, &idField, &fid, gctx, &running, monitor, &gmtx);
 
+		// Create the functor that will accept polygon objects.
 		struct fn {
 			PolygonContext* pc;
 			std::mutex* gmtx;
-			void operator()(int id, GEOSGeometry* geom) {
+			void operator()(int id, GEOSGeometry* geom, GEOSContextHandle_t gctx) {
 				std::lock_guard<std::mutex> lk(*gmtx);
 				pc->geoms.emplace_back(id, geom);
 			}
 		};
 
+		// Run the polygonization.
 		struct fn f;
 		f.pc = &pc;
 		f.gmtx = &gmtx;
 		polygonize(f, &pc);
 
+		// Wait for the writer to exit and join.
 		running = false;
 		if(th.joinable())
 			th.join();
 
-		// Release the layer -- GDAL will take care of it. But close the dataset so that can happen.
+		// Commit and release the layer -- GDAL will take care of it. But close the dataset so that can happen.
 		if(OGRERR_NONE != layer->CommitTransaction())
 			g_runerr("Failed to commit transaction.");
-
 		layer->Dereference();
 		GDALClose(ds);
 
@@ -4514,8 +4519,40 @@ public:
 
 	}
 
+	/**
+	 * \brief Vectorizes the raster by consuming pixels and calling back with completed GEOS polygon objects.
+	 *
+	 * The callback is a functor which accepts an int for the ID, a GEOSGeometry* and a GEOSContextHandle_t.
+	 * The caller is responsible for disposing of the geometry object.
+	 *
+	 * \param callback The callback functor.
+	 * \param removeHoles If set to true, holes are removed from polygons.
+	 * \param removeDangles If set to true, degeneracies are removed from polygons, leaving the main body.
+	 * \param monitor A Monitor for progress and cancelation.
+	 */
 	template <class C>
-	void polygonize(C callback, PolygonContext* pc = nullptr) {
+	void polygonize(C callback, bool removeHoles = false, bool removeDangles = false, Monitor* monitor = nullptr) {
+		PolygonContext pc;
+		pc.removeDangles = removeDangles;
+		pc.removeHoles = removeHoles;
+		pc.monitor = monitor;
+		polygonize(callback, &pc);
+	}
+
+	/**
+	 * \brief Vectorizes the raster by consuming pixels and calling back with completed GEOS polygon objects.
+	 *
+	 * The callback is a functor which accepts an int for the ID, a GEOSGeometry* and a GEOSContextHandle_t.
+	 * The caller is responsible for disposing of the geometry object.
+	 *
+	 * \param callback The callback functor.
+	 * \param pc An option PolygonContext containing configuration information.
+	 */
+	template <class C>
+	void polygonize(C callback, PolygonContext* pc) {
+
+		if(!pc)
+			g_runerr("A PolygonContext is requried.");
 
 		if(isFloat())
 			g_runerr("Only int rasters can be polygonized.");
@@ -4523,12 +4560,6 @@ public:
 		// It's faster to work on a band-interleaved raster.
 		if(props().interleave() == Interleave::BIP)
 			remap(Interleave::BIL);
-
-		std::unique_ptr<PolygonContext> pc_;
-		if(!pc) {
-			pc_.reset(new PolygonContext());
-			pc = pc_.get();
-		}
 
 		pc->monitor = pc->monitor != nullptr ? pc->monitor : getDefaultMonitor();
 
@@ -4649,7 +4680,7 @@ public:
 			th.join();
 
 		for(auto& it : pc->geoms)
-			GEOSGeom_destroy(it.second);
+			GEOSGeom_destroy_r(pc->gctx, it.second);
 
 		pc->monitor->status(1.0, "Finished polygonization");
 
