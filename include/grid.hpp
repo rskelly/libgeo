@@ -38,13 +38,47 @@
 #include "util.hpp"
 
 // Debug. Forces grid to use file-backed mapping regardless of file size.
-#define GRID_FORCE_MAPPED 1
+//#define GRID_FORCE_MAPPED 1
 
 using namespace geo::util;
 
 namespace geo {
 namespace grid {
 
+	class PolygonContext {
+	public:
+		GEOSContextHandle_t gctx;
+
+		// Data containers.
+		std::list<std::pair<int, std::vector<GEOSGeometry*>>> geomBuf;	// Buffer of final geometry parts for one ID.
+		std::list<std::pair<int, GEOSGeometry*>> geoms;					// Merged geoms for writing.
+
+		bool running;
+		geo::Monitor* monitor;
+
+		// Extract some grid properties.
+		int cols;
+		int rows;
+		double resX;
+		double resY;
+		Bounds bounds;
+
+		// The starting corner coordinates.
+		double startX;
+		double startY;
+
+		// "Epsilon" for snapping geometries.
+		double xeps;
+		double yeps;
+
+		bool removeHoles;
+		bool removeDangles;
+
+		std::mutex gmtx;
+		std::condition_variable gcv;
+
+
+	};
 
 	/**
 	 * \brief Return the interleave type from the string representation.
@@ -107,34 +141,143 @@ namespace detail {
 	 * \param dims The number of dimensions.
 	 * \return A new geometry.
 	 */
-	GEOSGeometry* polyMakeGeom(double x0, double y0, double x1, double y1, int dims);
+	GEOSGeometry* polyMakeGeom(GEOSContextHandle_t gctx, double x0, double y0, double x1, double y1, int dims);
 
 	/**
 	 * \brief Write to the file from the map of geometry lists.
 	 *
 	 * On each loop, extracts a single finalized poly ID and loads those polys for unioning.
 	 *
-	 * \param geoms The map of geometries.
-	 * \param finalIds The set of IDs that are ready for finalization.
+	 * \param geoms The list of ID/geometry pairs.
 	 * \param idField The name of the field for storing IDs.
 	 * \param layer The OGRLayer for output.
+	 * \param gctx The GEOS context object.
+	 * \param running If false, the operation is canceled.
+	 * \param monitor The Monitor instance.
+	 * \param poly_fid A feature ID for geometries.
+	 * \param poly_gmtx Mutex for the geom list.
+	 * \param poly_omtx Mutex for the output file.
+	 * \param geom_cv To notify when a geom is available to write.
+	 */
+	void polyWriteToFile(std::list<std::pair<int, GEOSGeometry*>>* geoms,
+			OGRLayer* layer, const std::string* idField, std::atomic<int>* fid,
+			GEOSContextHandle_t gctx,
+			bool* running, Monitor* monitor, std::mutex* gmtx);
+
+	void printGEOSGeom(GEOSGeometry* geom, GEOSContextHandle_t gctx);
+
+	/**
+	 * Waits for finalized collections of polygon parts or unioning.
+	 *
+	 * \param geoms The list of ID/geometry pairs.
+	 * \param geomParts A mapping from ID to vectors of geometry parts to be unioned.
 	 * \param gctx The GEOS context object.
 	 * \param removeHoles If true, removes holes from polygons.
 	 * \param removeDangles If true, removes degeneracies from the edges of polygons.
 	 * \param running If false, the operation is canceled.
-	 * \param cancel If true, the operation is cancelled.
-	 * \param poly_fid A feature ID for geometries.
-	 * \param poly_gmtx For the geoms map.
-	 * \param poly_fmtx For the final list.
-	 * \param poly_omtx For OGR writes.
-	 * \param poly_cv For waiting on the queue.
+	 * \param monitor The Monitor instance.
+	 * \param poly_fmtx Mutex for For the final ID list.
+	 * \param poly_gmtx Mutex for For the output geom list.
+	 * \param poly_cv For waiting on the geometry input queue.
+	 * \param geom_cv For notifying the geometry write queue.
 	 */
-	void polyWriteToFile(std::unordered_map<int, std::vector<GEOSGeometry*> >* geoms,
-				std::unordered_set<int>* finalIds,
-				const std::string* idField, OGRLayer* layer, GEOSContextHandle_t* gctx,
-				bool removeHoles, bool removeDangles, bool* running, geo::Monitor* monitor,
-				std::atomic<size_t>* poly_fid, std::mutex* poly_gmtx, std::mutex* poly_fmtx,
-				std::mutex* poly_omtx, std::condition_variable* poly_cv);
+	template <class C>
+	void polyMerge(C* callback, PolygonContext* pc) {
+
+		std::vector<GEOSGeometry*> polys;
+		GEOSGeometry* geom = nullptr;
+		int id;
+
+		while(!pc->monitor->canceled() && (pc->running || !pc->geomBuf.empty())) {
+
+			// Get an ID and the list of polys from the queue.
+			{
+				std::unique_lock<std::mutex> lk(pc->gmtx);
+				// Wait for a notification if the queue is empty.
+				while(!pc->monitor->canceled() && pc->running && pc->geomBuf.empty())
+					pc->gcv.wait(lk);
+				// If the wakeup is spurious, skip.
+				if(pc->geomBuf.empty())
+					continue;
+				// Get the ID.
+				id = pc->geomBuf.front().first;
+				polys = std::move(pc->geomBuf.front().second);
+				pc->geomBuf.pop_front();
+			}
+
+			if(polys.empty())
+				continue;
+
+			if(pc->monitor->canceled()) {
+				for(GEOSGeometry* p : polys)
+					GEOSGeom_destroy(p);
+				continue;
+			}
+
+			// Union the polys.
+			geom = polys.front();
+			for(size_t i = 1; i < polys.size(); ++i) {
+				GEOSGeometry* tmp = GEOSUnion_r(pc->gctx, geom, polys[i]);
+				printGEOSGeom(geom, pc->gctx);
+				printGEOSGeom(tmp, pc->gctx);
+				GEOSGeom_destroy(geom);
+				GEOSGeom_destroy(polys[i]);
+				geom = tmp;
+			}
+			polys.clear();
+
+			if(pc->monitor->canceled()) {
+				GEOSGeom_destroy(geom);
+				continue;
+			}
+
+			// If we're removing dangles, throw away all but the
+			// largest single polygon. If it was originally a polygon, there are no dangles.
+			int numGeoms;
+			if(!pc->monitor->canceled() && pc->removeDangles
+					&& (numGeoms = GEOSGetNumGeometries(geom)) > 1) {
+				size_t idx = 0;
+				double a, area = 0;
+				for(size_t i = 0; i < numGeoms; ++i) {
+					const GEOSGeometry* p = GEOSGetGeometryN(geom, i);
+					GEOSArea(p, &a);
+					if(a > area) {
+						area = a;
+						idx = i;
+					}
+				}
+				GEOSGeometry *g = GEOSGeom_clone(GEOSGetGeometryN(geom, idx)); // Force copy.
+				GEOSGeom_destroy(geom);
+				geom = g;
+			}
+
+			// If we're removing holes, extract the exterior rings of all constituent polygons.
+			if(!pc->monitor->canceled() && pc->removeHoles) {
+				std::vector<GEOSGeometry*> geoms0;
+				for(int i = 0; i < GEOSGetNumGeometries(geom); ++i) {
+					const GEOSGeometry* p = GEOSGetGeometryN(geom, i);
+					const GEOSGeometry* l = GEOSGetExteriorRing(p);
+					const GEOSCoordSequence* seq = GEOSGeom_getCoordSeq(l);
+					GEOSGeometry* r = GEOSGeom_createLinearRing(GEOSCoordSeq_clone(seq));
+					GEOSGeometry* npoly = GEOSGeom_createPolygon(r, 0, 0);
+					geoms0.push_back(npoly);
+				}
+				GEOSGeometry* g = GEOSGeom_createCollection(GEOSGeomTypes::GEOS_MULTIPOLYGON, geoms0.data(), geoms0.size()); // Do not copy -- take ownership.
+				GEOSGeom_destroy(geom);
+				geom = g;
+			}
+
+			// If the result is not a multi, make it one.
+			if(!pc->monitor->canceled() && GEOSGeomTypeId(geom) != GEOSGeomTypes::GEOS_MULTIPOLYGON)
+				geom = GEOSGeom_createCollection_r(pc->gctx, GEOSGeomTypes::GEOS_MULTIPOLYGON, &geom, 1);
+
+			if(!geom) {
+				g_warn("Null geometry.");
+			} else {
+				(*callback)(id, geom);
+			}
+		}
+	}
 
 	/**
 	 * \brief Fix the given coordinates so that the source does not extend
@@ -2636,7 +2779,7 @@ public:
 					x1 = startX + c * resX;
 					// If the value is a valid ID, create and the geometry and save it for writing.
 					if(v0 > 0) {
-						geoms[v0].push_back(polyMakeGeom(x0, y0, x1 + xeps, y1 + yeps, d3 ? 3 : 2));
+						geoms[v0].push_back(polyMakeGeom(gctx, x0, y0, x1 + xeps, y1 + yeps, d3 ? 3 : 2));
 						activeIds.insert(v0);
 					}
 					// Update values for next loop.
@@ -4254,7 +4397,7 @@ public:
 	 * \param status A Status object to receive progress updates.
 	 * \param cancel A boolean that will be set to true if the algorithm should quit.
 	 */
-	void polygonize(const std::string& filename, const std::string& layerName, const std::string& idField,
+	void polygonizeToFile(const std::string& filename, const std::string& layerName, const std::string& idField,
 			const std::string& driver, int srid,
 			bool removeHoles = false, bool removeDangles = false,
 			const std::string& mask = "", int maskBand = 0, int threads = 1, bool d3 = false,
@@ -4271,8 +4414,8 @@ public:
 		sr.exportToWkt(&bufc);
 		std::string projection(buf.data());
 
-		polygonize(filename, layerName, idField, driver, projection, removeHoles, removeDangles,
-				mask, maskBand, threads, d3, fields, monitor);
+		polygonizeToFile(filename, layerName, idField, driver, projection, removeHoles, removeDangles,
+				d3, fields, monitor);
 	}
 
 	/**
@@ -4293,54 +4436,41 @@ public:
 	 * \param status A Status object to receive progress updates.
 	 * \param cancel A boolean that will be set to true if the algorithm should quit.
 	 */
-	void polygonize(const std::string& filename, const std::string& layerName, const std::string& idField,
+	void polygonizeToFile(const std::string& filename, const std::string& layerName, const std::string& idField,
 			const std::string& driver, const std::string& projection,
-			bool removeHoles = false, bool removeDangles = false,
-			const std::string& mask = "", int maskBand = 0, int threads = 1, bool d3 = false,
+			bool removeHoles = false, bool removeDangles = false, bool d3 = false,
 			const std::vector<std::pair<std::string, OGRFieldType> >& fields = {},
 			Monitor* monitor = nullptr) {
-
-		if(!monitor)
-			monitor = getDefaultMonitor();
-
-		if(isFloat())
-			g_runerr("Only int rasters can be polygonized.");
-
-		// It's faster to work on a band-interleaved raster.
-		if(props().interleave() == Interleave::BIP)
-			remap(Interleave::BIL);
-
-		if(threads < 1)
-			threads = 1;
-
-		initGEOS(0, 0);
-
-		// Extract some grid properties.
-		int cols = props().cols();
-		int rows = props().rows();
-		double resX = props().resX();
-		double resY = props().resY();
-		const Bounds& bounds = props().bounds();
-
-		// The starting corner coordinates.
-		double startX = resX > 0 ? bounds.minx() : bounds.maxx();
-		double startY = resY > 0 ? bounds.miny() : bounds.maxy();
 
 		// Create the output dataset
 		GEOSContextHandle_t gctx = OGRGeometry::createGEOSContext();
 
+		// If a projection is given, create a spatial reference object for it.
 		OGRSpatialReference* sr = nullptr;
 		if(!projection.empty())
 			sr = new OGRSpatialReference(projection.c_str());
 
+		// Create the output dataset.
 		GDALDataset* ds;
 		OGRLayer* layer;
+		std::atomic<int> fid(0);
+		bool running = true;
+		std::mutex gmtx;
+
+		PolygonContext pc;
+		pc.gctx = gctx;
+		pc.removeDangles = removeDangles;
+		pc.removeHoles = removeHoles;
+		pc.monitor = monitor != nullptr ? monitor : getDefaultMonitor();
+
 		polyMakeDataset(filename, driver, layerName, idField, sr,
 				d3 ? wkbMultiPolygon25D : wkbMultiPolygon, &ds, &layer);
 
+		// Dispose of the spatial reference object.
 		if(sr)
 			sr->Release();
 
+		// Create the field set for the database.
 		if(!fields.empty()) {
 			for(const std::pair<std::string, OGRFieldType>& field : fields) {
 				if(idField == field.first) {
@@ -4352,123 +4482,181 @@ public:
 			}
 		}
 
-		double xeps = 0.001 * (resX > 0 ? 1 : -1);
-		double yeps = 0.001 * (resY > 0 ? 1 : -1);
+		if(OGRERR_NONE != layer->StartTransaction())
+			g_runerr("Failed to start transaction.");
 
-		// Data containers.
-		std::unordered_map<int, std::vector<GEOSGeometry*> > geoms;
-		std::unordered_set<int> activeIds;
-		std::unordered_set<int> finalIds;
+		std::thread th(polyWriteToFile, &pc.geoms, layer, &idField, &fid, gctx, &running, monitor, &gmtx);
 
-		// Thread control features.
-		bool running = true;
-		std::list<std::thread> ths;
-
-		std::atomic<size_t> poly_fid(0);
-		std::mutex poly_gmtx;
-		std::mutex poly_fmtx;
-		std::mutex poly_omtx;
-		std::condition_variable poly_cv;
-
-		// Start output threads.
-		for(int i = 0; i < threads; ++i) {
-			ths.emplace_back(polyWriteToFile, &geoms, &finalIds, &idField, layer, &gctx,
-					removeHoles, removeDangles, &running, monitor,
-					&poly_fid, &poly_gmtx, &poly_fmtx, &poly_omtx, &poly_cv);
-		}
-
-		int tileRows = 64;
-
-		// Create a buffer for the row.
-		std::vector<T> buf(cols * tileRows);
-
-		// Process raster.
-		for(int tr = 0; tr < rows; tr += tileRows) {
-
-			if(monitor->canceled()) break;
-
-			monitor->status((float) tr / rows, "Polygonizing...");
-
-			// Load the row buffer.
-			getTile(buf.data(), 0, tr, cols, tileRows);
-
-			for(int r = 0; r < tileRows; ++r) {
-
-				// Initialize the corner coordinates.
-				double x0 = startX;
-				double y0 = startY + (tr + r) * resY;
-				double x1 = x0;
-				double y1 = y0 + resY;
-
-				// For tracking cell values. TODO: An unsigned int is possible here: overflow.
-				int v0 = buf[r * cols];
-				int v1 = -1;
-
-				// Reset the list of IDs extant in the current row.
-				activeIds.clear();
-
-				for(int c = 1; c < cols; ++c) {
-
-					if(monitor->canceled()) break;
-
-					// If the current cell value differs from the previous one...
-					if((v1 = buf[r * cols + c]) != v0) {
-						// Update the right x coordinate.
-						x1 = startX + c * resX;
-						// If the value is a valid ID, create and the geometry and save it for writing.
-						if(v0 > 0) {
-							geoms[v0].push_back(polyMakeGeom(x0, y0, x1 + xeps, y1 + yeps, d3 ? 3 : 2));
-							activeIds.insert(v0);
-						}
-						// Update values for next loop.
-						v0 = v1;
-						x0 = x1;
-					}
-				}
-
-				// IDs that are in the geoms array and not in the current row are ready to be finalized.
-				if(!monitor->canceled()) {
-					std::lock_guard<std::mutex> lk0(poly_gmtx);
-					std::lock_guard<std::mutex> lk1(poly_fmtx);
-					for(const auto& it : geoms) {
-						if(activeIds.find(it.first) == activeIds.end())
-							finalIds.insert(it.first);
-					}
-				}
-				poly_cv.notify_all();
-
-				while(!monitor->canceled() && !finalIds.empty())
-					std::this_thread::yield();
+		struct fn {
+			PolygonContext* pc;
+			std::mutex* gmtx;
+			void operator()(int id, GEOSGeometry* geom) {
+				std::lock_guard<std::mutex> lk(*gmtx);
+				pc->geoms.emplace_back(id, geom);
 			}
-		}
+		};
 
-		// Finalize all remaining geometries.
-		if(!monitor->canceled()) {
-			std::lock_guard<std::mutex> lk0(poly_gmtx);
-			std::lock_guard<std::mutex> lk1(poly_fmtx);
-			for(auto& it : geoms)
-				finalIds.insert(it.first);
-		}
+		struct fn f;
+		f.pc = &pc;
+		f.gmtx = &gmtx;
+		polygonize(f, &pc);
 
-		// Let the threads shut down when they run out of geometries.
 		running = false;
-		poly_cv.notify_all();
-
-		for(std::thread& th : ths) {
-			if(th.joinable())
-				th.join();
-		}
-
-		OGRGeometry::freeGEOSContext(gctx);
+		if(th.joinable())
+			th.join();
 
 		// Release the layer -- GDAL will take care of it. But close the dataset so that can happen.
+		if(OGRERR_NONE != layer->CommitTransaction())
+			g_runerr("Failed to commit transaction.");
+
 		layer->Dereference();
 		GDALClose(ds);
 
-		monitor->status(1.0, "Finished polygonization");
+		OGRGeometry::freeGEOSContext(gctx);
 
-		finishGEOS();
+	}
 
+	template <class C>
+	void polygonize(C callback, PolygonContext* pc = nullptr) {
+
+		if(isFloat())
+			g_runerr("Only int rasters can be polygonized.");
+
+		// It's faster to work on a band-interleaved raster.
+		if(props().interleave() == Interleave::BIP)
+			remap(Interleave::BIL);
+
+		std::unique_ptr<PolygonContext> pc_;
+		if(!pc) {
+			pc_.reset(new PolygonContext());
+			pc = pc_.get();
+		}
+
+		pc->monitor = pc->monitor != nullptr ? pc->monitor : getDefaultMonitor();
+
+		bool destroyGeos = false;
+		if(!pc->gctx) {
+			pc->gctx = GEOS_init_r();
+			destroyGeos = true;
+		}
+
+		// Extract some grid properties.
+		pc->cols = props().cols();
+		pc->rows = props().rows();
+		pc->resX = props().resX();
+		pc->resY = props().resY();
+		pc->bounds = props().bounds();
+
+		// The starting corner coordinates.
+		pc->startX = pc->resX > 0 ? pc->bounds.minx() : pc->bounds.maxx();
+		pc->startY = pc->resY > 0 ? pc->bounds.miny() : pc->bounds.maxy();
+
+		// "Epsilon" for snapping geometries.
+		pc->xeps = 0.001 * (pc->resX > 0 ? 1 : -1);
+		pc->yeps = 0.001 * (pc->resY > 0 ? 1 : -1);
+
+		// Thread control features.
+		pc->running = true;
+
+		// Start merge and write threads.
+		std::thread th(polyMerge<C>, &callback, pc);
+
+		// Row buffer.
+		std::vector<T> buf(pc->cols);
+		// Lists of geoms under construction.
+		std::unordered_map<int, std::vector<GEOSGeometry*>> geomParts;
+		// The list of geometries currently being built.
+		std::unordered_set<int> activeIds;
+
+		// Process raster.
+		for(int tr = 0; tr < pc->rows; ++tr) {
+
+			if(pc->monitor->canceled()) break;
+
+			pc->monitor->status((float) tr / pc->rows, "Polygonizing...");
+
+			while(pc->geomBuf.size() > 10000 && !pc->monitor->canceled())
+				std::this_thread::yield();
+
+			// Load the row buffer.
+			getTile(buf.data(), 0, tr, pc->cols, 1);
+
+			// Initialize the corner coordinates.
+			double x0 = pc->startX;
+			double y0 = pc->startY + tr * pc->resY;
+			double x1 = x0;
+			double y1 = y0 + pc->resY;
+
+			// For tracking cell values. TODO: An unsigned int is possible here: overflow.
+			int v0 = buf[0];
+			int v1 = -1;
+
+			// Reset the list of IDs extant in the current row.
+			activeIds.clear();
+
+			// Note: Count's past the end to trigger writing the last cell.
+			for(int c = 1; c < pc->cols; ++c) {
+
+				if(pc->monitor->canceled())
+					break;
+
+				// If the current cell value differs from the previous one...
+				if(c == pc->cols || (v1 = buf[c]) != v0) {
+					// Update the right x coordinate.
+					x1 = pc->startX + c * pc->resX;
+					// If the value is a valid ID, create and the geometry and save it for writing.
+					if(v0 > 0) {
+						GEOSGeometry* geom = polyMakeGeom(pc->gctx, x0, y0, x1 + pc->xeps, y1 + pc->yeps, 3);
+						geomParts[v0].push_back(geom);
+						activeIds.insert(v0);
+					}
+					// Update values for next loop.
+					v0 = v1;
+					x0 = x1;
+				}
+			}
+
+			// IDs that are in the geoms array and not in the current row are ready to be finalized.
+			if(!pc->monitor->canceled()) {
+				std::lock_guard<std::mutex> lk(pc->gmtx);
+				std::vector<int> rem;
+				for(const auto& it : geomParts) {
+					if(activeIds.find(it.first) == activeIds.end()) {
+						pc->geomBuf.push_back(std::make_pair(it.first, std::move(geomParts[it.first])));
+						rem.push_back(it.first);
+					}
+				}
+				for(int i : rem)
+					geomParts.erase(i);
+			}
+
+			// Notify the waiting processor thread.
+			pc->gcv.notify_all();
+		}
+
+		// Finalize all remaining geometries.
+		if(!pc->monitor->canceled()) {
+			std::lock_guard<std::mutex> lk1(pc->gmtx);
+			for(const auto& it : geomParts) {
+				pc->geomBuf.push_back(std::make_pair(it.first, std::move(geomParts[it.first])));
+			}
+			geomParts.clear();
+		}
+
+		// Let the threads shut down when they run out of geometries.
+		pc->running = false;
+		pc->gcv.notify_all();
+
+		if(th.joinable())
+			th.join();
+
+		for(auto& it : pc->geoms)
+			GEOSGeom_destroy(it.second);
+
+		pc->monitor->status(1.0, "Finished polygonization");
+
+		if(destroyGeos)
+			GEOS_finish_r(pc->gctx);
 	}
 
 	/**

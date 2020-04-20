@@ -34,111 +34,31 @@ size_t geo::grid::detail::minValue(std::unordered_map<size_t, double>& m) {
 	return key;
 }
 
-void geo::grid::detail::polyWriteToFile(std::unordered_map<int, std::vector<GEOSGeometry*> >* geoms,
-		std::unordered_set<int>* finalIds,
-		const std::string* idField, OGRLayer* layer, GEOSContextHandle_t* gctx,
-		bool removeHoles, bool removeDangles, bool* running, geo::Monitor* monitor,
-		std::atomic<size_t>* poly_fid, std::mutex* poly_gmtx, std::mutex* poly_fmtx,
-		std::mutex* poly_omtx, std::condition_variable* poly_cv) {
 
+void geo::grid::detail::polyWriteToFile(std::list<std::pair<int, GEOSGeometry*>>* geoms,
+		OGRLayer* layer, const std::string* idField, std::atomic<int>* fid,
+		GEOSContextHandle_t gctx,
+		bool* running, Monitor* monitor, std::mutex* gmtx) {
 
-	std::vector<GEOSGeometry*> polys;
 	GEOSGeometry* geom = nullptr;
 	int id;
 
-	while(!monitor->canceled() && (*running || !finalIds->empty())) {
+	while(!monitor->canceled() && (*running || !geoms->empty())) {
 
 		// Get an ID and the list of polys from the queue.
 		{
-			std::unique_lock<std::mutex> lk(*poly_fmtx);
-			// Wait for a notification if the queue is empty.
-			while(!monitor->canceled() && *running && finalIds->empty())
-				poly_cv->wait(lk);
+			// Wait for if the queue is empty.
+			while(!monitor->canceled() && *running && geoms->empty())
+				std::this_thread::yield();
 			// If the wakeup is spurious, skip.
-			if(finalIds->empty())
+			std::unique_lock<std::mutex> lk(*gmtx);
+			if(geoms->empty())
 				continue;
 			// Get the ID.
-			id = *(finalIds->begin());
-			finalIds->erase(id);
+			id = geoms->front().first;
+			geom = std::move(geoms->front().second);
+			geoms->pop_front();
 		}
-		// Get the list of polys and remove the list from the map.
-		{
-			std::lock_guard<std::mutex> lk(*poly_gmtx);
-			// If the geoms list is still here, grab it.
-			if(geoms->find(id) == geoms->end())
-				continue;
-			polys = geoms->at(id);
-			geoms->erase(id);
-		}
-
-		if(polys.empty())
-			continue;
-
-		if(monitor->canceled()) {
-			for(GEOSGeometry* p : polys)
-				GEOSGeom_destroy(p);
-			continue;
-		}
-
-		// Union the polys.
-		geom = polys.front();
-		for(size_t i = 1; i < polys.size(); ++i) {
-			GEOSGeometry* tmp = GEOSUnion_r(*gctx, geom, polys[i]); //
-			GEOSGeom_destroy(geom);
-			GEOSGeom_destroy(polys[i]);
-			geom = tmp;
-		}
-		polys.clear();
-
-		if(monitor->canceled()) {
-			GEOSGeom_destroy(geom);
-			continue;
-		}
-
-		// If we're removing dangles, throw away all but the
-		// largest single polygon. If it was originally a polygon, there are no dangles.
-		size_t numGeoms;
-		if(!monitor->canceled() && removeDangles && (numGeoms = GEOSGetNumGeometries(geom)) > 1) {
-			size_t idx = 0;
-			double a, area = 0;
-			for(size_t i = 0; i < numGeoms; ++i) {
-				const GEOSGeometry* p = GEOSGetGeometryN(geom, i);
-				GEOSArea(p, &a);
-				if(a > area) {
-					area = a;
-					idx = i;
-				}
-			}
-			GEOSGeometry *g = GEOSGeom_clone(GEOSGetGeometryN(geom, idx)); // Force copy.
-			GEOSGeom_destroy(geom);
-			geom = g;
-		}
-
-		// If we're removing holes, extract the exterior rings of all constituent polygons.
-		if(!monitor->canceled() && removeHoles) {
-			std::vector<GEOSGeometry*> geoms0;
-			for(int i = 0; i < GEOSGetNumGeometries(geom); ++i) {
-				const GEOSGeometry* p = GEOSGetGeometryN(geom, i);
-				const GEOSGeometry* l = GEOSGetExteriorRing(p);
-				const GEOSCoordSequence* seq = GEOSGeom_getCoordSeq(l);
-				GEOSGeometry* r = GEOSGeom_createLinearRing(GEOSCoordSeq_clone(seq));
-				GEOSGeometry* npoly = GEOSGeom_createPolygon(r, 0, 0);
-				geoms0.push_back(npoly);
-			}
-			GEOSGeometry* g = GEOSGeom_createCollection(GEOSGeomTypes::GEOS_MULTIPOLYGON, geoms0.data(), geoms0.size()); // Do not copy -- take ownership.
-			GEOSGeom_destroy(geom);
-			geom = g;
-		}
-
-		// If the result is not a multi, make it one.
-		if(!monitor->canceled() && GEOSGeomTypeId(geom) != GEOSGeomTypes::GEOS_MULTIPOLYGON) {
-			std::vector<GEOSGeometry*> gs;
-			gs.push_back(geom);
-			geom = GEOSGeom_createCollection(GEOSGeomTypes::GEOS_MULTIPOLYGON, gs.data(), gs.size());
-		}
-
-		if(!geom)
-			g_runerr("Null geometry.");
 
 		if(monitor->canceled()) {
 			GEOSGeom_destroy(geom);
@@ -146,7 +66,7 @@ void geo::grid::detail::polyWriteToFile(std::unordered_map<int, std::vector<GEOS
 		}
 
 		// Create and write the OGR geometry.
-		OGRGeometry* ogeom = OGRGeometryFactory::createFromGEOS(*gctx, (GEOSGeom) geom);
+		OGRGeometry* ogeom = OGRGeometryFactory::createFromGEOS(gctx, (GEOSGeom) geom);
 		GEOSGeom_destroy(geom);
 
 		// Create and configure the feature. Feature owns the OGRGeometry.
@@ -154,20 +74,23 @@ void geo::grid::detail::polyWriteToFile(std::unordered_map<int, std::vector<GEOS
 		OGRFeature* feat = OGRFeature::CreateFeature(fdef); // Creates on the OGR heap.
 		feat->SetGeometryDirectly(ogeom);
 		feat->SetField(idField->c_str(), (GIntBig) id);
-		feat->SetFID(++*poly_fid);
+		feat->SetFID(++*fid);
 
 		// Write to the output file.
-		int err;
-		{
-			std::lock_guard<std::mutex> lk(*poly_omtx);
-			err = layer->CreateFeature(feat);
-		}
-
+		int err = layer->CreateFeature(feat);
 		OGRFeature::DestroyFeature(feat);
 
 		if(OGRERR_NONE != err)
 			g_runerr("Failed to add geometry.");
 	}
+}
+
+void geo::grid::detail::printGEOSGeom(GEOSGeometry* geom, GEOSContextHandle_t gctx) {
+	GEOSWKTWriter* wtr = GEOSWKTWriter_create_r(gctx);
+	char* a = GEOSWKTWriter_write_r(gctx, wtr, geom);
+	g_warn(a);
+	free(a);
+	GEOSWKTWriter_destroy_r(gctx, wtr);
 }
 
 /**
@@ -179,33 +102,33 @@ void geo::grid::detail::polyWriteToFile(std::unordered_map<int, std::vector<GEOS
  * \param y1 The top left corner y-coordinate.
  * \param dims The number of dimensions.
  */
-GEOSGeometry* geo::grid::detail::polyMakeGeom(double x0, double y0, double x1, double y1, int dims) {
+GEOSGeometry* geo::grid::detail::polyMakeGeom(GEOSContextHandle_t gctx, double x0, double y0, double x1, double y1, int dims) {
 
 	// Build the geometry.
 	// TODO: Necessary to give z coord here?
-	GEOSCoordSequence* seq = GEOSCoordSeq_create(5, dims);
-	GEOSCoordSeq_setX(seq, 0, x0);
-	GEOSCoordSeq_setY(seq, 0, y0);
+	GEOSCoordSequence* seq = GEOSCoordSeq_create_r(gctx, 5, dims);
+	GEOSCoordSeq_setX_r(gctx, seq, 0, x0);
+	GEOSCoordSeq_setY_r(gctx, seq, 0, y0);
 	if(dims == 3)
-		GEOSCoordSeq_setZ(seq, 0, 0);
-	GEOSCoordSeq_setX(seq, 1, x0);
-	GEOSCoordSeq_setY(seq, 1, y1);
+		GEOSCoordSeq_setZ_r(gctx, seq, 0, 0);
+	GEOSCoordSeq_setX_r(gctx, seq, 1, x0);
+	GEOSCoordSeq_setY_r(gctx, seq, 1, y1);
 	if(dims == 3)
-		GEOSCoordSeq_setZ(seq, 0, 0);
-	GEOSCoordSeq_setX(seq, 2, x1);
-	GEOSCoordSeq_setY(seq, 2, y1);
+		GEOSCoordSeq_setZ_r(gctx, seq, 0, 0);
+	GEOSCoordSeq_setX_r(gctx, seq, 2, x1);
+	GEOSCoordSeq_setY_r(gctx, seq, 2, y1);
 	if(dims == 3)
-		GEOSCoordSeq_setZ(seq, 0, 0);
-	GEOSCoordSeq_setX(seq, 3, x1);
-	GEOSCoordSeq_setY(seq, 3, y0);
+		GEOSCoordSeq_setZ_r(gctx, seq, 0, 0);
+	GEOSCoordSeq_setX_r(gctx, seq, 3, x1);
+	GEOSCoordSeq_setY_r(gctx, seq, 3, y0);
 	if(dims == 3)
-		GEOSCoordSeq_setZ(seq, 0, 0);
-	GEOSCoordSeq_setX(seq, 4, x0);
-	GEOSCoordSeq_setY(seq, 4, y0);
+		GEOSCoordSeq_setZ_r(gctx, seq, 0, 0);
+	GEOSCoordSeq_setX_r(gctx, seq, 4, x0);
+	GEOSCoordSeq_setY_r(gctx, seq, 4, y0);
 	if(dims == 3)
-		GEOSCoordSeq_setZ(seq, 0, 0);
-	GEOSGeometry* ring = GEOSGeom_createLinearRing(seq);
-	GEOSGeometry* poly = GEOSGeom_createPolygon(ring, 0, 0);
+		GEOSCoordSeq_setZ_r(gctx, seq, 0, 0);
+	GEOSGeometry* ring = GEOSGeom_createLinearRing_r(gctx, seq);
+	GEOSGeometry* poly = GEOSGeom_createPolygon_r(gctx, ring, 0, 0);
 	return poly;
 }
 
