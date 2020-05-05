@@ -350,6 +350,11 @@ namespace detail {
 		}
 	}
 
+	/**
+	 * \brief Status callback for GDAL RasterIO.
+	 */
+	int gdalProgress(double dfComplete, const char *pszMessage, void *pProgressArg);
+
 } // detail
 
 using namespace geo::grid::detail;
@@ -1291,7 +1296,7 @@ public:
 	 * \param filename The path to the file.
 	 * \param writable True if the file is to be writable.
 	 */
-	Grid(const std::string& filename, bool writable = false) :
+	Grid(const std::string& filename, bool writable = false, Monitor* monitor = nullptr) :
 		m_ds(nullptr),
 		m_type(GDT_Unknown),
 		m_mapped(false),
@@ -1299,7 +1304,7 @@ public:
 		m_data(nullptr),
 		m_dirty(false) {
 
-		init(filename, writable);
+		init(filename, writable, monitor);
 
 	}
 
@@ -1309,10 +1314,13 @@ public:
 	 * \param filename The path to the file.
 	 * \param writable True if the file is to be writable.
 	 */
-	void init(const std::string& filename, bool writable = false) {
+	void init(const std::string& filename, bool writable = false, Monitor* monitor = nullptr) {
 
 		if (filename.empty())
 			g_argerr("Filename must be given.");
+
+		if(!monitor)
+			monitor = getDefaultMonitor();
 
 		GDALAllRegister();
 
@@ -1371,6 +1379,9 @@ public:
 		}
 
 		std::vector<T> row(props().cols());
+		GDALRasterIOExtraArg arg;
+		arg.pfnProgress = gdalProgress;
+		arg.pProgressData = monitor;
 		for(int b = 0; b < props().bands(); ++b) {
 			GDALRasterBand* band = m_ds->GetRasterBand(b + 1);
 			for(int r = 0; r < props().rows(); ++r) {
@@ -3080,7 +3091,6 @@ public:
 		if(create == NULL || std::strncmp(create, "YES", 3) != 0)
 			g_runerr("The " << drvName << " driver does not support dataset creation. Please specify a different driver.");
 
-
 		// Remove and create the raster.
 
 		rem(filename);
@@ -3212,9 +3222,13 @@ public:
 		int cols = props().cols();
 		int rows = props().rows();
 		GDALRasterBand* bnd = m_ds->GetRasterBand(band + 1);
+		GDALRasterIOExtraArg arg;
+		INIT_RASTERIO_EXTRA_ARG(arg);
+		arg.pfnProgress = gdalProgress;
+		arg.pProgressData = monitor;
 
 		if(CE_None != bnd->RasterIO(GF_Read, 0, 0, cols, rows,
-				m_data, cols, rows, m_type, 0, 0, 0))
+				m_data, cols, rows, m_type, 0, 0, &arg))
 			g_runerr("Failed to copy raster row.");
 
 		m_props.setWritable(writable);
@@ -4310,9 +4324,13 @@ public:
 			int rows = props().rows();
 
 			GDALRasterBand* band = m_ds->GetRasterBand(m_band + 1);
+			GDALRasterIOExtraArg arg;
+			INIT_RASTERIO_EXTRA_ARG(arg);
+			arg.pfnProgress = gdalProgress;
+			arg.pProgressData = monitor;
 
 			if(CE_None != band->RasterIO(GF_Write, 0, 0, cols, rows,
-					m_data, cols, rows, gdalType(), 0, 0)) {
+					m_data, cols, rows, gdalType(), 0, 0, &arg)) {
 				monitor->error("Failed to write to raster.");
 			}
 

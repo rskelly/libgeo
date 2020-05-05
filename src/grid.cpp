@@ -93,15 +93,6 @@ void geo::grid::detail::printGEOSGeom(GEOSGeometry* geom, GEOSContextHandle_t gc
 	GEOSWKTWriter_destroy_r(gctx, wtr);
 }
 
-/**
- * \brief Produce a rectangular polygon from the four corners.
- *
- * \param x0 The top left corner x-coordinate.
- * \param y0 The top left corner y-coordinate.
- * \param x1 The top left corner x-coordinate.
- * \param y1 The top left corner y-coordinate.
- * \param dims The number of dimensions.
- */
 GEOSGeometry* geo::grid::detail::polyMakeGeom(GEOSContextHandle_t gctx, double x0, double y0, double x1, double y1, int dims) {
 
 	// Build the geometry.
@@ -132,18 +123,6 @@ GEOSGeometry* geo::grid::detail::polyMakeGeom(GEOSContextHandle_t gctx, double x
 	return poly;
 }
 
-/**
- * \brief Make or open an OGR database to write the polygons to.
- *
- * \param filename The output filename.
- * \param driver The output driver.
- * \param layerName The layer name.
- * \param idField The field for the geometry ID.
- * \param sr The spatial reference object.
- * \param gType The geometry type.
- * \param ds The dataset.
- * \param layer the layer.
- */
 void geo::grid::detail::polyMakeDataset(const std::string& filename, const std::string& driver, const std::string& layerName,
 		const std::string& idField,
 		OGRSpatialReference* sr, OGRwkbGeometryType gType,
@@ -190,12 +169,6 @@ void geo::grid::detail::polyMakeDataset(const std::string& filename, const std::
 
 }
 
-/**
- * \brief Return the number of bytes required to store each type.
- *
- * \param type The libgeo data type.
- * \return The number of bytes required to store each type.
- */
 int geo::grid::detail::getTypeSize(DataType type) {
 	switch(type) {
 	case DataType::Byte: return sizeof(uint8_t);
@@ -210,12 +183,6 @@ int geo::grid::detail::getTypeSize(DataType type) {
 	}
 }
 
-/**
- * \brief Convert the libgeo data type to a GDAL data type.
- *
- * \param The libgeo data type.
- * \return type The GDAL data type.
- */
 GDALDataType geo::grid::detail::dataType2GDT(DataType type) {
 	switch(type) {
 	case DataType::Byte:  	return GDT_Byte;
@@ -232,12 +199,6 @@ GDALDataType geo::grid::detail::dataType2GDT(DataType type) {
 	return GDT_Unknown;
 }
 
-/**
- * \brief Convert the GDAL data type to a libgeo data type.
- *
- * \param type The GDAL data type.
- * \return The libgeo data type.
- */
 DataType geo::grid::detail::gdt2DataType(GDALDataType type) {
 	switch(type) {
 	case GDT_Byte:	  	return DataType::Byte;
@@ -258,7 +219,6 @@ DataType geo::grid::detail::gdt2DataType(GDALDataType type) {
 	}
 	return DataType::None;
 }
-
 
 void geo::grid::detail::fixWriteBounds(int& cols, int& rows, int& srcCol, int& srcRow,
 		int& dstCol, int& dstRow, int rcols, int rrows, int gcols, int grows) {
@@ -344,4 +304,7 @@ bool geo::grid::detail::fixCoords(int& srcCol, int& srcRow, int& dstCol, int& ds
 	return true;
 }
 
-
+int geo::grid::detail::gdalProgress(double dfComplete, const char *pszMessage, void *pProgressArg) {
+	static_cast<Monitor*>(pProgressArg)->status((float) dfComplete, std::string(pszMessage));
+	return 1;
+};
