@@ -273,8 +273,13 @@ namespace detail {
 			}
 
 			// If the result is not a multi, make it one.
-			if(!pc->monitor->canceled() && GEOSGeomTypeId_r(pc->gctx, geom) != GEOSGeomTypes::GEOS_MULTIPOLYGON)
-				geom = GEOSGeom_createCollection_r(pc->gctx, GEOSGeomTypes::GEOS_MULTIPOLYGON, &geom, 1);
+			if(!pc->monitor->canceled() && GEOSGeomTypeId_r(pc->gctx, geom) != GEOSGeomTypes::GEOS_MULTIPOLYGON) {
+				std::vector<GEOSGeometry*> geoms0;
+				geoms0.push_back(geom);
+				// Collection keeps ownership of the geom.
+				GEOSGeometry* g = GEOSGeom_createCollection_r(pc->gctx, GEOSGeomTypes::GEOS_MULTIPOLYGON, geoms0.data(), 1);
+				geom = g;
+			}
 
 			if(!geom) {
 				g_warn("Null geometry.");
@@ -3122,9 +3127,9 @@ public:
 	 * \param filename The path to the file.
 	 * \param writable True if the file is to be writable.
 	 */
-	Band(const std::string& filename, int band, bool writable, Monitor* monitor = nullptr) :
+	Band(const std::string& filename, int band, bool writable, bool mapped, Monitor* monitor = nullptr) :
 		Band() {
-		init(filename, band, writable, monitor);
+		init(filename, band, writable, mapped, monitor);
 	}
 
 	/**
@@ -3133,7 +3138,7 @@ public:
 	 * \param filename The path to the file.
 	 * \param writable True if the file is to be writable.
 	 */
-	void init(const std::string& filename, int band, bool writable, Monitor* monitor = nullptr) {
+	void init(const std::string& filename, int band, bool writable, bool mapped, Monitor* monitor = nullptr) {
 
 		if (filename.empty())
 			g_argerr("Filename must be given.");
@@ -3196,7 +3201,7 @@ public:
 
 		m_props.setBandMetadata(bandMeta);
 
-		if(mapped() || !initMem()) {
+		if(mapped || !initMem()) {
 			if(!initMapped())
 				g_runerr("Could not allocate memory and failed to switch to mapped memory.");
 		}
@@ -3448,13 +3453,15 @@ public:
 	 * \param ro The row buffer.
 	 */
 	void getTile(T* tile, int col, int row, int width, int height, int cb = 0, int rb = 0) {
-		int cols = props().cols();
-		int rows = props().rows();
+		int _cols = props().cols();	// Use size_t to avoid overflows on large rasters.
+		int _rows = props().rows();
 		T nodata = props().nodata();
-		if(col >= cols || row >= rows) {
+		if(col + width < 0 || row + height < 0 || col >= _cols || row >= _rows) {
 			g_warn("Col/row out of bands.");
 			return;
 		}
+		size_t cols = _cols;
+		size_t rows = _rows;
 		if(cb < 0) cb = -cb;		// Set buffers positive.
 		if(rb < 0) rb = -rb;
 		int c = col - cb;			// Start col/row is input minus the buffer.
@@ -3488,9 +3495,9 @@ public:
 		// Fill the buffer with nodata for empty rows/ends.
 		std::fill(buf.begin(), buf.end(), nodata);
 
-		int endr = std::min(row + h, rows);
-		for(int rr = 0; rr < h; ++rr, ++r) {
-			std::memcpy(buf.data() + cb, m_data + r * cols + c, w * sizeof(T));
+		int endr = std::min((size_t) row + h, rows);
+		for(int rr = 0; r < endr; ++rr, ++r) {
+			std::memcpy(buf.data() + cb, m_data + (size_t) r * (size_t) cols + (size_t) c, w * sizeof(T)); // Casting to prevent overflow on large rasters.
 			std::memcpy(tile + (rr + rb) * tw, buf.data(), w * sizeof(T));
 		}
 	}
@@ -4531,7 +4538,7 @@ public:
 	 * \param monitor A Monitor for progress and cancelation.
 	 */
 	template <class C>
-	void polygonize(C callback, bool removeHoles = false, bool removeDangles = false, Monitor* monitor = nullptr) {
+	void polygonize(C& callback, bool removeHoles = false, bool removeDangles = false, Monitor* monitor = nullptr) {
 		PolygonContext pc;
 		pc.removeDangles = removeDangles;
 		pc.removeHoles = removeHoles;
@@ -4549,7 +4556,7 @@ public:
 	 * \param pc An option PolygonContext containing configuration information.
 	 */
 	template <class C>
-	void polygonize(C callback, PolygonContext* pc) {
+	void polygonize(C& callback, PolygonContext* pc) {
 
 		if(!pc)
 			g_runerr("A PolygonContext is requried.");
@@ -4588,7 +4595,10 @@ public:
 		pc->running = true;
 
 		// Start merge and write threads.
-		std::thread th(polyMerge<C>, &callback, pc);
+		int nth = 2;
+		std::vector<std::thread> th;
+		for(int i = 0; i < nth; ++i)
+			th.emplace_back(polyMerge<C>, &callback, pc);
 
 		// Row buffer.
 		std::vector<T> buf(pc->cols);
@@ -4676,8 +4686,10 @@ public:
 		pc->running = false;
 		pc->gcv.notify_all();
 
-		if(th.joinable())
-			th.join();
+		for(int i = 0; i < nth; ++i) {
+			if(th[i].joinable())
+				th[i].join();
+		}
 
 		for(auto& it : pc->geoms)
 			GEOSGeom_destroy_r(pc->gctx, it.second);
