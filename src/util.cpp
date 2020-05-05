@@ -1194,12 +1194,21 @@ CSVType CSV::columnType(size_t i) const {
 	throw std::runtime_error("No column with index " + i);
 }
 
-void Stopwatch::start() {}
+void Stopwatch::start() {
+	m_begin = std::chrono::steady_clock::now();
+}
 
-void Stopwatch::reset() {}
+void Stopwatch::reset() {
+	start();
+}
 
 std::string Stopwatch::time() {
-	return "[no time]";
+	int t = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now()- m_begin).count();
+	std::stringstream ss;
+	ss << std::setfill('0');
+	ss << std::setw(3) << (t / 60) << ':';
+	ss << std::setw(2) << (t % 60);
+	return ss.str();
 }
 
 

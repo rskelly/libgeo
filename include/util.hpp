@@ -10,6 +10,7 @@
 
 #include <array>
 #include <cstring>
+#include <chrono>
 
 #include <gdal_priv.h>
 
@@ -732,8 +733,13 @@ void saveGrid(const std::string& file, const std::vector<double> grid,
 		int cols, int rows, double minx, double miny,
 		double xres, double yres, const std::string& proj);
 
-
+/**
+ * \brief Does what it says on the tin: keeps time.
+ */
 class Stopwatch {
+private:
+	std::chrono::steady_clock::time_point m_begin;
+
 public:
 	void reset();
 	void start();
