@@ -145,10 +145,10 @@ namespace detail {
 	 * \param y0 The minimum corner y.
 	 * \param x1 The maximum corner x.
 	 * \param y1 The maximum corner y.
-	 * \param dims The number of dimensions.
+	 * \param eps A grid snap distance.
 	 * \return A new geometry.
 	 */
-	GEOSGeometry* polyMakeGeom(GEOSContextHandle_t gctx, double x0, double y0, double x1, double y1, int dims);
+	GEOSGeometry* polyMakeGeom(GEOSContextHandle_t gctx, double x0, double y0, double x1, double y1, double eps);
 
 	/**
 	 * \brief Write to the file from the map of geometry lists.
@@ -230,6 +230,7 @@ namespace detail {
 				geom = tmp;
 			}
 			polys.clear();
+
 
 			if(pc->monitor->canceled()) {
 				GEOSGeom_destroy_r(pc->gctx, geom);
@@ -2742,8 +2743,7 @@ public:
 			}
 		}
 
-		double xeps = 0.001 * (resX > 0 ? 1 : -1);
-		double yeps = 0.001 * (resY > 0 ? 1 : -1);
+		double eps = 0.001;
 
 		// Data containers.
 		std::unordered_map<int, std::vector<GEOSGeometry*> > geoms;
@@ -2800,7 +2800,7 @@ public:
 					x1 = startX + c * resX;
 					// If the value is a valid ID, create and the geometry and save it for writing.
 					if(v0 > 0) {
-						geoms[v0].push_back(polyMakeGeom(gctx, x0, y0, x1 + xeps, y1 + yeps, d3 ? 3 : 2));
+						geoms[v0].push_back(polyMakeGeom(gctx, x0, y0, x1, y1, eps));
 						activeIds.insert(v0);
 					}
 					// Update values for next loop.
@@ -4606,8 +4606,7 @@ public:
 		pc->startY = pc->resY > 0 ? pc->bounds.miny() : pc->bounds.maxy();
 
 		// "Epsilon" for snapping geometries.
-		pc->xeps = 0.001 * (pc->resX > 0 ? 1 : -1);
-		pc->yeps = 0.001 * (pc->resY > 0 ? 1 : -1);
+		double eps = 0.0001;
 
 		// Thread control features.
 		pc->running = true;
@@ -4663,7 +4662,7 @@ public:
 					x1 = pc->startX + c * pc->resX;
 					// If the value is a valid ID, create and the geometry and save it for writing.
 					if(v0 > 0) {
-						GEOSGeometry* geom = polyMakeGeom(pc->gctx, x0, y0, x1 + pc->xeps, y1 + pc->yeps, 3);
+						GEOSGeometry* geom = polyMakeGeom(pc->gctx, x0, y0, x1, y1, eps);
 						geomParts[v0].push_back(geom);
 						activeIds.insert(v0);
 					}

@@ -93,34 +93,25 @@ void geo::grid::detail::printGEOSGeom(GEOSGeometry* geom, GEOSContextHandle_t gc
 	GEOSWKTWriter_destroy_r(gctx, wtr);
 }
 
-GEOSGeometry* geo::grid::detail::polyMakeGeom(GEOSContextHandle_t gctx, double x0, double y0, double x1, double y1, int dims) {
+GEOSGeometry* geo::grid::detail::polyMakeGeom(GEOSContextHandle_t gctx, double x0, double y0, double x1, double y1, double eps) {
 
 	// Build the geometry.
-	// TODO: Necessary to give z coord here?
-	GEOSCoordSequence* seq = GEOSCoordSeq_create_r(gctx, 5, dims);
+	GEOSCoordSequence* seq = GEOSCoordSeq_create_r(gctx, 5, 2);
 	GEOSCoordSeq_setX_r(gctx, seq, 0, x0);
 	GEOSCoordSeq_setY_r(gctx, seq, 0, y0);
-	if(dims == 3)
-		GEOSCoordSeq_setZ_r(gctx, seq, 0, 0);
 	GEOSCoordSeq_setX_r(gctx, seq, 1, x0);
 	GEOSCoordSeq_setY_r(gctx, seq, 1, y1);
-	if(dims == 3)
-		GEOSCoordSeq_setZ_r(gctx, seq, 0, 0);
 	GEOSCoordSeq_setX_r(gctx, seq, 2, x1);
 	GEOSCoordSeq_setY_r(gctx, seq, 2, y1);
-	if(dims == 3)
-		GEOSCoordSeq_setZ_r(gctx, seq, 0, 0);
 	GEOSCoordSeq_setX_r(gctx, seq, 3, x1);
 	GEOSCoordSeq_setY_r(gctx, seq, 3, y0);
-	if(dims == 3)
-		GEOSCoordSeq_setZ_r(gctx, seq, 0, 0);
 	GEOSCoordSeq_setX_r(gctx, seq, 4, x0);
 	GEOSCoordSeq_setY_r(gctx, seq, 4, y0);
-	if(dims == 3)
-		GEOSCoordSeq_setZ_r(gctx, seq, 0, 0);
 	GEOSGeometry* ring = GEOSGeom_createLinearRing_r(gctx, seq);
 	GEOSGeometry* poly = GEOSGeom_createPolygon_r(gctx, ring, 0, 0);
-	return poly;
+	GEOSGeometry* prec = GEOSGeom_setPrecision_r(gctx, poly, eps, 0);
+	GEOSGeom_destroy_r(gctx, poly);
+	return prec;
 }
 
 void geo::grid::detail::polyMakeDataset(const std::string& filename, const std::string& driver, const std::string& layerName,
