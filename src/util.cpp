@@ -4,14 +4,10 @@
  *  Created on: Jun 4, 2019
  *      Author: rob
  */
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <sys/time.h>
+
 #include <fcntl.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <ftw.h>
+#include <unistd.h>
+#include <dirent.h>
 
 #include <cstdlib>
 #include <cstdio>
@@ -19,11 +15,21 @@
 #include <sstream>
 #include <regex>
 #include <fstream>
+#include <random>
 
 #include <gdal_priv.h>
 #include <ogr_spatialref.h>
 
 #include "util.hpp"
+
+#ifdef _WIN32
+#include <Minwinbase.h>
+#include <Sysinfoapi.h>
+constexpr char pathsep = '\\';
+#else
+#include <sys/time.h>
+	constexpr char pathsep = '/';
+#endif
 
 using namespace geo::util;
 
@@ -52,25 +58,50 @@ extern "C" {
 
 namespace {
 
-	// Used in rem.
-	// https://stackoverflow.com/questions/2256945/removing-a-non-empty-directory-programmatically-in-c-or-c
-	int rmFiles(const char *pathname, const struct stat*, int, struct FTW*) {
-		if(remove(pathname) < 0) {
-			perror("ERROR: remove");
-			return -1;
-		}
-		return 0;
+	const std::string defaultChars = "abcdefghijklmnaoqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890";
+
+	//https://codereview.stackexchange.com/a/118957
+	std::string randomString(size_t len = 15) {
+		std::mt19937_64 gen { std::random_device()() };
+	    std::uniform_int_distribution<size_t> dist { 0, defaultChars.length()-1 };
+	    std::string ret;
+	    std::generate_n(std::back_inserter(ret), len, [&] {
+	    	return defaultChars[dist(gen)];
+	    });
+	    return ret;
 	}
 
-	void formattmp(std::string& path) {
-		char tname[PATH_MAX];
-		std::strncpy(tname, path.c_str(), path.size());
-		tname[path.size()] = '\0';
-		// Attempto open, fail or return the path.
-		if(mkstemp(tname) > 0)
-			path = tname;
-		if(path.empty())
-			g_runerr("Failed to make temporary file name " << path << ": " << strerror(errno));
+	//https://stackoverflow.com/a/54956690/1050386
+	bool rmdir(const std::string& path) {
+		struct dirent *de;
+		char fname[300];
+		DIR *dr = opendir(path.c_str());
+		if(dr == NULL) {
+			g_warn("File or directory not found: " << path);
+			return false;
+		}
+		while((de = readdir(dr)) != NULL) {
+			int ret = -1;
+			struct stat statbuf;
+			//sprintf(fname,"%s/%s",path,de->d_name);
+			if(!strcmp(de->d_name, ".") || !strcmp(de->d_name, ".."))
+				continue;
+			if(!stat(fname, &statbuf)) {
+				if(S_ISDIR(statbuf.st_mode)) {
+					//printf("Is dir: %s\n",fname);
+					//printf("Err: %d\n",ret = unlinkat(dirfd(dr),fname,AT_REMOVEDIR));
+					if(ret != 0) {
+						rmdir(fname);
+						//printf("Err: %d\n",ret = unlinkat(dirfd(dr),fname,AT_REMOVEDIR));
+					}
+				} else {
+					//printf("Is file: %s\n",fname);
+					//printf("Err: %d\n",unlink(fname));
+				}
+			}
+		}
+		closedir(dr);
+		return true;
 	}
 
 } // anon
@@ -185,18 +216,11 @@ bool geo::util::isfile(const std::string& path) {
 bool geo::util::rem(const std::string& dir) {
 	if(isfile(dir)) {
 		return !::unlink(dir.c_str());
-	} else if (isdir(dir) && nftw(dir.c_str(), rmFiles,10, FTW_DEPTH|FTW_MOUNT|FTW_PHYS) < 0) {
-		perror("ERROR: ntfw");
+	} else if (isdir(dir) && !rmdir(dir)) {
 		return false;
 	}
 	return true;
 }
-
-#ifdef _WIN32
-	const char pathsep = '\\';
-#else
-	const char pathsep = '/';
-#endif
 
 std::string geo::util::parent(const std::string& path) {
 	std::string _p = path;
@@ -318,26 +342,30 @@ std::string geo::util::tmpdir(const std::string& prefix, const std::string& dir)
 		if(!makedir(tdir))
 			g_runerr("Failed to make target dir: " << tdir);
 	}
-	std::string path = join(tdir, prefix);
-	formattmp(path);
-	if(!makedir(path))
-		g_runerr("Failed to make directory: " << path);
-	return path;
+	int tries = 16;
+	while(--tries) {
+		std::string path = join(tdir, prefix + randomString());
+		if(makedir(path))
+			return path;
+	}
+	g_runerr("Failed to make temporary directory.");
 }
 
 std::string geo::util::tmpfile(const std::string& prefix, const std::string& dir) {
-	// Make a temp file in the system dir.
-	static std::string tpl = "_XXXXXX";
 	// Assemble the target directory, check and attempt to create if needed.
 	std::string tdir = join(gettmpdir(), dir);
 	if(!isdir(tdir)) {
 		if(!makedir(tdir))
 			g_runerr("Failed to make target directory: " << tdir);
 	}
-	// Assemble the file path.
-	std::string path = join(tdir, prefix + tpl);
-	formattmp(path);
-	return path;
+	int tries = 16;
+	while(--tries) {
+		// Assemble the file path.
+		std::string path = join(tdir, prefix + randomString());
+		if(!isfile(path))
+			return path;
+	}
+	g_runerr("Failed to create non-extant filename.");
 }
 
 bool geo::util::makedir(const std::string& filename) {
@@ -448,9 +476,15 @@ double geo::util::random(double min, double max) {
 }
 
 uint64_t geo::util::microtime() {
+#ifdef _WIN32
+	FILETIME ft;
+	GetSystemTimePreciseAsFileTime(&ft);
+	return (ft.dwHighDateTime << 32) | ft.dwLowDateTime;
+#else
 	struct timeval t;
 	gettimeofday(&t, NULL);
 	return (uint64_t) t.tv_sec * 1000000 + t.tv_usec;
+#endif
 }
 
 Bounds::Bounds() :
