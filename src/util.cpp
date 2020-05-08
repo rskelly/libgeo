@@ -6,8 +6,8 @@
  */
 
 #include <fcntl.h>
-#include <unistd.h>
-#include <dirent.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 #include <cstdlib>
 #include <cstdio>
@@ -16,6 +16,7 @@
 #include <regex>
 #include <fstream>
 #include <random>
+#include <filesystem>
 
 #include <gdal_priv.h>
 #include <ogr_spatialref.h>
@@ -25,6 +26,7 @@
 #ifdef _WIN32
 #include <Minwinbase.h>
 #include <Sysinfoapi.h>
+#include <Processthreadsapi.h>
 constexpr char pathsep = '\\';
 #else
 #include <sys/time.h>
@@ -69,39 +71,6 @@ namespace {
 	    	return defaultChars[dist(gen)];
 	    });
 	    return ret;
-	}
-
-	//https://stackoverflow.com/a/54956690/1050386
-	bool rmdir(const std::string& path) {
-		struct dirent *de;
-		char fname[300];
-		DIR *dr = opendir(path.c_str());
-		if(dr == NULL) {
-			g_warn("File or directory not found: " << path);
-			return false;
-		}
-		while((de = readdir(dr)) != NULL) {
-			int ret = -1;
-			struct stat statbuf;
-			//sprintf(fname,"%s/%s",path,de->d_name);
-			if(!strcmp(de->d_name, ".") || !strcmp(de->d_name, ".."))
-				continue;
-			if(!stat(fname, &statbuf)) {
-				if(S_ISDIR(statbuf.st_mode)) {
-					//printf("Is dir: %s\n",fname);
-					//printf("Err: %d\n",ret = unlinkat(dirfd(dr),fname,AT_REMOVEDIR));
-					if(ret != 0) {
-						rmdir(fname);
-						//printf("Err: %d\n",ret = unlinkat(dirfd(dr),fname,AT_REMOVEDIR));
-					}
-				} else {
-					//printf("Is file: %s\n",fname);
-					//printf("Err: %d\n",unlink(fname));
-				}
-			}
-		}
-		closedir(dr);
-		return true;
 	}
 
 } // anon
@@ -214,11 +183,7 @@ bool geo::util::isfile(const std::string& path) {
 }
 
 bool geo::util::rem(const std::string& dir) {
-	if(isfile(dir)) {
-		return !::unlink(dir.c_str());
-	} else if (isdir(dir) && !rmdir(dir)) {
-		return false;
-	}
+	std::filesystem::remove_all(dir);
 	return true;
 }
 
@@ -302,34 +267,13 @@ std::string geo::util::extension(const std::string& path) {
 }
 
 std::string geo::util::gettmpdir() {
-	std::string dir;
-	char* tmp = ::getenv("TMP");
-	if(!tmp)
-		tmp = ::getenv("TMPDIR");
-	if(!tmp) {
-#ifdef _WIN32
-#include <windows.h>
-#include <tchar.h>
-		TCHAR buf[MAX_PATH];
-		DWORD ret = GetTempPath(MAX_PATH, buf);
-		if (ret > 0 && ret <= MAX_PATH)
-			dir = std::string(buf, ret);
-#else
-		dir = P_tmpdir;
-#endif
-	} else {
-		dir = tmp;
-	}
-	if(dir.empty()) {
-		g_warn("Temp directory not found. Storing in current directory.");
-		dir = ".";
-	}
-	return dir;
+	std::filesystem::path p = std::filesystem::temp_directory_path();
+	return p.string();
 }
 
 int geo::util::pid() {
 #ifdef _WIN32
-	return _getpid();
+	return GetCurrentProcessId();
 #else
 	return getpid();
 #endif
@@ -368,23 +312,8 @@ std::string geo::util::tmpfile(const std::string& prefix, const std::string& dir
 	g_runerr("Failed to create non-extant filename.");
 }
 
-bool geo::util::makedir(const std::string& filename) {
-	std::stringstream path(filename);
-	std::stringstream inter;
-	std::string part, current;
-	if(filename[0] == '/')
-		inter << '/';
-	while(std::getline(path, part, '/')) {
-		inter << part;
-		current = inter.str();
-		if(!isdir(current) && !isfile(current)) {
-			if(mkdir(current.c_str(), 0755))
-				return false;
-		}
-		if(!part.empty())
-			inter << '/';
-	}
-	return true;
+bool geo::util::makedir(const std::string& path) {
+	return std::filesystem::create_directories(path);
 }
 
 std::string geo::util::sanitize(const std::string& str) {
@@ -429,7 +358,7 @@ std::string geo::util::projectionFromSRID(int srid) {
 TmpFile::TmpFile(size_t size) :
 	fd(0), size(0) {
 	filename = geo::util::tmpfile("geo_util");
-	fd = ::open(filename.c_str(), O_CREAT|O_LARGEFILE|O_RDWR, 0777);
+	fd = ::open(filename.c_str(), O_CREAT|O_RDWR, 0777);
 	if(fd <= 0)
 		g_runerr("Failed to open temp file: " << strerror(errno));
 	resize(size);
