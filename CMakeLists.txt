@@ -24,10 +24,10 @@ if (${APPLE})
 elseif(${WIN32})
 	set (DEV_DIR "C:\\dev")
 	set (GIT_DIR "${DEV_DIR}\\git")
-	set (GIS_DIR "${DEV_DIR}\\gisinternals")
-	set (GEOS_LIBRARYDIR "${GIS_DIR}\\lib;${GIS_DIR}\\bin") #set (GEOS_LIBRARYDIR "${DEV_DIR}\\geos\\lib;${DEV_DIR}\\geos\\bin")
-	set (GEOS_INCLUDEDIR "${GIS_DIR}\\include") #set (GEOS_INCLUDEDIR "${DEV_DIR}\\geos\\include")
-	set (EIGEN3_INCLUDE_DIR "${DEV_DIR}\\eigen3")
+	set (GIS_DIR "${DEV_DIR}\\OSGeo4W64")
+	set (GEOS_LIBRARYDIR "${GIS_DIR}\\lib;${GIS_DIR}\\bin")
+	set (GEOS_INCLUDEDIR "${GIS_DIR}\\include")
+	set (EIGEN3_INCLUDE_DIR "${GIS_DIR}\\include\\eigen3")
 	set (GDAL_INCLUDE_DIR "${GIS_DIR}\\include")
 	set (GDAL_LIBRARYDIR "${GIS_DIR}\\lib;${GIS_DIR}\\bin")
 	set (GIS_INCLUDE_DIR "${GIS_DIR}\\include")
@@ -40,29 +40,35 @@ elseif(${WIN32})
 else()
 	set (CMAKE_CXX_COMPILER_LAUNCHER ccache)
 	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wextra -Wno-unknown-pragmas -fopenmp")
+	set (FS_LIB stdc++fs) # For filesystem features in c++17.
+	find_package (Eigen3 REQUIRED)
 endif()
 
 set (THREADS_PREFER_PTHREAD_FLAG ON)
 
 find_package (Threads REQUIRED)
 find_package (GDAL 2 REQUIRED)
-find_package (CGAL REQUIRED)
-find_package (Eigen3 REQUIRED)
 
-if(${WITH_PDAL})
+if (${WITH_CGAL})
+	find_package (CGAL REQUIRED)
+endif()
+
+if (${WITH_PDAL})
 	find_package (PDAL REQUIRED)
 endif()
 
-if(${WITH_OPENSSL})
+if (${WITH_OPENSSL})
 	find_package (OpenSSL REQUIRED)
 endif()
 
-find_library (LIBLAS_LIBRARY las)
 find_library (JSONCPP_LIBRARY jsoncpp)
-find_library (CRYPTO_LIBRARY crypto libeay32 PATHS ${GIS_LIBRARYDIR})
+#find_library (CRYPTO_LIBRARY crypto libeay32 PATHS ${GIS_LIBRARYDIR})
 find_library (GEOS_LIBRARY geos_c PATHS ${GEOS_LIBRARYDIR})
 find_library (PROJ_LIBRARY proj)
 
+if (${WITH_LIBLAS})
+	find_library (LIBLAS_LIBRARY las)
+endif()
 
 # Configure directories###################################################################################
 
@@ -81,6 +87,7 @@ link_directories(./build/lib ./build/bin
 	${GDAL_LIBRARYDIR} 
 	${GIS_LIBRARYDIR} 
 	${PDAL_LIBRARY_DIRS}
+	${GEOS_INCLUDEDIR}
 )
 
 # Build support libraries ################################################################################
@@ -89,7 +96,7 @@ if (${WITH_FITPACK})
 	enable_language (Fortran)
 	file (GLOB FSRC src/fitpack/*.f)
 else ()
-	file (GLOB FSRC src/fitpack/fitpack_dummy.c)
+	file (GLOB FSRC src/geo.cpp src/fitpack/fitpack.cpp)
 endif ()
 add_library (fitpack_mod SHARED ${FSRC})
 target_compile_features(fitpack_mod PUBLIC cxx_std_17)
@@ -99,7 +106,7 @@ add_library (geoutilobj OBJECT ${geoutilsrc})
 target_compile_features(geoutilobj PUBLIC cxx_std_17)
 set_target_properties (geoutilobj PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_library(geoutil SHARED $<TARGET_OBJECTS:geoutilobj>)
-target_link_libraries (geoutil stdc++fs fitpack_mod ${GDAL_LIBRARY} ${CRYPTO_LIBRARY} ${SQLITE_LIBRARY} ${SPATIALITE_LIBRARY})
+target_link_libraries (geoutil ${FS_LIB} fitpack_mod ${GDAL_LIBRARY} ${CRYPTO_LIBRARY} ${SQLITE_LIBRARY} ${SPATIALITE_LIBRARY})
 
 set (geodbsrc src/geo.cpp src/db.cpp)
 add_library (geodbobj OBJECT ${geodbsrc})
@@ -127,13 +134,16 @@ if(${WITH_ANN})
 	target_compile_definitions (geoannobj PRIVATE DLL_EXPORTS=1)
 	add_library (geoann SHARED $<TARGET_OBJECTS:geoannobj>)
 	target_link_libraries (geoann geoutil)
-	set (${ANN_LIB} geoann)
+	set (ANN_LIB geoann)
 endif()
 
-file(GLOB PC_COMPUTERS src/pc/computers/*.cpp)
-add_library (geopc SHARED src/geo.cpp src/pointcloud.cpp src/pc/normalizer.cpp src/pc/rasterizer.cpp src/pc/filter.cpp ${PC_COMPUTERS})
-target_compile_features(geopc PUBLIC cxx_std_17)
-target_link_libraries (geopc geoutil geogrid ${ANN_LIB} ${LIBLAS_LIBRARY} CGAL CGAL_Core gmp)
+if (${WITH_PC})
+	file(GLOB PC_COMPUTERS src/pc/computers/*.cpp)
+	add_library (geopc SHARED src/geo.cpp src/pointcloud.cpp src/pc/normalizer.cpp src/pc/rasterizer.cpp src/pc/filter.cpp ${PC_COMPUTERS})
+	target_compile_features(geopc PUBLIC cxx_std_17)
+	target_link_libraries (geopc geoutil geogrid ${ANN_LIB} ${LIBLAS_LIBRARY} CGAL CGAL_Core gmp)
+	set (PC_LIB geopc)
+endif()
 
 # Applications ##################################################################################################
 
@@ -177,7 +187,7 @@ if(${BUILD_APPS})
 	
 endif()
 
-install(TARGETS ${ANN_LIB} geopc geogrid geoutil geodb fitpack_mod RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
+install(TARGETS ${ANN_LIB} ${PC_LIB} geogrid geoutil geodb fitpack_mod RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
 
 if(${BUILD_TESTS})
 

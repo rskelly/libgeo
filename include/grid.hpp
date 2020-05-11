@@ -8,7 +8,15 @@
 #ifndef INCLUDE_GRID_HPP_
 #define INCLUDE_GRID_HPP_
 
+#include "geo.hpp"
+
+#ifdef _WIN32
+#include <Windows.h>
+#include <stdio.h>
+#include <tchar.h>
+#else
 #include <sys/mman.h>
+#endif
 
 #include <set>
 #include <unordered_map>
@@ -34,7 +42,6 @@
 #include <ogr_feature.h>
 #include <ogrsf_frmts.h>
 
-#include "geo.hpp"
 #include "util.hpp"
 
 // Debug. Forces grid to use file-backed mapping regardless of file size.
@@ -61,7 +68,7 @@ namespace grid {
 		int rows;
 		double resX;
 		double resY;
-		Bounds bounds;
+		Bounds<double> bounds;
 
 		// The starting corner coordinates.
 		double startX;
@@ -93,7 +100,7 @@ namespace grid {
 	 * \param[in] str The interleave name.
 	 * \return The Interleave type.
 	 */
-	Interleave interleaveFromString(const std::string& str);
+	G_DLL_EXPORT Interleave interleaveFromString(const std::string& str);
 
 namespace detail {
 
@@ -103,7 +110,7 @@ namespace detail {
 	 * \param type The DataType.
 	 * \return The number of bytes required to represent the type.
 	 */
-	int getTypeSize(DataType type);
+	G_DLL_EXPORT int getTypeSize(DataType type);
 
 	/**
 	 * \brief Return the GDAL datatype corresponding to the DataType.
@@ -111,7 +118,7 @@ namespace detail {
 	 * \param type A DataType.
 	 * \return The GDAL datatype corresponding to the given DataType.
 	 */
-	GDALDataType dataType2GDT(DataType type);
+	G_DLL_EXPORT GDALDataType dataType2GDT(DataType type);
 
 	/**
 	 * \brief Return the DataType corresponding to the given GDAL datatype.
@@ -119,7 +126,7 @@ namespace detail {
 	 * \param type A GDAL datatype.
 	 * \return A DataType corresponding to the GDAL datatype.
 	 */
-	DataType gdt2DataType(GDALDataType type);
+	G_DLL_EXPORT DataType gdt2DataType(GDALDataType type);
 
 	/**
 	 * \brief Make a dataset to contain the polygons.
@@ -133,7 +140,7 @@ namespace detail {
 	 * \param ds The GDAL dataset.
 	 * \param layer The OGR layer.
 	 */
-	void polyMakeDataset(const std::string& filename, const std::string& driver, const std::string& layerName,
+	G_DLL_EXPORT void polyMakeDataset(const std::string& filename, const std::string& driver, const std::string& layerName,
 				const std::string& idField,	OGRSpatialReference* sr, OGRwkbGeometryType gType,
 				GDALDataset** ds, OGRLayer** layer);
 
@@ -148,7 +155,7 @@ namespace detail {
 	 * \param eps A grid snap distance.
 	 * \return A new geometry.
 	 */
-	GEOSGeometry* polyMakeGeom(GEOSContextHandle_t gctx, double x0, double y0, double x1, double y1, double eps);
+	G_DLL_EXPORT GEOSGeometry* polyMakeGeom(GEOSContextHandle_t gctx, double x0, double y0, double x1, double y1, double eps);
 
 	/**
 	 * \brief Write to the file from the map of geometry lists.
@@ -166,12 +173,12 @@ namespace detail {
 	 * \param poly_omtx Mutex for the output file.
 	 * \param geom_cv To notify when a geom is available to write.
 	 */
-	void polyWriteToFile(std::list<std::pair<int, GEOSGeometry*>>* geoms,
+	G_DLL_EXPORT void polyWriteToFile(std::list<std::pair<int, GEOSGeometry*>>* geoms,
 			OGRLayer* layer, const std::string* idField, std::atomic<int>* fid,
 			GEOSContextHandle_t gctx,
 			bool* running, Monitor* monitor, std::mutex* gmtx);
 
-	void printGEOSGeom(GEOSGeometry* geom, GEOSContextHandle_t gctx);
+	G_DLL_EXPORT void printGEOSGeom(GEOSGeometry* geom, GEOSContextHandle_t gctx);
 
 	/**
 	 * Waits for finalized collections of polygon parts or unioning.
@@ -189,7 +196,7 @@ namespace detail {
 	 * \param geom_cv For notifying the geometry write queue.
 	 */
 	template <class C>
-	void polyMerge(C* callback, PolygonContext* pc) {
+	G_DLL_EXPORT void polyMerge(C* callback, PolygonContext* pc) {
 
 		std::vector<GEOSGeometry*> polys;
 		GEOSGeometry* geom = nullptr;
@@ -305,7 +312,7 @@ namespace detail {
 	 * \param dstCols The number of columns in the destination.
 	 * \param dstRows The number of rows in the destination.
 	 */
-	bool fixCoords(int& srcCol, int& srcRow, int& dstCol, int& dstRow,
+	G_DLL_EXPORT bool fixCoords(int& srcCol, int& srcRow, int& dstCol, int& dstRow,
 			int& cols, int& rows, int srcCols, int srcRows, int dstCols, int dstRows);
 
 	/**
@@ -323,7 +330,7 @@ namespace detail {
 	 * \param gcols
 	 * \param grows
 	 */
-	void fixWriteBounds(int& cols, int& rows, int& srcCol, int& srcRow,
+	G_DLL_EXPORT void fixWriteBounds(int& cols, int& rows, int& srcCol, int& srcRow,
 			int& dstCol, int& dstRow, int rcols, int rrows, int gcols, int grows);
 
 	/**
@@ -331,7 +338,7 @@ namespace detail {
 	 *
 	 * \return The key for the minimum value in the given map.
 	 */
-	size_t minValue(std::unordered_map<size_t, double>& m);
+	G_DLL_EXPORT size_t minValue(std::unordered_map<size_t, double>& m);
 
 	/**
 	 * \brief Writes an ordered path to the iterator from the map of cells.
@@ -341,7 +348,7 @@ namespace detail {
 	 * \param inserter The insert iterator.
 	 */
 	template <class V>
-	void writeAStarPath(size_t start, std::unordered_map<size_t, size_t>& parents, V inserter) {
+	G_DLL_EXPORT void writeAStarPath(size_t start, std::unordered_map<size_t, size_t>& parents, V inserter) {
 		*inserter = start;
 		++inserter;
 		while(parents.find(start) != parents.end()) {
@@ -354,7 +361,7 @@ namespace detail {
 	/**
 	 * \brief Status callback for GDAL RasterIO.
 	 */
-	int gdalProgress(double dfComplete, const char *pszMessage, void *pProgressArg);
+	G_DLL_EXPORT int gdalProgress(double dfComplete, const char *pszMessage, void *pProgressArg);
 
 } // detail
 
@@ -479,12 +486,12 @@ public:
 	 *
 	 * \return The geographic bounds of the raster.
 	 */
-	Bounds bounds() const {
+	Bounds<double> bounds() const {
 		double x0 = m_trans[0];
 		double y0 = m_trans[3];
 		double x1 = x0 + m_trans[1] * m_cols;
 		double y1 = y0 + m_trans[5] * m_rows;
-		return Bounds(g_min(x0, x1), g_min(y0, y1), g_max(x0, x1), g_max(y0, y1));
+		return Bounds(geo::min(x0, x1), geo::min(y0, y1), geo::max(x0, x1), geo::max(y0, y1));
 	}
 
 	/**
@@ -492,11 +499,12 @@ public:
 	 *
 	 * \param bounds The geographic bounds of the raster.
 	 */
-	void setBounds(const Bounds& bounds) {
-		m_trans[0] = m_trans[1] > 0 ? bounds.minx() : bounds.maxx();
-		m_trans[3] = m_trans[5] > 0 ? bounds.miny() : bounds.maxy();
-		m_cols = (int) std::ceil(bounds.width() / std::abs(m_trans[1]));
-		m_rows = (int) std::ceil(bounds.height() / std::abs(m_trans[5]));
+	template <class T>
+	void setBounds(const Bounds<T>& bounds) {
+		m_trans[0] = m_trans[1] > 0 ? (double) bounds.minx() : (double) bounds.maxx();
+		m_trans[3] = m_trans[5] > 0 ? (double) bounds.miny() : (double) bounds.maxy();
+		m_cols = (int) std::ceil((double) bounds.width() / std::abs(m_trans[1]));
+		m_rows = (int) std::ceil((double) bounds.height() / std::abs(m_trans[5]));
 	}
 
 	/**
@@ -2865,6 +2873,89 @@ public:
 
 };
 
+template <class T>
+class MappedFile {
+private:
+	T* m_data;
+	size_t m_size;
+	std::string m_filename;
+#ifdef _WIN32
+	HANDLE m_mapFile;	// For windows file mapping.
+	HANDLE m_file;
+#else
+	std::unique_ptr<TmpFile> m_tmp;
+#endif
+
+public:
+	MappedFile(size_t size, const std::string& filename = "") :
+		m_data(nullptr),
+		m_size(0),
+		m_filename(filename) 
+#ifdef _WIN32
+		, m_mapFile(nullptr),
+		m_file(nullptr)
+#endif 
+	{
+		resize(size);
+	}
+
+	T* data() {
+		return m_data;
+	}
+
+	void resize(size_t size) {
+		if (size == m_size)
+			return;
+		if (m_filename.empty())
+			m_filename = geo::util::tmpfile("geo");
+#ifdef _WIN32
+		if (m_file) {
+			CloseHandle(m_file);
+			m_file = nullptr;
+		}
+		if (m_mapFile) {
+			CloseHandle(m_mapFile);
+			m_mapFile = nullptr;
+		}
+		m_file = CreateFile(m_filename.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+		m_mapFile = CreateFileMapping(
+			INVALID_HANDLE_VALUE,    // use paging file
+			NULL,                    // default security
+			PAGE_READWRITE,          // read/write access
+			0,                       // maximum object size (high-order DWORD)
+			m_size,                  // maximum object size (low-order DWORD)
+			"_mapped");              // name of mapping object
+
+		if (m_mapFile == NULL)
+			g_runerr("Could not create file mapping object: " << GetLastError());
+
+		m_data = (T*)MapViewOfFile(m_mapFile, FILE_MAP_ALL_ACCESS, 0, 0, m_size);
+#else
+		if (m_data)
+			munmap(m_data, m_size);
+		if (!m_tmp.get())
+			m_tmp.reset(new TmpFile(m_filename));
+		m_tmp.resize(size);
+		m_data = (T*) mmap(0, m_size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, 0, 0);
+#endif
+		if (!m_data) {
+			g_runerr("Failed to created mapped segment.");
+		}
+
+	}
+
+	~MappedFile() {
+#ifdef _WIN32
+		UnmapViewOfFile(m_data);
+		CloseHandle(m_mapFile);
+#else
+		munmap(m_data, m_size);
+#endif
+
+	}
+
+};
+
 /**
  * \brief A band of a raster. Similar to Grid.
  */
@@ -2874,7 +2965,7 @@ private:
 	GDALDataset *m_ds;          				///<! GDAL data set pointer.
 	GDALDataType m_type;        				///<! GDALDataType -- limits the possible template types.
 	GridProps m_props;							///<! Properties of the raster.
-	std::unique_ptr<TmpFile> m_mapFile;			///<! Temporary file used for file-backed mapped memory.
+	std::unique_ptr<MappedFile<T>> m_mapFile;   ///<! Mapped memory
 	bool m_mapped;								///<! If true, file-backed mapped memory is in use.
 	size_t m_size;								///<! The size of the total raster in bytes.
 	T* m_data;									///<! Pointer to the raster data.
@@ -2889,8 +2980,8 @@ private:
 			destroy();
 		m_mapped = false;
 		m_size = (size_t) props().cols() * (size_t) props().rows() * (size_t) sizeof(T);
-		m_mapFile.reset(new TmpFile(m_size));
-		m_data = (T*) mmap(0, m_size, PROT_READ|PROT_WRITE, MAP_SHARED, m_mapFile->fd, 0);
+		m_mapFile.reset(new MappedFile<T>(m_size));
+		m_data = m_mapFile->data();
 		if(!m_data) {
 			g_warn("Failed to map " << m_size << " bytes for grid.");
 			return false;
@@ -3509,7 +3600,7 @@ public:
 		// Fill the buffer with nodata for empty rows/ends.
 		std::fill(buf.begin(), buf.end(), nodata);
 
-		int endr = std::min((size_t) row + h, rows);
+		int endr = geo::min((size_t) row + h, rows);
 		for(int rr = 0; r < endr; ++rr, ++r) {
 			std::memcpy(buf.data() + cb, m_data + (size_t) r * (size_t) cols + (size_t) c, w * sizeof(T)); // Casting to prevent overflow on large rasters.
 			std::memcpy(tile + (rr + rb) * tw, buf.data(), w * sizeof(T));
@@ -4354,7 +4445,7 @@ public:
 				m_ds = nullptr;
 			}
 			if(m_mapped) {
-				munmap(m_data, m_size);
+				m_mapFile.release();
 				m_mapped = false;
 				m_data = nullptr;
 			} else if(m_data) {
@@ -4391,9 +4482,8 @@ public:
 			int cols = props().cols();
 			int rows = props().rows();
 
-			T* mem = (T*) mmap(0, m_size, PROT_READ|PROT_WRITE, MAP_ANONYMOUS|MAP_SHARED, 0, 0);
-			if(!mem)
-				g_runerr("Failed to reserve space for remap.")
+			MappedFile<T> mf(m_size);
+			T* mem = (T*) mf.data();
 
 			GridProps nprops(props());
 			nprops.setInterleave(interleave);
@@ -4406,6 +4496,7 @@ public:
 			std::memcpy(m_data, mem, m_size);
 
 			m_props.setInterleave(interleave);
+
 		}
 	}
 

@@ -8,7 +8,17 @@
 #ifndef INCLUDE_DS_MQTREE_HPP_
 #define INCLUDE_DS_MQTREE_HPP_
 
+#define NOMINMAX	// To prevent windows redefining these.
+
+#ifdef _WIN32
+#include <Windows.h>
+#include <io.h>
+typedef int mode_t;
+
+#else
 #include <unistd.h>
+#endif
+
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -20,6 +30,7 @@
 #include <unordered_map>
 #include <list>
 #include <atomic>
+#include <algorithm>
 
 #include "geo.hpp"
 #include "util.hpp"
@@ -29,28 +40,6 @@
 using namespace geo::util;
 
 namespace {
-
-	/**
-	 * \brief Recursively create the directory with the given mode.
-	 *
-	 * \param file_path The path to the directory.
-	 * \param mode The folder permissions.
-	 * \return 0 on success.
-	 */
-	int mkpath(const char* file_path, mode_t mode) {
-		//assert(file_path && *file_path);
-		for (char* p = strchr((char*) file_path + 1, '/'); p; p = strchr(p + 1, '/')) {
-			*p = '\0';
-			if (mkdir(file_path, mode) == -1) {
-				if (errno != EEXIST) {
-					*p = '/';
-					return -1;
-				}
-			}
-			*p = '/';
-		}
-		return 0;
-	}
 
 	/**
 	 * \brief Manages a buffer of allocated data, resizing if necessary.
@@ -172,7 +161,7 @@ public:
 			int handle;
 			size_t size = m_cache.size();
 			m_buf.init(bufSize());
-			if(!mkpath(m_path.c_str(), 0777)) {
+			if(makedir(m_path)) {
 				if((handle = open(m_path.c_str(), O_RDWR|O_CREAT|O_TRUNC, 0777)) > 0) {
 					std::memcpy(m_buf.data, &size, sizeof(size_t));
 					std::memcpy(static_cast<char*>(m_buf.data) + sizeof(size_t), m_cache.data(), size * sizeof(T));
@@ -684,12 +673,19 @@ public:
 		m_rootPath = util::tmpdir(dirname.c_str());
 
 		// Get the side length of the table region.
+#ifdef _WIN32 
+		double side = max(maxx - minx, maxy - miny); // TODO: Windows is stupid.
+#else
 		double side = std::max(maxx - minx, maxy - miny);
-
+#endif
 		// Get the block size for IO.
+#ifdef _WIN32
+		m_blkSize = 4096; // TODO: Hack. Find out how windows does this.
+#else
 		struct stat st;
 		stat(m_rootPath.c_str(), &st);
 		m_blkSize = st.st_blksize;
+#endif
 
 		// The max count takes the block size into consideration.
 		m_maxCount = (lrunode<T>::bufSize() - sizeof(size_t)) / sizeof(T);

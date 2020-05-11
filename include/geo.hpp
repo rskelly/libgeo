@@ -1,6 +1,8 @@
 #ifndef __GEO_H__
 #define __GEO_H__
 
+#define NOMINMAX
+
 #include <limits>
 #include <exception>
 #include <iostream>
@@ -22,34 +24,151 @@
 #define G_DLL_EXPORT
 #endif
 
-#define G_PI 3.14159265358979323846
-#define G_E 2.71828
+constexpr double G_PI = 3.14159265358979323846;
+constexpr double G_E = 2.71828;
 
-#define G_DBL_MAX_POS (std::numeric_limits<double>::max())
-#define G_DBL_MAX_NEG (std::numeric_limits<double>::lowest())
-#define G_DBL_MIN_POS (std::numeric_limits<double>::min())
+constexpr int G_LOG_TRACE = 5;
+constexpr int G_LOG_DEBUG = 4;
+constexpr int G_LOG_WARN = 3;
+constexpr int G_LOG_ERROR = 2;
+constexpr int G_LOG_NONE = 0;
 
-#define G_FLT_MAX_POS (std::numeric_limits<float>::max())
-#define G_FLT_MAX_NEG (std::numeric_limits<float>::lowest())
+namespace geo {
+	
+	G_DLL_EXPORT int loglevel();
 
-#define g_min(a, b) ((a) > (b) ? (b) : (a))
-#define g_max(a, b) ((a) < (b) ? (b) : (a))
-#define g_sq(a) ((a) * (a))
-#define g_abs(x) ((x) < 0 ? -(x) : (x))
-#define g_deg(x) ((x) * 180.0 / G_PI)
-#define g_rad(x) ((x) * G_PI / 180.0)
+	G_DLL_EXPORT void loglevel(int x);
 
-G_DLL_EXPORT extern int g__loglevel;
+	template <class T>
+	T maxvalue() {
+		return std::numeric_limits<T>::max();
+	}
 
-#define G_LOG_TRACE 5
-#define G_LOG_DEBUG 4
-#define G_LOG_WARN 3
-#define G_LOG_ERROR 2
-#define G_LOG_NONE 0
+	template <class T>
+	T smallvalue() {
+		return std::numeric_limits<T>::lowest();
+	}
+	
+	template <class T>
+	T minvalue() {
+		return std::numeric_limits<T>::min();
+	}
 
-#define g_loglevel(x) {g__loglevel = x;}
+	template <class T>
+	inline T min(T a, T b) {
+		return a > b ? b : a;
+	}
 
-#define g_log(x, y) { if(g__loglevel <= y) std::cerr << std::setprecision(12) << x << std::endl; }
+	template <class T>
+	inline T max(T a, T b) {
+		return a < b ? b : a;
+	}
+
+	template <class T>
+	inline T sq(T a) {
+		return a * a;
+	}
+
+	template <class T>
+	inline T abs(T x) {
+		return x < 0 ? -x : x;
+	}
+
+	template <class T>
+	T deg(T x) {
+		return x * 180.0 / G_PI;
+	}
+
+	template <class T>
+	T rad(T x) {
+		return x * G_PI / 180.0;
+	}
+
+
+	/**
+	 * Monitors and controls the operation of a running program.
+	 * Provides access to status-tracking functions, and cancelation flags.
+	 */
+	class Monitor {
+	private:
+		bool m_cancel;
+		float m_start;
+		float m_end;
+		Monitor* m_monitor;
+
+	public:
+
+		/**
+		 * \brief Initialize a Monitor whose progress range is 0-1 (0-100%).
+		 */
+		Monitor() :
+			m_cancel(false),
+			m_start(0), m_end(1),
+			m_monitor(nullptr) {
+		}
+
+		/**
+		 * \brief Initialize a Monitor whose progress range is {start} to {end}.
+		 *
+		 * The status is transformed by status = start + status * (end - start).
+		 *
+		 * \param monitor The Monitor to which status updates are passed.
+		 * \param start The starting status.
+		 * \param end The ending status.
+		 */
+		Monitor(Monitor* monitor, float start, float end) :
+			m_cancel(false),
+			m_start(start), m_end(end),
+			m_monitor(monitor) {
+		}
+
+		/**
+		 * \brief Return true if the cancel flag is set.
+		 */
+		virtual bool canceled() const {
+			if (m_monitor) {
+				return m_monitor->canceled();
+			}
+			else {
+				return m_cancel;
+			}
+		}
+
+		virtual void cancel() {
+			if (m_monitor) {
+				m_monitor->cancel();
+			}
+			else {
+				m_cancel = true;
+			}
+		}
+
+		virtual void status(float status, const std::string& message = "") {
+			std::cout << std::setprecision(1) << std::fixed << message << " " << (m_start + status * (m_end - m_start)) * 100.0f << "%\n";
+		}
+
+		virtual void error(const std::string& err) {
+			std::cerr << err << "\n";
+		}
+
+		virtual void exception(const std::exception* ex) {
+			error(ex == nullptr ? "Unknown exception" : ex->what());
+		}
+
+		virtual ~Monitor() {}
+	};
+
+	/**
+	 * \brief Return a default Monitor object if none is available elsewhere.
+	 *
+	 * \return A pointer to a global Monitor object.
+	 */
+	Monitor* getDefaultMonitor();
+
+} // geo
+
+
+#define g_log(x, y) { if(geo::loglevel() <= y) std::cerr << std::setprecision(12) << x << std::endl; }
 
 #define g_trace(x) g_log("TRACE:   " << x, G_LOG_TRACE)
 #define g_debug(x) g_log("DEBUG:   " << x, G_LOG_DEBUG)
@@ -59,89 +178,6 @@ G_DLL_EXPORT extern int g__loglevel;
 #define g_argerr(x) {std::stringstream _ss; _ss << x; throw std::invalid_argument(_ss.str());}
 #define g_implerr(x) {std::stringstream _ss; _ss << x; throw std::runtime_error(_ss.str());}
 #define g_runerr(x) {std::stringstream _ss; _ss << x; throw std::runtime_error(_ss.str());}
-
-
-namespace geo {
-
-/**
- * Monitors and controls the operation of a running program.
- * Provides access to status-tracking functions, and cancelation flags.
- */
-class Monitor {
-private:
-	bool m_cancel;
-	float m_start;
-	float m_end;
-	Monitor* m_monitor;
-
-public:
-
-	/**
-	 * \brief Initialize a Monitor whose progress range is 0-1 (0-100%).
-	 */
-	Monitor() :
-		m_cancel(false),
-		m_start(0), m_end(1),
-		m_monitor(nullptr) {
-	}
-
-	/**
-	 * \brief Initialize a Monitor whose progress range is {start} to {end}.
-	 *
-	 * The status is transformed by status = start + status * (end - start).
-	 *
-	 * \param monitor The Monitor to which status updates are passed.
-	 * \param start The starting status.
-	 * \param end The ending status.
-	 */
-	Monitor(Monitor* monitor, float start, float end) :
-		m_cancel(false),
-		m_start(start), m_end(end),
-		m_monitor(monitor) {
-	}
-
-	/**
-	 * \brief Return true if the cancel flag is set.
-	 */
-	virtual bool canceled() const {
-		if(m_monitor) {
-			return m_monitor->canceled();
-		} else {
-			return m_cancel;
-		}
-	}
-
-	virtual void cancel() {
-		if(m_monitor) {
-			m_monitor->cancel();
-		} else {
-			m_cancel = true;
-		}
-	}
-
-	virtual void status(float status, const std::string& message = "") {
-		std::cout << std::setprecision(1) << std::fixed << message << " " << (m_start + status * (m_end - m_start)) * 100.0f << "%\n";
-	}
-
-	virtual void error(const std::string& err) {
-		std::cerr << err << "\n";
-	}
-
-	virtual void exception(const std::exception* ex) {
-		error(ex == nullptr ? "Unknown exception" : ex->what());
-	}
-
-	virtual ~Monitor() {}
-};
-
-/**
- * \brief Return a default Monitor object if none is available elsewhere.
- *
- * \return A pointer to a global Monitor object.
- */
-Monitor* getDefaultMonitor();
-
-} // geo
 
 
 #endif

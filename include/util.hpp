@@ -8,13 +8,13 @@
 #ifndef INCLUDE_UTIL_HPP_
 #define INCLUDE_UTIL_HPP_
 
+#include "geo.hpp"
+
 #include <array>
 #include <cstring>
 #include <chrono>
 
 #include <gdal_priv.h>
-
-#include "geo.hpp"
 
 namespace {
 
@@ -46,7 +46,7 @@ namespace util {
 /**
  * Input and output file types.
  */
-enum class FileType {
+G_DLL_EXPORT enum class FileType {
 	GTiff,
 	ENVI,
 	ROI,
@@ -62,7 +62,7 @@ enum class FileType {
 /**
  * The allowable types for a raster.
  */
-enum class DataType {
+G_DLL_EXPORT enum class DataType {
 	Float64 = 7,
 	Float32 = 6,
 	UInt32 = 5,
@@ -76,7 +76,7 @@ enum class DataType {
 /**
  * Interleave methods.
  */
-enum class Interleave {
+G_DLL_EXPORT enum class Interleave {
 	BIL,
 	BSQ,
 	BIP
@@ -85,16 +85,16 @@ enum class Interleave {
 /**
  * Normalization methods.
  */
-enum class NormMethod {
+G_DLL_EXPORT enum class NormMethod {
 	ConvexHull,
 	ConvexHullLongestSeg,
 	Line,
 	Unknown
 };
 
-constexpr std::array<FileType, 3> OUTPUT_TYPES = {FileType::GTiff, FileType::ENVI, FileType::CSV};			///<! Allowed output types for results.
+G_DLL_EXPORT constexpr std::array<FileType, 3> OUTPUT_TYPES = {FileType::GTiff, FileType::ENVI, FileType::CSV};			///<! Allowed output types for results.
 
-constexpr std::array<NormMethod, 3> NORM_METHODS = {NormMethod::ConvexHull, NormMethod::ConvexHullLongestSeg, NormMethod::Line};
+G_DLL_EXPORT constexpr std::array<NormMethod, 3> NORM_METHODS = {NormMethod::ConvexHull, NormMethod::ConvexHullLongestSeg, NormMethod::Line};
 
 /**
  * A class that when instantiated creates a temporary file
@@ -102,7 +102,7 @@ constexpr std::array<NormMethod, 3> NORM_METHODS = {NormMethod::ConvexHull, Norm
  * destructs, the file is deleted. Maintains the filename
  * and file descriptor.
  */
-class TmpFile {
+class G_DLL_EXPORT TmpFile {
 public:
 	std::string filename;	///<! The filename of the temporary file.
 	int fd;					///<! The file descriptor.
@@ -134,42 +134,42 @@ public:
 };
 
 
-FileType getFileType(const std::string& filename);
+G_DLL_EXPORT FileType getFileType(const std::string& filename);
 
-std::string fileTypeAsString(FileType type);
+G_DLL_EXPORT std::string fileTypeAsString(FileType type);
 
-FileType fileTypeFromString(const std::string& type);
+G_DLL_EXPORT FileType fileTypeFromString(const std::string& type);
 
-NormMethod normMethodFromString(const std::string& method);
+G_DLL_EXPORT NormMethod normMethodFromString(const std::string& method);
 
-std::string normMethodAsString(NormMethod method);
+G_DLL_EXPORT std::string normMethodAsString(NormMethod method);
 
-bool isnonzero(const double& v);
+G_DLL_EXPORT bool isnonzero(const double& v);
 
 /**
  * Return true if it's a dir and it exists.
  */
-bool isdir(const std::string& path);
+G_DLL_EXPORT bool isdir(const std::string& path);
 
 /**
  * Return true if it's a file and it exists.
  */
-bool isfile(const std::string& path);
+G_DLL_EXPORT bool isfile(const std::string& path);
 
 /**
  * Remove the directory or file.
  */
-bool rem(const std::string& dir);
+G_DLL_EXPORT bool rem(const std::string& dir);
 
 /**
  * Attempt to return the system temp dir. Falls back to ".".
  */
-std::string gettmpdir();
+G_DLL_EXPORT std::string gettmpdir();
 
 /**
  * Return the processid.
  */
-int pid();
+G_DLL_EXPORT int pid();
 
 /**
  * Create a temporary directory and return the path.
@@ -179,7 +179,7 @@ int pid();
  * The process ID is added to the prefix to create the dir name. Subsequent
  * calls from the same process with the same prefix return the same path.
  */
-std::string tmpdir(const std::string& prefix, const std::string& dir = "");
+G_DLL_EXPORT std::string tmpdir(const std::string& prefix, const std::string& dir = "");
 
 /**
  * Create a temporary file name. A random string is added to the end of the prefix.
@@ -187,7 +187,7 @@ std::string tmpdir(const std::string& prefix, const std::string& dir = "");
  * If dir is empty, creates a file in the system temp dir. Otherwise attempts to build the
  * directory if required and puts the file there.
  */
-std::string tmpfile(const std::string& prefix, const std::string& dir = "");
+G_DLL_EXPORT std::string tmpfile(const std::string& prefix, const std::string& dir = "");
 
 /**
  * \brief Renames or moves the file, across device boundaries if necessary.
@@ -199,17 +199,17 @@ std::string tmpfile(const std::string& prefix, const std::string& dir = "");
  * \param to The destination file.
  * \return True on success.
  */
-bool rename(const std::string& from, const std::string& to);
+G_DLL_EXPORT bool rename(const std::string& from, const std::string& to);
 
 /**
  * Return the parent directory of the path.
  */
-std::string parent(const std::string& path);
+G_DLL_EXPORT std::string parent(const std::string& path);
 
 /**
  * Recursively make the directory.
  */
-bool makedir(const std::string& filename);
+G_DLL_EXPORT bool makedir(const std::string& filename);
 
 /**
  * Join to paths together using the appropriate separator for the system.
@@ -218,7 +218,7 @@ bool makedir(const std::string& filename);
  * \param b The second path part.
  * \return The joined path.
  */
-std::string join(const std::string& a, const std::string& b);
+G_DLL_EXPORT std::string join(const std::string& a, const std::string& b);
 
 /**
  * Join the items represented by the iterator using the given delimited.
@@ -229,7 +229,7 @@ std::string join(const std::string& a, const std::string& b);
  * \return The joined string.
  */
 template <class Iter>
-std::string join(Iter begin, Iter end, const std::string& delim = ",") {
+G_DLL_EXPORT std::string join(Iter begin, Iter end, const std::string& delim = ",") {
 	std::stringstream ss;
 	ss << *begin;
 	++begin;
@@ -240,14 +240,14 @@ std::string join(Iter begin, Iter end, const std::string& delim = ",") {
 	return ss.str();
 }
 
-std::string basename(const std::string& path);
+G_DLL_EXPORT std::string basename(const std::string& path);
 
-std::string extension(const std::string& path);
+G_DLL_EXPORT std::string extension(const std::string& path);
 
 /**
  * Remove non-alphanumeric characters and replace with underscores.
  */
-std::string sanitize(const std::string& str);
+G_DLL_EXPORT std::string sanitize(const std::string& str);
 
 /**
  * Return the byte size of the given GDAL type.
@@ -255,7 +255,7 @@ std::string sanitize(const std::string& str);
  * \param The GDAL type.
  * \return The type size.
  */
-int gdalTypeSize(GDALDataType type);
+G_DLL_EXPORT int gdalTypeSize(GDALDataType type);
 
 /**
  * \brief Get the well-known text representation of the projection from the SRID.
@@ -263,7 +263,7 @@ int gdalTypeSize(GDALDataType type);
  * \param srid The SRID.
  * \return The projection string.
  */
-std::string projectionFromSRID(int srid);
+G_DLL_EXPORT std::string projectionFromSRID(int srid);
 
 
 /**
@@ -273,7 +273,7 @@ std::string projectionFromSRID(int srid);
  * \param[out] The output buffer.
  */
 template <class T>
-void inline convertBuffer(std::vector<char>& raw, std::vector<T>& buf) {
+G_DLL_EXPORT void inline convertBuffer(std::vector<char>& raw, std::vector<T>& buf) {
 	buf.reserve(raw.size() / sizeof(T));
 	std::memcpy(buf.data(), raw.data(), raw.size());
 }
@@ -286,7 +286,7 @@ void inline convertBuffer(std::vector<char>& raw, std::vector<T>& buf) {
  * \param delim The delimiter.
  */
 template <class T>
-void split(T iter, const std::string& str, const std::string& delim = ",") {
+G_DLL_EXPORT void split(T iter, const std::string& str, const std::string& delim = ",") {
     std::stringstream ss(str);
     std::string item;
     while (std::getline(ss, item, *(delim.c_str()))) {
@@ -300,7 +300,7 @@ void split(T iter, const std::string& str, const std::string& delim = ",") {
  *
  * \param str A string.
  */
-std::string lowercase(const std::string& str);
+G_DLL_EXPORT std::string lowercase(const std::string& str);
 
 /**
  * Convert the given raw char buffer to the typed output buffer
@@ -311,7 +311,7 @@ std::string lowercase(const std::string& str);
  * \param[out] buf The output buffer.
  */
 template <class T>
-void convertBuffer(GDALDataType type, std::vector<char>& rawBuf, std::vector<T>& buf) {
+G_DLL_EXPORT void convertBuffer(GDALDataType type, std::vector<char>& rawBuf, std::vector<T>& buf) {
 
 	switch(type) {
 	case GDT_Float32:
@@ -374,129 +374,352 @@ void convertBuffer(GDALDataType type, std::vector<char>& rawBuf, std::vector<T>&
  * \param y The y coordinatescaled to the full value of an unsigned int.
  * \return The 1-dimensional Morton or z-order coordinate.
  */
-uint64_t morton(uint32_t x, uint32_t y);
+G_DLL_EXPORT uint64_t morton(uint32_t x, uint32_t y);
 
-double random(double min, double max);
+G_DLL_EXPORT double random(double min, double max);
 
 /**
  * Return the clock time in microseconds.
  *
  * \return The clock time in microseconds.
  */
-uint64_t microtime();
+G_DLL_EXPORT uint64_t microtime();
 
+template <class T> 
 class G_DLL_EXPORT Bounds {
 private:
-    double m_minx, m_miny;
-    double m_maxx, m_maxy;
-    double m_minz, m_maxz;
+	T m_minx, m_miny;
+	T m_maxx, m_maxy;
+	T m_minz, m_maxz;
 public:
-    Bounds();
+	Bounds() : Bounds(maxvalue<T>(), maxvalue<T>(),
+		minvalue<T>(), minvalue<T>(),
+		maxvalue<T>(), minvalue<T>()) {}
 
-    Bounds(double minx, double miny, double maxx, double maxy);
+	Bounds(T minx, T miny, T maxx, T maxy) :
+		Bounds(minx, miny, maxx, maxy, maxvalue<T>(), minvalue<T>()) {}
 
-    Bounds(double minx, double miny, double maxx, double maxy, double minz, double maxz);
+	Bounds(T minx, T miny, T maxx, T maxy, T minz, T maxz) :
+		m_minx(minx), m_miny(miny), m_maxx(maxx), m_maxy(maxy), m_minz(minz), m_maxz(maxz) {}
 
-    void set(double minx, double miny, double maxx, double maxy, double minz = 0, double maxz = 0);
+	void set(T minx, T miny, T maxx, T maxy, T minz = 0, T maxz = 0) {
+		m_minx = geo::min(minx, maxx);
+		m_miny = geo::min(miny, maxy);
+		m_minz = geo::min(minz, maxz);
+		m_maxx = geo::max(minx, maxx);
+		m_maxy = geo::max(miny, maxy);
+		m_maxz = geo::max(minz, maxz);
+	}
 
-    void assign(const Bounds& bounds);
+	void assign(const Bounds<T>& bounds) {
+		set(bounds.minx(), bounds.miny(), bounds.maxx(), bounds.maxy(), bounds.minz(), bounds.maxz());
+	}
 
-    bool contains(double x, double y) const;
+	bool contains(T x, T y) const {
+		return x >= m_minx && x < m_maxx && y >= m_miny && y < m_maxy;
+	}
 
-    bool contains(double x, double y, double z) const;
+	bool contains(T x, T y, T z) const {
+		return contains(x, y) && z >= m_minz && z < m_maxz;
+	}
 
-    bool contains(const geo::util::Bounds &b, int dims = 2) const;
+	bool contains(const geo::util::Bounds<T>& b, int dims = 2) const {
+		if (dims == 3) {
+			return contains(b.minx(), b.miny(), b.minz())
+				&& contains(b.maxx(), b.maxy(), b.maxz());
+		}
+		else {
+			return contains(b.minx(), b.miny()) && contains(b.maxx(), b.maxy());
+		}
+	}
 
-    bool intersects(const geo::util::Bounds &b, int dims = 2) const;
+	bool intersects(const geo::util::Bounds<T>& b, int dims = 2) const {
+		if (dims == 3) {
+			return !(b.maxx() < minx() || b.maxy() < miny() || b.minx() > maxx()
+				|| b.miny() > maxy() || b.minz() > maxz() || b.maxz() < minz());
+		}
+		else {
+			return !(b.maxx() < minx() || b.maxy() < miny() || b.minx() > maxx()
+				|| b.miny() > maxy());
+		}
+	}
+	
+	Bounds intersection(const Bounds<T>& other) const {
+		return Bounds(geo::max(minx(), other.minx()), geo::max(miny(), other.miny()),
+			geo::min(maxx(), other.maxx()), geo::min(maxy(), other.maxy()));
+	}
 
-    Bounds intersection(const Bounds &other) const;
 
-    // Enlarge dimensions so the bounds becomes a cube.
-    // If the bounds is 2D, will become a square.
-    void cube();
 
-    double midx() const;
+	void cube() {
+		T max = geo::max(width(), height());
+		if (m_maxz != G_DBL_MAX_POS) {
+			max = geo::max(max, depth()) / 2.0;
+			set(midx() - max, midy() - max, midx() + max, midy() + max, midz() - max, midz() + max);
+		}
+		else {
+			max /= 2.0;
+			set(midx() - max, midy() - max, midx() + max, midy() + max);
+		}
+	}
 
-    double midy() const;
+	T midx() const {
+		return (m_maxx + m_minx) / 2.0;
+	}
 
-    double midz() const;
+	T midy() const {
+		return (m_maxy + m_miny) / 2.0;
+	}
 
-    double minx() const;
+	T midz() const {
+		return (m_maxz + m_minz) / 2.0;
+	}
 
-    void minx(double minx);
 
-    double miny() const;
+	T minx() const {
+		return m_minx;
+	}
 
-    void miny(double miny);
+	void minx(T minx) {
+		m_minx = minx;
+	}
 
-    double minz() const;
+	T miny() const {
+		return m_miny;
+	}
 
-    void minz(double minz);
+	void miny(T miny) {
+		m_miny = miny;
+	}
 
-    double maxx() const;
+	T minz() const {
+		return m_minz;
+	}
 
-    void maxx(double maxx);
+	void minz(T minz) {
+		m_minz = minz;
+	}
 
-    double maxy() const;
+	T maxx() const {
+		return m_maxx;
+	}
 
-    void maxy(double maxy);
+	void maxx(T maxx) {
+		m_maxx = maxx;
+	}
 
-    double maxz() const;
+	T maxy() const {
+		return m_maxy;
+	}
 
-    void maxz(double maxz);
+	void maxy(T maxy) {
+		m_maxy = maxy;
+	}
 
-    double width() const;
+	T maxz() const {
+		return m_maxz;
+	}
 
-    double height() const;
+	void maxz(T maxz) {
+		m_maxz = maxz;
+	}
 
-    double depth() const;
+	T width() const {
+		return maxx() - minx();
+	}
 
-    double volume() const;
+	T height() const {
+		return maxy() - miny();
+	}
 
-    int maxCol(double resolution) const;
+	T depth() const {
+		return maxz() - minz();
+	}
 
-    int maxRow(double resolution) const;
+	T volume() const {
+		return width() * height() * depth();
+	}
 
-    int toCol(double x, double resolution) const;
+	int maxCol(T resolution) const {
+		return (int)geo::abs(width() / resolution);
+	}
 
-    int toRow(double y, double resolution) const;
+	int maxRow(T resolution) const {
+		return (int)geo::abs(height() / resolution);
+	}
 
-    double toX(int col, double resolution) const;
+	int toCol(T x, T resolution) const {
+		if (width() == 0.0)
+			return 0;
+		if (resolution > 0) {
+			return (int)((x - m_minx) / width() * (width() / resolution));
+		}
+		else {
+			return (int)((x - m_maxx) / width() * (width() / resolution));
+		}
+	}
 
-    double toY(int row, double resolution) const;
+	int toRow(T y, T resolution) const {
+		if (height() == 0.0)
+			return 0;
+		if (resolution > 0) {
+			return (int)((y - m_miny) / height() * (height() / resolution));
+		}
+		else {
+			return (int)((y - m_maxy) / height() * (height() / resolution));
+		}
+	}
 
-    void extend(const geo::util::Bounds &b);
+	T toX(int col, T resolution) const {
+		if (resolution > 0) {
+			return m_minx + resolution * col;
+		}
+		else {
+			return m_maxx + resolution * col;
+		}
+	}
 
-    void extendX(double x);
+	T toY(int row, T resolution) const {
+		if (resolution > 0) {
+			return m_miny + resolution * row;
+		}
+		else {
+			return m_maxy + resolution * row;
+		}
+	}
 
-    void extendY(double y);
+	void extend(const Bounds &b) {
+		m_minx = geo::min(b.minx(), m_minx);
+		m_maxx = geo::max(b.maxx(), m_maxx);
+		m_miny = geo::min(b.miny(), m_miny);
+		m_maxy = geo::max(b.maxy(), m_maxy);
+		m_minz = geo::min(b.minz(), m_minz);
+		m_maxz = geo::max(b.maxz(), m_maxz);
+	}
 
-    void extendZ(double z);
+	void extendX(T x) {
+		m_minx = geo::min(x, m_minx);
+		m_maxx = geo::max(x, m_maxx);
+	}
 
-    void extend(double x, double y);
+	void extendY(T y) {
+		m_miny = geo::min(y, m_miny);
+		m_maxy = geo::max(y, m_maxy);
+	}
 
-    void extend(double x, double y, double z);
+	void extendZ(T z) {
+		m_minz = geo::min(z, m_minz);
+		m_maxz = geo::max(z, m_maxz);
+	}
 
-    void collapse(int dims = 3);
+	void extend(T x, T y) {
+		extendX(x);
+		extendY(y);
+	}
 
-    double operator[](size_t pos) const;
+	void extend(T x, T y, T z) {
+		extend(x, y);
+		extendZ(z);
+	}
 
-    void snap(double resolution);
+	T operator[](size_t pos) const {
+		switch (pos) {
+		case 0:
+			return m_minx;
+		case 1:
+			return m_miny;
+		case 2:
+			return m_maxx;
+		case 3:
+			return m_maxy;
+		case 4:
+			return m_minz;
+		case 5:
+			return m_maxz;
+		default:
+			g_argerr("Illegal position: " << pos);
+		}
+	}
 
-    std::string print() const;
+	void snap(T resolution) {
+		minx(std::floor(minx() / resolution) * resolution);
+		miny(std::floor(miny() / resolution) * resolution);
+		maxx(std::floor(maxx() / resolution) * resolution + resolution);
+		maxy(std::floor(maxy() / resolution) * resolution + resolution);
+	}
 
-    void print(std::ostream &str) const;
+	void collapse(int dims) {
+		minx(G_DBL_MAX_POS);
+		miny(G_DBL_MAX_POS);
+		maxx(G_DBL_MAX_NEG);
+		maxy(G_DBL_MAX_NEG);
+		if (dims == 3) {
+			minz(G_DBL_MAX_POS);
+			maxz(G_DBL_MAX_NEG);
+		}
+	}
 
-    std::string toString() const;
+	std::string print() const {
+		std::stringstream s;
+		print(s);
+		return s.str();
+	}
 
-    void fromString(const std::string&);
+	void print(std::ostream &str) const {
+		str << "[Bounds: " << minx() << ", " << miny() << ", " << minz() << "; "
+			<< maxx() << ", " << maxy() << ", " << maxz() << "]";
+	}
 
-    void align(double x, double y, double xres, double yres);
+	void fromString(const std::string &str) {
+		std::vector<std::string> parts;
+		split(std::back_inserter(parts), str);
+		if (parts.size() < 4)
+			g_runerr("Bounds string must be 4 or 6 comma-separated values.");
+		m_minx = atof(parts[0].c_str());
+		m_miny = atof(parts[1].c_str());
+		m_maxx = atof(parts[2].c_str());
+		m_maxy = atof(parts[3].c_str());
+		if (parts.size() >= 6) {
+			m_maxz = atof(parts[4].c_str());
+			m_maxz = atof(parts[5].c_str());
+		}
+	}
+
+	std::string toString() const {
+		std::stringstream ss;
+		ss << minx() << "," << miny() << "," << maxx() << "," << maxy() << ","
+			<< minz() << "," << maxz();
+		return ss.str();
+	}
+
+    void align(T x, T y, T xres, T yres) {
+		xres = geo::abs(xres);
+		yres = geo::abs(yres);
+		while (x < m_minx)
+			x += xres;
+		while (x > m_minx)
+			x -= xres;
+		m_minx = x;
+		while (x < m_maxx)
+			x += xres;
+		m_maxx = x;
+		while (y < m_miny)
+			y += yres;
+		while (y > m_miny)
+			y -= yres;
+		m_miny = y;
+		while (y < m_maxy)
+			y += yres;
+		m_maxy = y;
+	}
+
 
 };
 
 
-class BivariateSpline {
+
+
+class G_DLL_EXPORT BivariateSpline {
 private:
 	std::vector<double> m_tx;
 	std::vector<double> m_ty;
@@ -548,7 +771,7 @@ public:
 
 };
 
-class SmoothingSpline {
+class G_DLL_EXPORT SmoothingSpline {
 private:
 	std::vector<double> m_tx;
 	std::vector<double> m_c;
@@ -598,13 +821,13 @@ public:
 
 namespace csv {
 
-	enum CSVType {
+	enum G_DLL_EXPORT CSVType {
 		Int,
 		Double,
 		String
 	};
 
-	class CSVValue {
+	class G_DLL_EXPORT CSVValue {
 	public:
 		std::string s;
 		CSVType t;
@@ -617,14 +840,14 @@ namespace csv {
 		const std::string& asString() const;
 	};
 
-	class CSVColumn {
+	class G_DLL_EXPORT CSVColumn {
 	public:
 		std::string name;
 		CSVType type;
 		std::vector<CSVValue> values;
 	};
 
-	class CSV {
+	class G_DLL_EXPORT CSV {
 	private:
 		std::vector<CSVColumn> m_values;
 		std::string m_file;
@@ -729,14 +952,14 @@ namespace csv {
  * \param yres The resolution of the raster in y.
  * \param proj The projection.
  */
-void saveGrid(const std::string& file, const std::vector<double> grid,
+G_DLL_EXPORT void saveGrid(const std::string& file, const std::vector<double> grid,
 		int cols, int rows, double minx, double miny,
 		double xres, double yres, const std::string& proj);
 
 /**
  * \brief Does what it says on the tin: keeps time.
  */
-class Stopwatch {
+class G_DLL_EXPORT Stopwatch {
 private:
 	std::chrono::steady_clock::time_point m_begin;
 

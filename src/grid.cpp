@@ -7,6 +7,7 @@
 
 #include <string>
 #include <algorithm>
+#include <limits>
 
 #include "grid.hpp"
 
@@ -61,7 +62,7 @@ void geo::grid::detail::polyWriteToFile(std::list<std::pair<int, GEOSGeometry*>>
 		}
 
 		if(monitor->canceled()) {
-			GEOSGeom_destroy(geom);
+			GEOSGeom_destroy_r(gctx, geom);
 			continue;
 		}
 

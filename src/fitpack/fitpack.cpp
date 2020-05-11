@@ -7,25 +7,7 @@
  *      Author: rob
  */
 
-/*
-void surfit_(int*, int*, const double*, const double*, const double*, const double*,
-		double*, double*, double*, double*, int*, int*,
-		double*, int*, int*, int*, double*,
-		int*, double*, int*, double*, double*, double*,
-		double*, int*, double*, int*, int*, int*,
-		int*) {}
-
-void surev_(int*, double*, int*, double*, int*,
-		double*, const double*, int*, const double*, int*, double*, int*,
-		double*, int*, int*, int*, int*) {}
-
-void curfit_(int*, int*, const double*, const double*, const double*,
-		double*, double*, int*, double*, int*, int*, double*, double*,
-		double*, double*, int*, int*, int*) {}
-
-void curev_(int*, double*, int*, double*, int*, int*,
-		const double*, int*, double*, int*, int*) {}
-*/
+#include "fitpack.hpp"
 
 void surfit_(int* iopt, int* m, const double* x, const double* y, const double* z, const double* w,
 		double* xb, double* xe, double* yb, double* ye, int* kx, int* ky,
