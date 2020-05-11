@@ -453,7 +453,7 @@ public:
 
 	void cube() {
 		T max = geo::max(width(), height());
-		if (m_maxz != G_DBL_MAX_POS) {
+		if (m_maxz != maxvalue<T>()) {
 			max = geo::max(max, depth()) / 2.0;
 			set(midx() - max, midy() - max, midx() + max, midy() + max, midz() - max, midz() + max);
 		}
@@ -649,13 +649,13 @@ public:
 	}
 
 	void collapse(int dims) {
-		minx(G_DBL_MAX_POS);
-		miny(G_DBL_MAX_POS);
-		maxx(G_DBL_MAX_NEG);
-		maxy(G_DBL_MAX_NEG);
+		minx(maxvalue<T>());
+		miny(maxvalue<T>());
+		maxx(minvalue<T>());
+		maxy(minvalue<T>());
 		if (dims == 3) {
-			minz(G_DBL_MAX_POS);
-			maxz(G_DBL_MAX_NEG);
+			minz(maxvalue<T>());
+			maxz(minvalue<T>());
 		}
 	}
 
