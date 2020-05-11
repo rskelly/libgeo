@@ -491,7 +491,7 @@ public:
 		double y0 = m_trans[3];
 		double x1 = x0 + m_trans[1] * m_cols;
 		double y1 = y0 + m_trans[5] * m_rows;
-		return Bounds(geo::min(x0, x1), geo::min(y0, y1), geo::max(x0, x1), geo::max(y0, y1));
+		return Bounds<double>(geo::min(x0, x1), geo::min(y0, y1), geo::max(x0, x1), geo::max(y0, y1));
 	}
 
 	/**
@@ -1030,6 +1030,7 @@ class G_DLL_EXPORT TargetFillOperator;
 /**
  * \brief Grid (raster).
  */
+#ifdef DOGRID
 template <class T>
 class G_DLL_EXPORT Grid {
 private:
@@ -1722,8 +1723,8 @@ public:
 		int k = 1;
 		st.sum = 0;
 		st.count = 0;
-		st.min = G_DBL_MAX_POS;
-		st.max = G_DBL_MAX_NEG;
+		st.min = geo::maxvalue<double>();
+		st.max = geo::minvalue<double>();
 		// Welford's method for variance.
 		int rows = gp.rows();
 		int cols = gp.cols();
@@ -2055,7 +2056,7 @@ public:
 		int cols = gp.cols();
 		for(int row = 0; row < rows; ++row) {
 			for(int col = 0; col < cols; ++col) {
-				if ((v = get<double>(col, row, band)) != nodata && !std::isnan(v) && v < G_DBL_MAX_POS) {
+				if ((v = get<double>(col, row, band)) != nodata && !std::isnan(v) && v < geo::maxvalue<double>()) {
 					set(col, row, ((v - mean) / stdDev), band);
 				} else {
 					set(col, row, nodata, band);
@@ -2154,10 +2155,10 @@ public:
 
 			if (!visited[idx] && op.shouldFill(col, row)) {
 
-				minc = g_min(col, minc);
-				maxc = g_max(col, maxc);
-				minr = g_min(row, minr);
-				maxr = g_max(row, maxr);
+				minc = geo::min(col, minc);
+				maxc = geo::max(col, maxc);
+				minr = geo::min(row, minr);
+				maxr = geo::max(row, maxr);
 				++area;
 				op.fill(col, row);
 				visited[idx] = true;
@@ -2171,7 +2172,7 @@ public:
 				for (c = col - 1; c >= 0; --c) {
 					idx = (size_t) row * cols + c;
 					if (!visited[idx] && op.shouldFill(c, row)) {
-						minc = g_min(c, minc);
+						minc = geo::min(c, minc);
 						++area;
 						op.fill(c, row);
 						visited[idx] = true;
@@ -2192,7 +2193,7 @@ public:
 				for (c = col + 1; c < cols; ++c) {
 					idx = (size_t) row * cols + c;
 					if (!visited[idx] && op.shouldFill(c, row)) {
-						maxc = g_max(c, maxc);
+						maxc = geo::max(c, maxc);
 						++area;
 						op.fill(c, row);
 						visited[idx] = true;
@@ -2329,7 +2330,7 @@ public:
 		oprops.setWritable(true);
 		Grid<T> output(oprops);
 
-		double maxDist = 100;
+		int maxDist = 100;
 		bool holesOnly = true;
 
 		double nodata = props().nodata();
@@ -2361,9 +2362,9 @@ public:
 
 					double dp, a = 0, b = 0;
 					int cnt = 0;
-					for(int r0 = g_max(0, r - maxDist); r0 < g_min(rows, r + maxDist + 1); ++r0) {
-						for(int c0 = g_max(0, c - maxDist); c0 < g_min(cols, c + maxDist + 1); ++c0) {
-							if((c0 == c && r0 == r) || (d = g_sq(c0 - c) + g_sq(r0 - r)) > maxDist ||
+					for(int r0 = geo::max(0, r - maxDist); r0 < geo::min(rows, r + maxDist + 1); ++r0) {
+						for(int c0 = geo::max(0, c - maxDist); c0 < geo::min(cols, c + maxDist + 1); ++c0) {
+							if((c0 == c && r0 == r) || (d = geo::sq(c0 - c) + geo::sq(r0 - r)) > maxDist ||
 									(v = input.get(c0, r0, band)) == nodata)
 								continue;
 							dp = 1.0 / std::pow(d, exp);
@@ -2389,8 +2390,8 @@ public:
 					// Find all the pixels which were filled
 					std::vector<std::tuple<int, int, double> > vpx;
 					std::vector<std::tuple<int, int> > npx;
-					for(int r0 = g_max(0, outminr - 1); r0 < g_min(rows, outmaxr + 2); ++r0) {
-						for(int c0 = g_max(0, outminc - 1); c0 < g_min(cols, outmaxc + 2); ++c0) {
+					for(int r0 = geo::max(0, outminr - 1); r0 < geo::min(rows, outmaxr + 2); ++r0) {
+						for(int c0 = geo::max(0, outminc - 1); c0 < geo::min(cols, outmaxc + 2); ++c0) {
 							v = input.get(c0, r0, band);
 							if(v == 99999) {
 								npx.push_back(std::make_tuple(c0, r0));
@@ -2413,7 +2414,7 @@ public:
 							pc = std::get<0>(vp);
 							pr = std::get<1>(vp);
 							pv = std::get<2>(vp);
-							d = g_sq(pc - nc) + g_sq(pr - nr);
+							d = geo::sq(pc - nc) + geo::sq(pr - nr);
 							dp = 1.0 / std::pow(d, exp);
 							a += dp * pv;
 							b += dp;
@@ -2716,7 +2717,7 @@ public:
 		int rows = props().rows();
 		double resX = props().resX();
 		double resY = props().resY();
-		const Bounds& bounds = props().bounds();
+		const Bounds<T>& bounds = props().bounds();
 
 		// Create a buffer for the row.
 		std::vector<T> buf(cols);
@@ -2872,6 +2873,7 @@ public:
 	}
 
 };
+#endif
 
 template <class T>
 class MappedFile {
@@ -2887,10 +2889,9 @@ private:
 #endif
 
 public:
-	MappedFile(size_t size, const std::string& filename = "") :
+	MappedFile(size_t size) :
 		m_data(nullptr),
-		m_size(0),
-		m_filename(filename) 
+		m_size(0)
 #ifdef _WIN32
 		, m_mapFile(nullptr),
 		m_file(nullptr)
@@ -2906,8 +2907,6 @@ public:
 	void resize(size_t size) {
 		if (size == m_size)
 			return;
-		if (m_filename.empty())
-			m_filename = geo::util::tmpfile("geo");
 #ifdef _WIN32
 		if (m_file) {
 			CloseHandle(m_file);
@@ -2917,31 +2916,40 @@ public:
 			CloseHandle(m_mapFile);
 			m_mapFile = nullptr;
 		}
+		if(m_filename.empty()) {
+			m_filename = geo::util::tmpfile("geo");
+		} else {
+			geo::util::rem(m_filename);
+		}
 		m_file = CreateFile(m_filename.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 		m_mapFile = CreateFileMapping(
 			INVALID_HANDLE_VALUE,    // use paging file
 			NULL,                    // default security
 			PAGE_READWRITE,          // read/write access
 			0,                       // maximum object size (high-order DWORD)
-			m_size,                  // maximum object size (low-order DWORD)
+			size,                    // maximum object size (low-order DWORD)
 			"_mapped");              // name of mapping object
 
 		if (m_mapFile == NULL)
 			g_runerr("Could not create file mapping object: " << GetLastError());
 
-		m_data = (T*)MapViewOfFile(m_mapFile, FILE_MAP_ALL_ACCESS, 0, 0, m_size);
+		m_data = (T*) MapViewOfFile(m_mapFile, FILE_MAP_ALL_ACCESS, 0, 0, size);
 #else
 		if (m_data)
 			munmap(m_data, m_size);
-		if (!m_tmp.get())
-			m_tmp.reset(new TmpFile(m_filename));
-		m_tmp.resize(size);
-		m_data = (T*) mmap(0, m_size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, 0, 0);
-#endif
-		if (!m_data) {
-			g_runerr("Failed to created mapped segment.");
+		if (!m_tmp.get()) {
+			m_tmp.reset(new TmpFile(size));
+		} else {
+			m_tmp->resize(size);
 		}
+		m_data = (T*) mmap(0, size, PROT_READ|PROT_WRITE, MAP_SHARED, m_tmp->fd, 0);
+		if(m_data == (void*) -1)
+			g_runerr("Failed to created mapped segment of " << size << " bytes (" << strerror(errno) << ")");
+#endif
+		if (!m_data)
+			g_runerr("Failed to created mapped segment of " << size << " bytes.");
 
+		m_size = size;
 	}
 
 	~MappedFile() {
@@ -3660,8 +3668,8 @@ public:
 		int k = 1;
 		st.sum = 0;
 		st.count = 0;
-		st.min = G_DBL_MAX_POS;
-		st.max = G_DBL_MAX_NEG;
+		st.min = geo::maxvalue<double>();
+		st.max = geo::minvalue<double>();
 		// Welford's method for variance.
 		int rows = gp.rows();
 		int cols = gp.cols();
@@ -3816,7 +3824,7 @@ public:
 	 * \param dstCol The destination column to write to.
 	 * \param dstRow The destination row to write to.
 	 */
-	void writeTo(Grid<T>& grd,
+	void writeTo(Band<T>& grd,
 			int cols = 0, int rows = 0,
 			int srcCol = 0, int srcRow = 0,
 			int dstCol = 0, int dstRow = 0) {
@@ -3929,7 +3937,7 @@ public:
 		int cols = gp.cols();
 		for(int row = 0; row < rows; ++row) {
 			for(int col = 0; col < cols; ++col) {
-				if ((v = get<double>(col, row)) != nodata && !std::isnan(v) && v < G_DBL_MAX_POS) {
+				if ((v = get<double>(col, row)) != nodata && !std::isnan(v) && v < geo::maxvalue<double>()) {
 					set(col, row, ((v - mean) / stdDev));
 				} else {
 					set(col, row, nodata);
@@ -4023,10 +4031,10 @@ public:
 
 			if (!visited[idx] && op.shouldFill(col, row)) {
 
-				minc = g_min(col, minc);
-				maxc = g_max(col, maxc);
-				minr = g_min(row, minr);
-				maxr = g_max(row, maxr);
+				minc = geo::min(col, minc);
+				maxc = geo::max(col, maxc);
+				minr = geo::min(row, minr);
+				maxr = geo::max(row, maxr);
 				++area;
 				op.fill(col, row);
 				visited[idx] = true;
@@ -4040,7 +4048,7 @@ public:
 				for (c = col - 1; c >= 0; --c) {
 					idx = (size_t) row * cols + c;
 					if (!visited[idx] && op.shouldFill(c, row)) {
-						minc = g_min(c, minc);
+						minc = geo::min(c, minc);
 						++area;
 						op.fill(c, row);
 						visited[idx] = true;
@@ -4061,7 +4069,7 @@ public:
 				for (c = col + 1; c < cols; ++c) {
 					idx = (size_t) row * cols + c;
 					if (!visited[idx] && op.shouldFill(c, row)) {
-						maxc = g_max(c, maxc);
+						maxc = geo::max(c, maxc);
 						++area;
 						op.fill(c, row);
 						visited[idx] = true;
@@ -4194,7 +4202,7 @@ public:
 		oprops.setWritable(true);
 		Band<T> output(oprops);
 
-		double maxDist = 100;
+		int maxDist = 100;
 		bool holesOnly = true;
 
 		double nodata = props().nodata();
@@ -4226,9 +4234,9 @@ public:
 
 					double dp, a = 0, b = 0;
 					int cnt = 0;
-					for(int r0 = g_max(0, r - maxDist); r0 < g_min(rows, r + maxDist + 1); ++r0) {
-						for(int c0 = g_max(0, c - maxDist); c0 < g_min(cols, c + maxDist + 1); ++c0) {
-							if((c0 == c && r0 == r) || (d = g_sq(c0 - c) + g_sq(r0 - r)) > maxDist ||
+					for(int r0 = geo::max(0, r - maxDist); r0 < geo::min(rows, r + maxDist + 1); ++r0) {
+						for(int c0 = geo::max(0, c - maxDist); c0 < geo::min(cols, c + maxDist + 1); ++c0) {
+							if((c0 == c && r0 == r) || (d = geo::sq(c0 - c) + geo::sq(r0 - r)) > maxDist ||
 									(v = input.get(c0, r0)) == nodata)
 								continue;
 							dp = 1.0 / std::pow(d, exp);
@@ -4254,8 +4262,8 @@ public:
 					// Find all the pixels which were filled
 					std::vector<std::tuple<int, int, double> > vpx;
 					std::vector<std::tuple<int, int> > npx;
-					for(int r0 = g_max(0, outminr - 1); r0 < g_min(rows, outmaxr + 2); ++r0) {
-						for(int c0 = g_max(0, outminc - 1); c0 < g_min(cols, outmaxc + 2); ++c0) {
+					for(int r0 = geo::max(0, outminr - 1); r0 < geo::min(rows, outmaxr + 2); ++r0) {
+						for(int c0 = geo::max(0, outminc - 1); c0 < geo::min(cols, outmaxc + 2); ++c0) {
 							v = input.get(c0, r0);
 							if(v == 99999) {
 								npx.push_back(std::make_tuple(c0, r0));
@@ -4278,7 +4286,7 @@ public:
 							pc = std::get<0>(vp);
 							pr = std::get<1>(vp);
 							pv = std::get<2>(vp);
-							d = g_sq(pc - nc) + g_sq(pr - nr);
+							d = geo::sq(pc - nc) + geo::sq(pr - nr);
 							dp = 1.0 / std::pow(d, exp);
 							a += dp * pv;
 							b += dp;
@@ -4293,7 +4301,7 @@ public:
 			}
 		}
 
-		Grid<T> routput(filename, oprops);
+		Band<T> routput(filename, oprops);
 		output.writeTo(routput);
 
 	}
@@ -4824,9 +4832,9 @@ public:
 template <class T, class U>
 class G_DLL_EXPORT TargetFillOperator : public FillOperator<T, U> {
 private:
-	Grid<T>* m_src;		///<! The source grid.
+	Band<T>* m_src;		///<! The source grid.
 	int m_srcBand;		///<! The source band.
-	Grid<U>* m_dst;		///<! The destination grid.
+	Band<U>* m_dst;		///<! The destination grid.
 	int m_dstBand;		///<! The destination band.
 	T m_target;			///<! The target value.
 	U m_fill;			///<! The fill value.
@@ -4841,7 +4849,7 @@ public:
 	 * \param fill The fill value.
 	 * \param band The band to fill.
 	 */
-	TargetFillOperator(Grid<T>* src, int srcBand, Grid<U>* dst, int dstBand, T target, U fill) :
+	TargetFillOperator(Band<T>* src, int srcBand, Band<U>* dst, int dstBand, T target, U fill) :
 		m_src(src), m_srcBand(srcBand),
 		m_dst(dst), m_dstBand(dstBand),
 		m_target(target), m_fill(fill) {
@@ -4856,7 +4864,7 @@ public:
 	 * \param target The target value.
 	 * \param fill The fill value.
 	 */
-	TargetFillOperator(Grid<T>* grd, int srcBand, int dstBand, T target, U fill) :
+	TargetFillOperator(Band<T>* grd, int srcBand, int dstBand, T target, U fill) :
 		m_src(grd), m_srcBand(srcBand),
 		m_dst(grd), m_dstBand(dstBand),
 		m_target(target), m_fill(fill) {
