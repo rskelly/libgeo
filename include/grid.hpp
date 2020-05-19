@@ -52,6 +52,23 @@ using namespace geo::util;
 namespace geo {
 namespace grid {
 
+	class PolygonValue {
+	public:
+		std::string name;
+		OGRFieldType type;
+		int ivalue;
+		double dvalue;
+		std::string svalue;
+		PolygonValue(const std::string& name, int value) :
+			name(name), type(OFTInteger), ivalue(value), dvalue(0) {}
+		PolygonValue(const std::string& name, double value) :
+			name(name), type(OFTReal), ivalue(0), dvalue(value) {}
+		PolygonValue(const std::string& name, float value) :
+			name(name), type(OFTReal), ivalue(0), dvalue((double) value) {}
+		PolygonValue(const std::string& name, const std::string& value) :
+			name(name), type(OFTReal), ivalue(0), dvalue(0), svalue(value) {}
+	};
+
 	class PolygonContext {
 	public:
 		GEOSContextHandle_t gctx;
@@ -60,7 +77,8 @@ namespace grid {
 		std::list<std::pair<int, std::vector<GEOSGeometry*>>> geomBuf;	// Buffer of final geometry parts for one ID.
 		std::list<std::pair<int, GEOSGeometry*>> geoms;					// Merged geoms for writing.
 
-		bool running;
+		bool mergeRunning;												///<! Control the geom merge thread.
+		bool writeRunning;												///<! Control the output thread.
 		geo::Monitor* monitor;
 
 		// Extract some grid properties.
@@ -84,12 +102,19 @@ namespace grid {
 		std::mutex gmtx;
 		std::condition_variable gcv;
 
+		std::string idField;
+		std::vector<PolygonValue> fieldValues;							///<! A list of field values that will be saved with every poly in the set.
+		OGRLayer* layer;
+		std::mutex lmtx;												///<! Protects layer for writing.
+
 		PolygonContext() :
 			gctx(nullptr),
-			running(false), monitor(nullptr),
+			mergeRunning(false), writeRunning(false),
+			monitor(nullptr),
 			cols(0), rows(0), resX(0), resY(0),
 			startX(0), startY(0), xeps(0), yeps(0),
-			removeHoles(false), removeDangles(false) {
+			removeHoles(false), removeDangles(false),
+			layer(nullptr) {
 		}
 
 	};
@@ -140,9 +165,11 @@ namespace detail {
 	 * \param ds The GDAL dataset.
 	 * \param layer The OGR layer.
 	 */
-	G_DLL_EXPORT void polyMakeDataset(const std::string& filename, const std::string& driver, const std::string& layerName,
-				const std::string& idField,	OGRSpatialReference* sr, OGRwkbGeometryType gType,
-				GDALDataset** ds, OGRLayer** layer);
+	G_DLL_EXPORT void polyMakeDataset(const std::string& filename, const std::string& driver,
+			const std::string& layerName, const std::string& idField,
+			const std::vector<PolygonValue>& fields,
+			OGRSpatialReference* sr, OGRwkbGeometryType gType,
+			GDALDataset** ds, OGRLayer** layer);
 
 	/**
 	 * \brief Make and return a rectangular geometry with the given corners
@@ -162,21 +189,10 @@ namespace detail {
 	 *
 	 * On each loop, extracts a single finalized poly ID and loads those polys for unioning.
 	 *
-	 * \param geoms The list of ID/geometry pairs.
-	 * \param idField The name of the field for storing IDs.
-	 * \param layer The OGRLayer for output.
-	 * \param gctx The GEOS context object.
-	 * \param running If false, the operation is canceled.
-	 * \param monitor The Monitor instance.
-	 * \param poly_fid A feature ID for geometries.
+	 * \param pc A PolygonContext.
 	 * \param poly_gmtx Mutex for the geom list.
-	 * \param poly_omtx Mutex for the output file.
-	 * \param geom_cv To notify when a geom is available to write.
 	 */
-	G_DLL_EXPORT void polyWriteToFile(std::list<std::pair<int, GEOSGeometry*>>* geoms,
-			OGRLayer* layer, const std::string* idField, std::atomic<int>* fid,
-			GEOSContextHandle_t gctx,
-			bool* running, Monitor* monitor, std::mutex* gmtx);
+	G_DLL_EXPORT void polyWriteToDB(PolygonContext* pc, std::mutex* gmtx);
 
 	G_DLL_EXPORT void printGEOSGeom(GEOSGeometry* geom, GEOSContextHandle_t gctx);
 
@@ -202,20 +218,20 @@ namespace detail {
 		GEOSGeometry* geom = nullptr;
 		int id;
 
-		while(!pc->monitor->canceled() && (pc->running || !pc->geomBuf.empty())) {
+		while(!pc->monitor->canceled() && (pc->mergeRunning || !pc->geomBuf.empty())) {
 
 			// Get an ID and the list of polys from the queue.
 			{
 				std::unique_lock<std::mutex> lk(pc->gmtx);
 				// Wait for a notification if the queue is empty.
-				while(!pc->monitor->canceled() && pc->running && pc->geomBuf.empty())
+				while(!pc->monitor->canceled() && pc->mergeRunning && pc->geomBuf.empty())
 					pc->gcv.wait(lk);
 				// If the wakeup is spurious, skip.
 				if(pc->geomBuf.empty())
 					continue;
 				// Get the ID.
 				id = pc->geomBuf.front().first;
-				polys = std::move(pc->geomBuf.front().second);
+				polys.swap(pc->geomBuf.front().second);
 				pc->geomBuf.pop_front();
 			}
 
@@ -228,16 +244,12 @@ namespace detail {
 				continue;
 			}
 
-			// Union the polys.
-			geom = polys.front();
-			for(size_t i = 1; i < polys.size(); ++i) {
-				GEOSGeometry* tmp = GEOSUnion_r(pc->gctx, geom, polys[i]);
-				GEOSGeom_destroy_r(pc->gctx, geom);
-				GEOSGeom_destroy_r(pc->gctx, polys[i]);
-				geom = tmp;
+			{
+				GEOSGeometry* multi = GEOSGeom_createCollection_r(pc->gctx, GEOS_GEOMETRYCOLLECTION, polys.data(), polys.size());
+				geom = GEOSUnaryUnion_r(pc->gctx, multi);
+				GEOSGeom_destroy_r(pc->gctx, multi);
 			}
 			polys.clear();
-
 
 			if(pc->monitor->canceled()) {
 				GEOSGeom_destroy_r(pc->gctx, geom);
@@ -341,22 +353,12 @@ namespace detail {
 	G_DLL_EXPORT size_t minValue(std::unordered_map<size_t, double>& m);
 
 	/**
-	 * \brief Writes an ordered path to the iterator from the map of cells.
-	 *
-	 * \param start The start index into the map.
-	 * \param parents The map of cell relationships.
-	 * \param inserter The insert iterator.
+	 * For status in the gdal progress monitor.
 	 */
-	template <class V>
-	G_DLL_EXPORT void writeAStarPath(size_t start, std::unordered_map<size_t, size_t>& parents, V inserter) {
-		*inserter = start;
-		++inserter;
-		while(parents.find(start) != parents.end()) {
-			start = parents[start];
-			*inserter = start;
-			++inserter;
-		}
-	}
+	struct gdalprg {
+		int p;
+		geo::Monitor* m;
+	};
 
 	/**
 	 * \brief Status callback for GDAL RasterIO.
@@ -1027,1854 +1029,6 @@ public:
 template <class T, class U>
 class G_DLL_EXPORT TargetFillOperator;
 
-/**
- * \brief Grid (raster).
- */
-#ifdef DOGRID
-template <class T>
-class G_DLL_EXPORT Grid {
-private:
-	GDALDataset *m_ds;          				///<! GDAL data set pointer.
-	GDALDataType m_type;        				///<! GDALDataType -- limits the possible template types.
-	GridProps m_props;							///<! Properties of the raster.
-	std::unique_ptr<TmpFile> m_mapFile;			///<! Temporary file used for file-backed mapped memory.
-	bool m_mapped;								///<! If true, file-backed mapped memory is in use.
-	size_t m_size;								///<! The size of the total raster in bytes.
-	T* m_data;									///<! Pointer to the raster data.
-	bool m_dirty;								///<! True if the current block has been written to and must be flushed.
-
-	/**
-	 * \brief Initialize file-backed mapped memory.
-	 */
-	bool initMapped() {
-		if(m_data)
-			destroy();
-		m_mapped = false;
-		m_size = (size_t) props().cols() * (size_t) props().rows() * (size_t) props().bands() * (size_t) sizeof(T); // TODO: Casting to prevent roll over.
-		m_mapFile.reset(new TmpFile(m_size));
-		m_data = (T*) mmap(0, m_size, PROT_READ|PROT_WRITE, MAP_SHARED, m_mapFile->fd, 0);
-		if(!m_data) {
-			g_warn("Failed to map " << m_size << " bytes for grid.");
-			return false;
-		}
-		m_mapped = true;
-		return true;
-	}
-
-	/**
-	 * \brief Initialize raster memory in physical RAM.
-	 */
-	bool initMem() {
-		if(m_data)
-			destroy();
-		m_mapped = false;
-		m_size = (size_t) props().cols() * (size_t) props().rows() * (size_t) props().bands() * (size_t) sizeof(T); // TODO: Casting to prevent roll over.
-		m_data = (T*) malloc(m_size);
-		if(!m_data) {
-			g_warn("Failed to allocate " << m_size << " bytes for grid.");
-			return false;
-		}
-		return true;
-	}
-
-	/**
-	 * \brief Return the raster DataType given the template parameter.
-	 *
-	 * \return The raster DataType given the template parameter.
-	 */
-	DataType type() const {
-		if(std::is_same<T, double>::value) {
-			return DataType::Float64;
-		} else if(std::is_same<T, float>::value) {
-			return DataType::Float32;
-		} else if(std::is_same<T, int>::value) {
-			return DataType::Int32;
-		} else if(std::is_same<T, unsigned int>::value) {
-			return DataType::UInt32;
-		} else if(std::is_same<T, short>::value) {
-			return DataType::Int16;
-		} else if(std::is_same<T, unsigned short>::value) {
-			return DataType::UInt16;
-		} else if(std::is_same<T, char>::value) {
-			return DataType::Byte;
-		} else if(std::is_same<T, unsigned char>::value) {
-			return DataType::Byte;
-		} else {
-			return DataType::None;
-		}
-	}
-
-	/**
-	 * \brief Return the GDAL raster data type given the template parameter.
-	 *
-	 * \return The GDAL raster data type given the template parameter.
-	 */
-	GDALDataType gdalType() const {
-		if(std::is_same<T, double>::value) {
-			return GDT_Float64;
-		} else if(std::is_same<T, float>::value) {
-			return GDT_Float32;
-		} else if(std::is_same<T, int>::value) {
-			return GDT_Int32;
-		} else if(std::is_same<T, unsigned int>::value) {
-			return GDT_UInt32;
-		} else if(std::is_same<T, short>::value) {
-			return GDT_Int16;
-		} else if(std::is_same<T, unsigned short>::value) {
-			return GDT_UInt16;
-		} else if(std::is_same<T, char>::value) {
-			return GDT_Byte;
-		} else if(std::is_same<T, unsigned char>::value) {
-			return GDT_Byte;
-		} else {
-			return GDT_Unknown;
-		}
-	}
-
-	/**
-	 * \brief Return true if the raster is a floating-point raster.
-	 *
-	 * \return True if the raster is a floating-point raster.
-	 */
-	bool isFloat() const {
-		DataType t = type();
-		return t == DataType::Float32 || t == DataType::Float64;
-	}
-
-public:
-
-	/**
-	 * \brief Construct an empty Grid.
-	 */
-	Grid() :
-		m_ds(nullptr),
-		m_type(GDT_Unknown),
-		m_mapped(false),
-		m_size(0),
-		m_data(nullptr),
-		m_dirty(false) {}
-
-	/**
-	 * \brief Create an anonymous grid of the given size with the given properties.
-	 *
-	 * \param props The properties of the grid.
-	 * \param mapped If true, the grid is created in a mapped memory segment.
-	 */
-	Grid(const GridProps& props, bool mapped = false) :
-		m_ds(nullptr),
-		m_type(GDT_Unknown),
-		m_mapped(false),
-		m_size(0),
-		m_data(nullptr),
-		m_dirty(false) {
-
-		init(props, mapped);
-	}
-
-	/**
-	 * \brief Initialize the Grid.
-	 *
-	 * \param props The properties of the grid.
-	 * \param mapped If true, the grid is created in a mapped memory segment.
-	 */
-	void init(const GridProps& props, bool mapped = false) {
-		m_props = props;
-		if(mapped || !initMem()) {
-			if(!initMapped())
-				g_runerr("Failed to allocate or map memory for raster.");
-		}
-	}
-
-	/**
-	 * \brief Create a new raster with the given properties. The raster will be created.
-	 *
-	 * \param filename The path to the file.
-	 * \param props A GridProps instance containing a descriptor for the raster.
-	 */
-	Grid(const std::string& filename, const GridProps& props) :
-		m_ds(nullptr),
-		m_type(GDT_Unknown),
-		m_mapped(false),
-		m_size(0),
-		m_data(nullptr),
-		m_dirty(false) {
-
-		init(filename, props);
-	}
-
-	/**
-	 * \brief Initialize the raster by loading it and setting up the grid properties.
-	 *
-	 * \param filename The path to the file.
-	 * \param props A GridProps instance containing a descriptor for the raster.
-	 */
-	void init(const std::string& filename, const GridProps& props) {
-
-		if (props.resX() == 0 || props.resY() == 0)
-			g_argerr("Resolution must not be zero.");
-		if (props.cols() <= 0 || props.rows() <= 0)
-			g_argerr("Columns and rows must be larger than zero.");
-		if (filename.empty())
-			g_argerr("Filename must be given.");
-
-		m_props = props;
-		m_props.setFilename(filename);
-
-		// Create GDAL dataset.
-		char **opts = NULL;
-		if(m_props.compress()) {
-			opts = CSLSetNameValue(opts, "COMPRESS", "LZW");
-			opts = CSLSetNameValue(opts, "PREDICTOR", "2");
-		}
-		if(m_props.bigTiff())
-			opts = CSLSetNameValue(opts, "BIGTIFF", "YES");
-		if(m_props.interleave() == Interleave::BIL) {
-			opts = CSLSetNameValue(opts, "INTERLEAVE", "BAND");
-		} else if(m_props.interleave() == Interleave::BIP){
-			opts = CSLSetNameValue(opts, "INTERLEAVE", "PIXEL");
-		}
-
-		GDALAllRegister();
-
-		// Figure out and load the driver.
-
-		std::string drvName = m_props.driver();
-		if(drvName.empty())
-			drvName = getDriverForFilename(filename);
-
-		if(drvName.empty()) {
-			g_runerr("Couldn't find driver for: " << filename);
-		} else {
-			m_props.setDriver(drvName);
-		}
-
-		GDALDriver *drv = GetGDALDriverManager()->GetDriverByName(drvName.c_str());
-		if(!drv)
-			g_runerr("Failed to get driver for " << drvName);
-
-		const char *create = drv->GetMetadataItem(GDAL_DCAP_CREATE);
-		if(create == NULL || std::strncmp(create, "YES", 3) != 0)
-			g_runerr("The " << drvName << " driver does not support dataset creation. Please specify a different driver.");
-
-
-		// Remove and create the raster.
-
-		rem(filename);
-
-		m_ds = drv->Create(filename.c_str(), m_props.cols(), m_props.rows(), m_props.bands(),
-				dataType2GDT(m_props.dataType()), opts);
-
-		if(opts)
-			CSLDestroy(opts);
-
-		if (!m_ds)
-			g_runerr("Failed to create file: " << filename);
-
-		// Initialize geotransform.
-
-		double trans[6];
-		m_props.trans(trans);
-		m_ds->SetGeoTransform(trans);
-
-		// Set projection.
-
-		std::string proj = m_props.projection();
-		if (!proj.empty())
-			m_ds->SetProjection(proj.c_str());
-
-		if(m_props.nodataSet()) {
-			for(int i = 1; i <= m_props.bands(); ++i)
-				m_ds->GetRasterBand(i)->SetNoDataValue(m_props.nodata());
-		}
-
-		// Set the metadata if there is any.
-		const std::vector<std::string>& bandMeta = m_props.bandMetadata();
-		const char* metaName = m_props.bandMetaName().c_str();
-		for(size_t i = 0; i < std::min(m_props.bands(), (int) bandMeta.size()); ++i)
-			m_ds->GetRasterBand(i + 1)->SetMetadataItem(metaName, bandMeta[i].c_str(), "");
-
-		// Map the raster into virtual memory.
-
-		if(!initMapped())
-			g_runerr("Failed to map memory.")
-	}
-
-
-	/**
-	 * \brief Open the given extant raster. Set the writable argument to true to enable writing.
-	 *
-	 * \param filename The path to the file.
-	 * \param writable True if the file is to be writable.
-	 */
-	Grid(const std::string& filename, bool writable = false, Monitor* monitor = nullptr) :
-		m_ds(nullptr),
-		m_type(GDT_Unknown),
-		m_mapped(false),
-		m_size(0),
-		m_data(nullptr),
-		m_dirty(false) {
-
-		init(filename, writable, monitor);
-
-	}
-
-	/**
-	 * \brief Initalize with an extant raster. Set the writable argument to true to enable writing.
-	 *
-	 * \param filename The path to the file.
-	 * \param writable True if the file is to be writable.
-	 */
-	void init(const std::string& filename, bool writable = false, Monitor* monitor = nullptr) {
-
-		if (filename.empty())
-			g_argerr("Filename must be given.");
-
-		if(!monitor)
-			monitor = getDefaultMonitor();
-
-		GDALAllRegister();
-
-		// Attempt to open the dataset.
-
-		m_ds = (GDALDataset *) GDALOpen(filename.c_str(), writable ? GA_Update : GA_ReadOnly);
-		if (m_ds == NULL)
-			g_runerr("Failed to open raster.");
-
-		GDALDriver *drv = m_ds->GetDriver();
-		if(drv == NULL)
-			g_runerr("Failed to retrieve driver.");
-
-		const char *drvName = drv->GetDescription();
-		if(drvName != NULL)
-			m_props.setDriver(drvName);
-
-		char** interleave = m_ds->GetMetadata("INTERLEAVE");
-
-		m_type = m_ds->GetRasterBand(1)->GetRasterDataType();
-
-		// Save some raster properties
-
-		double trans[6];
-		m_ds->GetGeoTransform(trans);
-
-		m_props.setTrans(trans);
-		m_props.setSize(m_ds->GetRasterXSize(), m_ds->GetRasterYSize());
-		m_props.setDataType(gdt2DataType(m_type));
-		m_props.setBands(m_ds->GetRasterCount());
-		m_props.setWritable(true);
-		m_props.setProjection(std::string(m_ds->GetProjectionRef()));
-		m_props.setNoData(m_ds->GetRasterBand(1)->GetNoDataValue()); // TODO: This might not be a real nodata value.
-		m_props.setFilename(filename);
-		if(interleave) {
-			m_props.setInterleave(interleaveFromString(*interleave));
-		} else {
-			m_props.setInterleave(Interleave::BIL);
-		}
-		// Set the metadata if there is any.
-		std::vector<std::string> bandMeta;
-		const char* metaName = m_props.bandMetaName().c_str();
-		for(size_t i = 0; i < m_props.bands(); ++i) {
-			const char* v = m_ds->GetRasterBand(i + 1)->GetMetadataItem(metaName, "");
-			if(v) {
-				bandMeta.emplace_back(v);
-			} else {
-				bandMeta.emplace_back("");
-			}
-		}
-		m_props.setBandMetadata(bandMeta);
-
-		if(mapped() || !initMem()) {
-			if(!initMapped())
-				g_runerr("Failed to allocate or map memory for raster.");
-		}
-
-		std::vector<T> row(props().cols());
-		GDALRasterIOExtraArg arg;
-		arg.pfnProgress = gdalProgress;
-		arg.pProgressData = monitor;
-		for(int b = 0; b < props().bands(); ++b) {
-			GDALRasterBand* band = m_ds->GetRasterBand(b + 1);
-			for(int r = 0; r < props().rows(); ++r) {
-				band->RasterIO(GF_Read, 0, r, props().cols(), 1, row.data(), props().cols(), 1, m_type, 0, 0, 0);
-				this->setRow(r, b, row.data());
-			}
-		}
-
-		m_props.setWritable(writable);
-	}
-
-	/**
-	 * \brief Write the metadata values band-wise.
-	 *
-	 * \param name The name of the field to set.
-	 * \param values The list of band values.
-	 */
-	void setMetadata(const std::string& name, const std::vector<std::string>& values) {
-		if(m_ds && props().writable()) {
-			for(int i = 0; i < std::min((int) values.size(), m_ds->GetRasterCount()); ++i)
-				m_ds->GetRasterBand(i + 1)->SetMetadataItem(name.c_str(), values[i].c_str());
-		} else {
-			g_runerr("Raster not open or not writable.");
-		}
-	}
-
-	/**
-	 * \brief Return a map containing the raster driver short name and extension.
-	 *
-	 * \return A map containing the raster driver short name and extension.
-	 */
-	static std::map<std::string, std::set<std::string> > extensions() {
-		GDALAllRegister();
-		std::map<std::string, std::set<std::string> > extensions;
-		GDALDriverManager* mgr = GetGDALDriverManager();
-		for(int i = 0; i < mgr->GetDriverCount(); ++i) {
-			GDALDriver* drv = mgr->GetDriver(i);
-			const char* cc = drv->GetMetadataItem(GDAL_DCAP_RASTER);
-			if(cc != NULL && std::strncmp(cc, "YES", 3) == 0) {
-				const char* desc = drv->GetDescription();
-				if(desc != NULL) {
-					const char* ext = drv->GetMetadataItem(GDAL_DMD_EXTENSION);
-					if(ext != NULL ) {
-						std::list<std::string> lst;
-						split(std::back_inserter(lst), std::string(ext));
-						for(const std::string& item : lst)
-							extensions[desc].insert("." + lowercase(item));
-					}
-
-				}
-			}
-		}
-		return extensions;
-	}
-
-	/**
-	 * \brief Return a map containing the raster driver short name and long name.
-	 *
-	 * \return A map containing the raster driver short name and long name.
-	 */
-	static std::map<std::string, std::string> drivers() {
-		std::vector<std::string> f;
-		return drivers(f);
-	}
-
-	/**
-	 * \brief Return a map containing the raster driver short name and long name.
-	 *
-	 * Use filter to filter the returns on short name.
-	 *
-	 * \param filter A vector containing the short names of drivers to include.
-	 * \return A map containing the raster driver short name and long name.
-	 */
-	static std::map<std::string, std::string> drivers(const std::vector<std::string>& filter) {
-		GDALAllRegister();
-		std::map<std::string, std::string> drivers;
-		GDALDriverManager *mgr = GetGDALDriverManager();
-		for(int i = 0; i < mgr->GetDriverCount(); ++i) {
-			GDALDriver *drv = mgr->GetDriver(i);
-			const char* cc = drv->GetMetadataItem(GDAL_DCAP_RASTER);
-			if(cc != NULL && std::strncmp(cc, "YES", 3) == 0) {
-				const char* name = drv->GetMetadataItem(GDAL_DMD_LONGNAME);
-				const char* desc = drv->GetDescription();
-				if(name != NULL && desc != NULL) {
-					bool found = true;
-					if(!filter.empty()) {
-						found = false;
-						for(const std::string& f : filter) {
-							if(f == desc) {
-								found = true;
-								break;
-							}
-						}
-					}
-					if(found)
-						drivers[desc] = name;
-				}
-			}
-		}
-		return drivers;
-	}
-
-
-	/**
-	 * \brief Get the name of the driver that would be used to open a file with the given path.
-	 *
-	 * \param filename The path to an existing raster.
-	 * \return The name of the griver used to open the file.
-	 */
-	static std::string getDriverForFilename(const std::string& filename) {
-		std::string ext = extension(filename);
-		std::map<std::string, std::set<std::string> > drivers = extensions();
-		std::string result;
-		for(const auto& it : drivers) {
-			if(it.second.find(ext) != it.second.end())
-				result = it.first;
-		}
-		return result;
-	}
-
-	/**
-	 * \brief Creates a virtual raster using the given files and writes it to a file with the given name.
-	 *
-	 * \param files A list of files to include in the raster.
-	 * \param outfile The path to the virtual raster.
-	 * \param nodata The nodata value for the virtual raster.
-	 */
-	static void createVirtualRaster(const std::vector<std::string>& files, const std::string& outfile, double nodata);
-
-	/**
-	 * \brief Creates a virtual raster using the given files and writes it to a file with the given name.
-	 *
-	 * \param begin An iterator into a list of files to include in the raster.
-	 * \param files The end iterator of the list of files to include in the raster.
-	 * \param outfile The path to the virtual raster.
-	 * \param nodata The nodata value for the virtual raster.
-	 */
-	template <class U>
-	static void createVirtualRaster(U begin, U end, const std::string& outfile, double nodata) {
-		std::vector<std::string> files(begin, end);
-		return createVirtualRaster(files, outfile, nodata);
-	}
-
-	/**
-	 * \brief Compute the table of Gaussian weights given the size of the table and the standard deviation.
-	 *
-	 * \param weights The list of weights.
-	 * \param size The size of the weights list.
-	 * \param sigma The standard deviation.
-	 * \param mean The centre of the curve.
-	 */
-	template <class U>
-	static void gaussianWeights(U* weights, int size, U sigma, U mean = 0) {
-		// If size is an even number, bump it up.
-		if (size % 2 == 0) {
-			++size;
-			g_warn("Gaussian kernel size must be an odd number >=3. Bumping up to " << size);
-		}
-		for (int r = 0; r < size; ++r) {
-			for (int c = 0; c < size; ++c) {
-				int x = c - size / 2;
-				int y = r - size / 2;
-				weights[r * size + c] = (1 / (2 * G_PI * sigma * sigma)) * std::pow(G_E, -((x * x + y * y) / (2.0 * sigma * sigma)));
-			}
-		}
-	}
-
-	/**
-	 * \brief Attempts to return the data type of the raster with the given filename.
-	 *
-	 * \param filename The path to an existing raster.
-	 * \return The data type.
-	 */
-	static DataType dataType(const std::string& filename) {
-		return DataType::None;
-	}
-
-	/**
-	 * \brief Return the GDAL data set pointer.
-	 *
-	 * \return The GDAL data set pointer.
-	 */
-	GDALDataset* gdalDataset() const {
-		return m_ds;
-	}
-
-	/**
-	 * \brief Copies the image data from an entire row into the buffer which must be pre-allocated.
-	 *
-	 * \param row The row index.
-	 * \param band The band number.
-	 * \param buf A pre-allocated buffer to store the data.
-	 */
-	void getRow(int row, int band, T* buf) {
-		for(int c = 0; c < props().cols(); ++c)
-			buf[c] = get(c, row, band);
-	}
-
-	/**
-	 * \brief Copies the image data from an entire row into the buffer which must be pre-allocated.
-	 *
-	 * \param row The row index.
-	 * \param band The band number.
-	 * \param buf A pre-allocated buffer to store the data.
-	 */
-	void setRow(int row, int band, T* buf) {
-		for(int c = 0; c < props().cols(); ++c)
-			set(c, row, buf[c], band);
-	}
-
-	/**
-	 * \brief Copies the image data from an entire column into the buffer which must be pre-allocated.
-	 *
-	 * \param column The column index.
-	 * \param band The band number.
-	 * \param buf A pre-allocated buffer to store the data.
-	 */
-	void getColumn(int col, int band, T* buf) {
-		for(int r = 0; r < props().rows(); ++r)
-			buf[r] = get(col, r, band);
-	}
-
-	/**
-	 * \brief Copies the image data from an entire column into the buffer which must be pre-allocated.
-	 *
-	 * \param col The column index.
-	 * \param band The band number.
-	 * \param buf A pre-allocated buffer to store the data.
-	 */
-	void setColumn(int col, int band, T* buf) {
-		for(int r = 0; r < props().rows(); ++r)
-			set(col, r, buf[r], band);
-	}
-
-	/**
-	 * \brief Copies the image data from an entire pixel into the buffer which must be pre-allocated.
-	 *
-	 * The buffer represents the band stack for that pixel.
-	 *
-	 * \param col The column index.
-	 * \param row The row index.
-	 * \param buf A pre-allocated buffer to store the data.
-	 */
-	void getPixel(int col, int row, T* buf) {
-		for(int b = 0; b < props().bands(); ++b)
-			buf[b] = get(col, row, b);
-	}
-
-	/**
-	 * \brief Copies the image data from a rectangular region into the buffer which must be pre-allocated.
-	 *
-	 * \param tile The buffer.
-	 * \param col The column index.
-	 * \param row The row index.
-	 * \param width The width of the tile.
-	 * \param height The height of the tile.
-	 * \param band The source band.
-	 */
-	void getTile(T* tile, int col, int row, int width, int height, int band) {
-		int cols = props().cols();
-		int rows = props().rows();
-		T nodata = props().nodata();
-		for(int r = row, rr = 0; r < row + height; ++r, ++rr) {
-			for(int c = col, cc = 0; c < col + width; ++c, ++cc) {
-				if(r < 0 || c < 0 || r >= rows || c >= cols) {
-					tile[rr * width + cc] = nodata;
-				} else {
-					tile[rr * width + cc] = get(c, r, band);
-				}
-			}
-		}
-	}
-
-	/**
-	 * \brief Copies the image data from a rectangular region into the buffer which must be pre-allocated.
-	 *
-	 * \param tile The buffer.
-	 * \param col The column index.
-	 * \param row The row index.
-	 * \param width The width of the tile.
-	 * \param height The height of the tile.
-	 * \param band The source band.
-	 */
-	void setTile(T* tile, int col, int row, int width, int height, int band) {
-
-		for(int r = row, rr = 0; r < row + height; ++r, ++rr) {
-			for(int c = col, cc = 0; c < col + width; ++c, ++cc) {
-				if(!(r < 0 || c < 0 || r >= props().rows() || c >= props().cols()))
-					set(c, r, tile[rr * width + cc], band);
-			}
-		}
-
-	}
-
-	/**
-	 * \brief Copies the image data from an entire column into the buffer which must be pre-allocated.
-	 *
-	 * \param band The band index.
-	 * \param band The band number.
-	 * \param buf A pre-allocated buffer to store the data.
-	 */
-	void setPixel(int col, int row, T* buf) {
-
-		for(int b = 0; b < props().bands(); ++b)
-			set(col, row, buf[b], b);
-
-	}
-
-	/**
-	 * \brief Return the properties of this Grid.
-	 *
-	 * \return The properties of this Grid.
-	 */
-	const GridProps& props() const {
-		return m_props;
-	}
-
-	/**
-	 * \brief Compute and return the statistics for the band.
-	 *
-	 * \param band The raster band.
-	 * \return A GridStats instance containing computed statistics.
-	 */
-	GridStats stats(int band) {
-		GridStats st;
-		const GridProps& gp = props();
-		double nodata = gp.nodata();
-		double v, m = 0, s = 0;
-		int k = 1;
-		st.sum = 0;
-		st.count = 0;
-		st.min = geo::maxvalue<double>();
-		st.max = geo::minvalue<double>();
-		// Welford's method for variance.
-		int rows = gp.rows();
-		int cols = gp.cols();
-		for(int row = 0; row < rows; ++row) {
-			for(int col = 0; col < cols; ++col) {
-				if ((v = get<double>(col, row, band)) != nodata) {
-					double oldm = m;
-					m = m + (v - m) / k;
-					s = s + (v - m) * (v - oldm);
-					st.sum += v;
-					if(v < st.min) st.min = v;
-					if(v > st.max) st.max = v;
-					++st.count;
-					++k;
-				}
-			}
-		}
-		st.mean = st.sum / st.count;
-		st.variance = s / st.count;
-		st.stdDev = std::sqrt(st.variance);
-		return st;
-	}
-
-	/**
-	 * \brief Fill the entire dataset with the given value.
-	 *
-	 * The given value is cast to the raster's type.
-	 *
-	 * \param value The value to fill the raster with.
-	 * \param band The band to fill.
-	 */
-	template <class U>
-	void fill(U value, int band) {
-		if(band < 0 && band >= props().bands())
-			g_runerr("Invalid fill band: " << band);
-		T v = (T) value;
-		size_t rows = m_props.rows();
-		size_t cols = m_props.cols();
-		size_t bands = m_props.bands();
-		size_t offset, step, size;
-		switch(m_props.interleave()) {
-		case Interleave::BIL:
-			offset = (size_t) band * cols;
-			step = bands * cols;
-			for(size_t i = offset; i < m_size; i += step) {
-				for(size_t c = 0; c < cols; ++c)
-					*(m_data + i + c) = v;
-			}
-			break;
-		case Interleave::BSQ:
-			size = cols * rows;
-			offset = (size_t) band * size;
-			for(size_t i = offset; i < offset + size; ++i)
-				*(m_data + i) = v;
-			break;
-		case Interleave::BIP:
-			for(size_t i = 0; i < m_size; i += bands) {
-				*(m_data + i + band) = v;
-			}
-			break;
-		default:
-			g_runerr("Unknown interleave: " << (int) m_props.interleave());
-		}
-	}
-
-	/**
-	 * \brief Fill the entire dataset with the given value.
-	 *
-	 * \param value The value to fill the raster with.
-	 * \param band The band to fill.
-	 */
-	void fill(T value, int band) {
-		fill<T>(value, band);
-	}
-
-	/**
-	 * \brief Fill all bands with the given value.
-	 *
-	 * \param value The fill value.
-	 */
-	void fill(T value) {
-		for(int i = 0; i < m_props.bands(); ++i)
-			fill(value, i);
-	}
-
-	/**
-	 * \brief Return a the value held at the given position in the grid.
-	 *
-	 * \param col The column.
-	 * \param row The row.
-	 * \param band The band.
-	 * \return The value held at the given index in the grid.
-	 */
-	template <class U>
-	U get(int col, int row, int band) {
-		size_t idx = props().index(col, row, band);
-		return (U) m_data[idx];
-
-	}
-
-	template <class U>
-	U get(double x, double y, int band) {
-		return get<U>(props().toCol(x), props().toRow(y), band);
-	}
-
-	/**
-	 * \brief Set the value held at the given index in the grid.
-	 *
-	 * \param col The column.
-	 * \param row The row.
-	 * \param value The value to set.
-	 * \param band The band.
-	 */
-	template <class U>
-	void set(int col, int row, U value, int band) {
-		if (!m_props.writable())
-			g_runerr("This raster is not writable.");
-		size_t idx = props().index(col, row, band);
-		m_data[idx] =(T) value;
-		m_dirty = true;
-	}
-
-	/**
-	 * \brief Set the value held at the given geographic position in the grid.
-	 *
-	 * \param x The x-coordinate.
-	 * \param y The y-coordinate.
-	 * \param value The value to set.
-	 * \param band The band.
-	 */
-	template <class U>
-	void set(double x, double y, U value, int band) {
-		set<U>(m_props.toCol(x), m_props.toRow(y), value, band);
-	}
-
-	/**
-	 * \brief Return a the value held at the given position in the grid.
-	 *
-	 * \param col The column.
-	 * \param row The row.
-	 * \param band The band.
-	 * \return The value held at the given index in the grid.
-	 */
-	T get(int col, int row, int band) {
-		return get<T>(col, row, band);
-	}
-
-	/**
-	 * \brief Return a the value held at the given position in the grid.
-	 *
-	 * \param x The x coordinate.
-	 * \param y The y coordinate.
-	 * \param band The band.
-	 * \return The value held at the given index in the grid.
-	 */
-	T get(double x, double y, int band) {
-		return get(props().toCol(x), props().toRow(y), band);
-	}
-
-	/**
-	 * \brief Set the value held at  the given index in the grid.
-	 *
-	 * \param col The column.
-	 * \param row The row.
-	 * \param value The value to set.
-	 * \param band The band.
-	 */
-	void set(int col, int row, T value, int band) {
-		set<T>(col, row, value, band);
-	}
-
-	/**
-	 * \brief Set the value held at  the given index in the grid.
-	 *
-	 * \param x The x coordinate.
-	 * \param y The y coordinate.
-	 * \param value The value to set.
-	 * \param band The band.
-	 */
-	void set(double x, double y, T value, int band) {
-		set(m_props.toCol(x), m_props.toRow(y), value, band);
-	}
-
-	/**
-	 * \brief Write data from the current Grid instance to the given grid.
-	 *
-	 * \param grd The target grid.
-	 * \param cols The number of columns to write.
-	 * \param rows The number of rows to write.
-	 * \param srcCol The source column to read from.
-	 * \param srcRow The source row to read from.
-	 * \param dstCol The destination column to write to.
-	 * \param dstRow The destination row to write to.
-	 * \param srcBand The source band.
-	 * \param dstBand The destination band.
-	 */
-	void writeTo(Grid<T>& grd,
-			int cols = 0, int rows = 0,
-			int srcCol = 0, int srcRow = 0,
-			int dstCol = 0, int dstRow = 0,
-			int srcBand = 0, int dstBand = 0) {
-
-		int srcCols = props().cols();
-		int srcRows = props().rows();
-		int dstCols = grd.props().cols();
-		int dstRows = grd.props().rows();
-
-		fixCoords(srcCol, srcRow, dstCol, dstRow, cols, rows, srcCols, srcRows, dstCols, dstRows);
-
-		for(int r = srcRow; r < srcRow + rows; ++r) {
-			for(int c = srcCol; c < srcCol + cols; ++c)
-				set(c - srcCol + dstCol, r - srcRow + dstRow, get(c, r, srcBand), dstBand);
-		}
-
-	}
-
-	/**
-	 * \brief Write a segment of the raster to a vector.
-	 *
-	 * The cells will be organized in row-column order.
-	 * Invalid values will be corrected.
-	 *
-	 * \param vec The vector.
-	 * \param col The start column.
-	 * \param row The start row.
-	 * \param cols The number of columns.
-	 * \param rows The number of rows.
-	 * \param band The source band.
-	 * \return The number of elements written.
-	 */
-	size_t readFromVector(std::vector<T>& vec, int col, int row, int cols, int rows, int band) {
-		for(int r = 0; r < rows; ++r) {
-			for(int c = 0; c < cols; ++c) {
-				if(!(c + col < 0 || r + row < 0 || c + col >= props().cols() || r + row >= props().rows()))
-					set(col + c, row + r, vec[r * cols + c], band);
-			}
-		}
-		return cols * rows;
-	}
-
-	/**
-	 * \brief Write a segment of the raster to a vector.
-	 *
-	 * The cells will be organized in row-column order.
-	 * Invalid values will be corrected.
-	 *
-	 * \param vec The vector.
-	 * \param col The start column.
-	 * \param row The start row.
-	 * \param cols The number of columns.
-	 * \param rows The number of rows.
-	 * \param band The source band.
-	 * \return The number of elements written.
-	 */
-	size_t writeToVector(std::vector<T>& vec, int col, int row, int cols, int rows, int band) {
-		vec.resize(cols * rows);
-		size_t i = 0;
-		for(int r = 0; r < rows; ++r) {
-			for(int c = 0; c < cols; ++c) {
-				if(c + col < 0 || r + row < 0 || c + col >= props().cols() || r + row >= props().rows()) {
-					vec[i++] = props().nodata();
-				} else {
-					vec[i++] = get(c + col, r + row, band);
-				}
-			}
-		}
-		return i;
-	}
-
-	/**
-	 * \brief Write a segment of the raster to a vector.
-	 *
-	 * The cells will be organized in row-column order.
-	 * Missing or out of bands cells are replaced with the given invalid value.
-	 *
-	 * \param vec The vector.
-	 * \param col The start column.
-	 * \param row The start row.
-	 * \param cols The number of columns.
-	 * \param rows The number of rows.
-	 * \param band The source band.
-	 * \param invalid A replacement for missing or out of bounds cells.
-	 * \return The number of elements written.
-	 */
-	size_t writeToVector(std::vector<T>& vec, int col, int row, int cols, int rows, int band, T invalid) {
-		vec.resize(cols * rows);
-		size_t i = 0;
-		for(int r = row; r < row + rows; ++r) {
-			for(int c = col; c < col + cols; ++c) {
-				if(c < 0 || r < 0 || c >= props().cols() || r >= props().rows()) {
-					vec[i++] = invalid;
-				} else {
-					vec[i++] = get(c + col, r + row, band);
-				}
-			}
-		}
-		return i;
-	}
-
-	/**
-	 * \brief Return the pixel values as a vector, for the given band.
-	 *
-	 * \param band The band.
-	 * \return The pixel values as a vector, for the given band.
-	 */
-	std::vector<T> asVector(int band) {
-		int cols = props().cols();
-		int rows = props().rows();
-		std::vector<T> data(cols * rows);
-		for(int r = 0; r < rows; ++r) {
-			for(int c = 0; c < cols; ++c)
-				data[r * cols + c] = get(c, r, band);
-		}
-		return data;
-	}
-
-	/**
-	 * \brief Normalize the grid so that one standard deviation is +-1.
-	 *
-	 * \param band The target band.
-	 */
-	void normalize(int band)  {
-		GridStats st = stats(1);
-		const GridProps& gp = props();
-		double v, nodata = gp.nodata();
-		double mean = st.mean;
-		double stdDev = st.stdDev;
-		int rows = gp.rows();
-		int cols = gp.cols();
-		for(int row = 0; row < rows; ++row) {
-			for(int col = 0; col < cols; ++col) {
-				if ((v = get<double>(col, row, band)) != nodata && !std::isnan(v) && v < geo::maxvalue<double>()) {
-					set(col, row, ((v - mean) / stdDev), band);
-				} else {
-					set(col, row, nodata, band);
-				}
-			}
-		}
-	}
-
-	/**
-	 * \brief Normalize the grid so that the max value is equal to 1, and the minimum is zero.
-	 *
-	 * \param band The target band.
-	 */
-	void logNormalize(int band) {
-		GridStats st = stats(band);
-		const GridProps& gp = props();
-		double n = st.min;
-		double x = st.max;
-		double e = std::exp(1.0) - 1.0;
-		int rows = gp.rows();
-		int cols = gp.cols();
-		for(int row = 0; row < rows; ++row) {
-			for(int col = 0; col < cols; ++col) {
-					set(col, row, std::log(1.0 + e * (get<double>(col, row, band) - n) / (x - n)), band);
-			}
-		}
-	}
-
-	/**
-	 * \brief Convert a Grid to some other type.
-	 *
-	 * \param g The destination Grid.
-	 * \param srcBand The source band.
-	 * \param dstBand The destination band.
-	 */
-	template <class U>
-	void convert(Grid<U>& g, int srcBand, int dstBand) {
-		const GridProps& gp = props();
-		int rows = gp.rows();
-		int cols = gp.cols();
-		for(int row = 0; row < rows; ++row) {
-			for(int col = 0; col < cols; ++col) {
-				g.set(col, row, get<U>(col, row, srcBand), dstBand);
-			}
-		}
-	}
-
-	/**
-	 * \brief Fill the grid, beginning with the target cell, where any contiguous cell satisfies the given FillOperator.
-	 *
-	 * The other grid is actually filled,
-	 * and the present grid is unchanged *unless* the present grid is passed
-	 * as other.
-	 *
-	 * \param col   The column to start on.
-	 * \param row   The row to start on.
-	 * \param op    A FillOperator instance which will determine
-	 *              whether a pixel should be filled.
-	 * \param other The grid whose cells will actually be filled.
-	 * \param fill  The value to fill cells with.
-	 * \param d8    Whether to enable diagonal fills.
-	 * \param out*  Pointer to variables that hold min and max rows and columns
-	 *              plus the area of the fill's bounding box.
-	 */
-	template <class U>
-	static void floodFill(int col, int row,
-		FillOperator<T, U>& op,  bool d8 = false,
-		int *outminc = nullptr, int *outminr = nullptr,
-		int *outmaxc = nullptr, int *outmaxr = nullptr,
-		int *outarea = nullptr) {
-
-		const GridProps& gp = op.srcProps();
-
-		int cols = gp.cols();
-		int rows = gp.rows();
-		size_t size = gp.size();
-		int minc = cols + 1;
-		int minr = rows + 1;
-		int maxc = -1;
-		int maxr = -1;
-		int area = 0;
-
-		std::queue<Cell> q;
-		q.emplace(col, row);
-
-		std::vector<bool> visited(size, false); // Tracks visited pixels.
-
-		while (q.size()) {
-
-			const Cell& cel = q.front();
-			row = cel.row;
-			col = cel.col;
-			q.pop();
-
-			size_t idx = (size_t) row * cols + col;
-
-			if (!visited[idx] && op.shouldFill(col, row)) {
-
-				minc = geo::min(col, minc);
-				maxc = geo::max(col, maxc);
-				minr = geo::min(row, minr);
-				maxr = geo::max(row, maxr);
-				++area;
-				op.fill(col, row);
-				visited[idx] = true;
-
-				if (row > 0)
-					q.push(Cell(col, row - 1));
-				if (row < rows - 1)
-					q.push(Cell(col, row + 1));
-
-				int c;
-				for (c = col - 1; c >= 0; --c) {
-					idx = (size_t) row * cols + c;
-					if (!visited[idx] && op.shouldFill(c, row)) {
-						minc = geo::min(c, minc);
-						++area;
-						op.fill(c, row);
-						visited[idx] = true;
-						if (row > 0)
-							q.push(Cell(c, row - 1));
-						if (row < rows - 1)
-							q.push(Cell(c, row + 1));
-					} else {
-						break;
-					}
-				}
-				if(d8) {
-					if (row > 0)
-						q.push(Cell(c, row - 1));
-					if (row < rows - 1)
-						q.push(Cell(c, row + 1));
-				}
-				for (c = col + 1; c < cols; ++c) {
-					idx = (size_t) row * cols + c;
-					if (!visited[idx] && op.shouldFill(c, row)) {
-						maxc = geo::max(c, maxc);
-						++area;
-						op.fill(c, row);
-						visited[idx] = true;
-						if (row > 0)
-							q.push(Cell(c, row - 1));
-						if (row < rows - 1)
-							q.push(Cell(c, row + 1));
-					} else {
-						break;
-					}
-				}
-				if(d8) {
-					if (row > 0)
-						q.push(Cell(c, row - 1));
-					if (row < rows - 1)
-						q.push(Cell(c, row + 1));
-				}
-			}
-		}
-		if(outminc != nullptr)
-			*outminc = minc;
-		if(outminr != nullptr)
-			*outminr = minr;
-		if(outmaxc != nullptr)
-			*outmaxc = maxc;
-		if(outmaxr != nullptr)
-			*outmaxr = maxr;
-		if(outarea != nullptr)
-			*outarea = area;
-	}
-
-	/**
-	 * \brief Smooth the raster and write the smoothed version to the output raster.
-	 *
-	 * Callback is an optional function reference with a single float
-	 * between 0 and 1, for status tracking.
-	 *
-	 * Sigma defaults to 0.84089642, window size to 3.
-	 *
-	 * \param smoothed The smoothed grid.
-	 * \param sigma    The standard deviation.
-	 * \param size     The window size.
-	 * \param srcband     The source band.
-	 * \param dstband     The target band.
-	 * \param monitor  A reference to the Monitor.
-	 */
-	void smooth(Grid<T>& smoothed, double sigma, int size, int srcband, int dstband, geo::Monitor* monitor = nullptr) {
-
-		if(!monitor)
-			monitor = getDefaultMonitor();
-
-		m_dirty = true;
-
-		const GridProps& gp = props();
-
-		monitor->status(0.01);
-
-		if (sigma <= 0)
-			g_argerr("Sigma must be > 0.");
-		if (size < 3)
-			g_argerr("Kernel size must be 3 or larger.");
-		if (size % 2 == 0) {
-			g_warn("Kernel size must be odd. Rounding up.");
-			size++;
-		}
-
-		// Compute the weights for Gaussian smoothing.
-		std::vector<double> weights(size * size * getTypeSize(DataType::Float64));
-		Grid::gaussianWeights(weights.data(), size, sigma);
-
-		monitor->status(0.02);
-
-		double k, v, nodata = gp.nodata();
-
-		// TODO: This is much faster when done in 2 passes.
-		for(int r = 0; r < gp.rows(); ++r) {
-			if(r % 100 == 0)
-				monitor->status(0.02 + ((float) r / gp.rows() - 0.02));
-			for(int c = 0; c < gp.cols(); ++c) {
-				double s = 0;
-				for(int rr = -size / 2; rr < size / 2 + 1; ++rr) {
-					for(int cc = -size / 2; cc < size / 2 + 1; ++cc) {
-						if(!(r + rr < 0 || c + cc < 0 || r + rr >= gp.rows() || c + cc >= gp.cols())
-								&& (v = get(c + cc, r + rr, srcband - 1)) != nodata) {
-							k = weights[(rr + size / 2) * size + (cc + size / 2)];
-							s += v * k;
-						}
-					}
-				}
-				smoothed.set(c, r, s, dstband - 1);
-			}
-		}
-
-		monitor->status(1.0);
-	}
-
-	/**
-	 * \brief The radius is given with cells as the unit, but can be rational.
-	 *
-	 * When determining which cells to include in the calculation,
-	 * any cell which partially falls in the radius will be included.
-	 *
-	 * \param filename 	The output filename.
-	 * \param band   	The source band.
-	 * \param mask		A raster to use as a mask; invalid pixels will be ignored.
-	 * \param maskBand  The band to use in the mask.
-	 * \param radius 	The search radius.
-	 * \param count  	The number of pixels to use for calculations.
-	 * \param exp    	The exponent.
-	 */
-	void voidFillIDW(const std::string& filename, int band, const std::string& mask,
-			int maskBand, double radius, int count = 4, double exp = 2.0) {
-
-		if(!isFloat())
-			g_runerr("IDW fill only implemented for float rasters.");
-
-		if (radius <= 0.0)
-			throw std::invalid_argument("Radius must be larger than 0.");
-
-		if (count <= 0)
-			throw std::invalid_argument("Count must be larger than 0.");
-
-		if (exp <= 0.0)
-			throw std::invalid_argument("Exponent must be larger than 0.");
-
-		GridProps iprops(props());
-		iprops.setBands(1);
-		iprops.setWritable(true);
-		Grid<T> input(iprops);
-		writeTo(input, iprops.cols(), iprops.rows(), 0, 0, 0, 0, band);
-
-		GridProps oprops(props());
-		oprops.setBands(1);
-		oprops.setWritable(true);
-		Grid<T> output(oprops);
-
-		int maxDist = 100;
-		bool holesOnly = true;
-
-		double nodata = props().nodata();
-		double v, d;
-		int rows = props().rows();
-		int cols = props().cols();
-
-		TargetFillOperator<T, T> op1(&input, band, band, nodata, 99999);
-		TargetFillOperator<T, T> op2(&input, band, &output, band, 99999, nodata);
-		TargetFillOperator<T, T> op3(&input, band, band, 99999, 99998);
-		int outminc, outminr, outmaxc, outmaxr;
-
-		for (int r = 0; r < rows; ++r) {
-			if(r % 100 == 0) {
-				std::cerr << "Row " << r << " of " << rows << "\n";
-			}
-			for (int c = 0; c < cols; ++c) {
-
-				v = input.get(c, r, band);
-				if(v == 99998) {
-
-					//output.setFloat(c, r, nodata);
-
-				} else if (v != nodata) {
-
-					output.set(c, r, v, 1);
-
-				} else if(!holesOnly) {
-
-					double dp, a = 0, b = 0;
-					int cnt = 0;
-					for(int r0 = geo::max(0, r - maxDist); r0 < geo::min(rows, r + maxDist + 1); ++r0) {
-						for(int c0 = geo::max(0, c - maxDist); c0 < geo::min(cols, c + maxDist + 1); ++c0) {
-							if((c0 == c && r0 == r) || (d = geo::sq(c0 - c) + geo::sq(r0 - r)) > maxDist ||
-									(v = input.get(c0, r0, band)) == nodata)
-								continue;
-							dp = 1.0 / std::pow(d, exp);
-							a += dp * v;
-							b += dp;
-							++cnt;
-						}
-					}
-					output.set(c, r, cnt ? (a / b) : nodata, 1);
-
-				} else {
-
-					// Fill the hole with a unique value.
-					input.floodFill(c, r, op1, false, &outminc, &outminr, &outmaxc, &outmaxr);
-
-					// If it touches the edges, re-fill with nodata and continue.
-					if(outminc == 0 || outmaxc == cols - 1 || outminr == 0 || outmaxr == rows - 1) {
-						output.floodFill(c, r, op2, false);
-						input.floodFill(c, r, op3, false);
-						continue;
-					}
-
-					// Find all the pixels which were filled
-					std::vector<std::tuple<int, int, double> > vpx;
-					std::vector<std::tuple<int, int> > npx;
-					for(int r0 = geo::max(0, outminr - 1); r0 < geo::min(rows, outmaxr + 2); ++r0) {
-						for(int c0 = geo::max(0, outminc - 1); c0 < geo::min(cols, outmaxc + 2); ++c0) {
-							v = input.get(c0, r0, band);
-							if(v == 99999) {
-								npx.push_back(std::make_tuple(c0, r0));
-							} else if(v != nodata && v != 99998) {
-								vpx.push_back(std::make_tuple(c0, r0, v));
-							}
-						}
-					}
-
-					// Fill voids using the surrounding pixel values.
-					int pc, pr, nc, nr, cnt;
-					double dp, pv, a, b;
-					for(auto& np : npx) {
-						nc = std::get<0>(np);
-						nr = std::get<1>(np);
-						cnt = 0;
-						a = 0;
-						b = 0;
-						for(auto& vp : vpx) {
-							pc = std::get<0>(vp);
-							pr = std::get<1>(vp);
-							pv = std::get<2>(vp);
-							d = geo::sq(pc - nc) + geo::sq(pr - nr);
-							dp = 1.0 / std::pow(d, exp);
-							a += dp * pv;
-							b += dp;
-							++cnt;
-						}
-						output.set(nc, nr, cnt ? (a / b) : nodata, 1);
-					}
-
-					// Fill again with a different value so it will be ignored.
-					input.floodFill(c, r, op3, false);
-				}
-			}
-		}
-
-		Grid<T> routput(filename, oprops);
-		output.writeTo(routput);
-
-	}
-
-	/**
-	 * \brief Finds the least-cost path from the start cell to the goal cell, using the given heuristic.
-	 *
-	 * Populates the given iterator with the optimal path between the start cell and the goal.
-	 *
-	 * If the search fails for some reason, like exceeding the maxCost, returns
-	 * false. Otherwise returns true.
-	 *
-	 * \param startCol The starting column.
-	 * \param startrow The starting row.
-	 * \param goalCol The column of the goal.
-	 * \param goalRow The row of the goal.
-	 * \param heuristic Used by the algorithm to estimate the future cost of the path.
-	 * \param inserter Used to accumulate the path results.
-	 * \param maxCost If the total cost exceeds this amount, just quit and return false.
-	 * \return True if the search succeeded, false otherwise.
-	 */
-	template <class U, class V>
-	bool searchAStar(int startCol, int startRow, int goalCol, int goalRow, U heuristic, V inserter, double maxCost = std::numeric_limits<double>::infinity()) {
-
-		static double offsets[4][2] = {{0, -1}, {-1, 0}, {1, 0}, {0, 1}};
-
-		size_t goal = ((size_t) goalCol << 32) | goalRow;
-		size_t start = ((size_t) startCol << 32) | startRow;
-
-		std::unordered_map<size_t, size_t> parents;
-		std::unordered_map<size_t, double> gscore;
-		std::unordered_map<size_t, double> fscore;
-
-		std::unordered_set<size_t> openSet;
-		std::unordered_set<size_t> closedSet;
-
-		openSet.insert(start);
-		gscore[start] = 0; 						// Distance from start to neighbour
-		fscore[start] = heuristic(start, goal); // Distance from neighbour to goal.
-
-		int cols = props().cols();
-		int rows = props().rows();
-
-		while(!openSet.empty()) {
-
-			if(openSet.size() % 10000 == 0) {
-				std::cerr << openSet.size() << "\n";
-			}
-
-			size_t top = minValue(fscore);
-
-			if(top == goal) {
-				writeAStarPath(top, parents, inserter);
-				return true;
-			}
-
-			double gscore0 = gscore[top];
-
-			fscore.erase(top);
-			gscore.erase(top);
-
-			openSet.erase(top);
-			closedSet.insert(top);
-
-			int qcol = (top >> 32) & 0xffffffff;
-			int qrow = top & 0xffffffff;
-
-			for(int i = 0; i < 4; ++i) {
-				int col = qcol + offsets[i][0];
-				int row = qrow + offsets[i][1];
-
-				if(col < 0 || row < 0 || col >= cols || row >= rows)
-					continue;
-
-				size_t n = ((size_t) col << 32) | row;
-
-				if(closedSet.find(n) != closedSet.end())
-					continue;
-
-				double tgscore = gscore0 + heuristic(top, n);
-
-				if(tgscore > maxCost)
-					return false;
-
-				if(openSet.find(n) == openSet.end()) {
-					openSet.insert(n);
-				} else if(tgscore >= gscore[n]) {
-					continue;
-				}
-
-				parents[n] = top;
-				gscore[n] = tgscore;
-				fscore[n] = tgscore + heuristic(n, goal);
-			}
-		}
-
-		return true;
-	}
-
-	/**
-	 * \brief Flush the raster data to the file.
-	 *
-	 * \param monitor An optional Monitor object.
-	 */
-	void flush(Monitor* monitor = nullptr) {
-
-		if(!m_ds || !props().writable())
-			return;
-
-		int cols = props().cols();
-		int rows = props().rows();
-		int bands = props().bands();
-
-		std::vector<T> buf(cols);
-
-		for(int b = 0; b < bands; ++b) {
-			GDALRasterBand* band = m_ds->GetRasterBand(b + 1);
-			for(int r = 0; r < rows; ++r) {
-				getRow(r, b, buf.data());
-				if(CE_None != band->RasterIO(GF_Write, 0, r, cols, 1, buf.data(), cols, 1, gdalType(), 0, 0, 0)) {
-					if(monitor)
-						monitor->error("Failed to write to raster.");
-				}
-
-				if(monitor)
-					monitor->status((float) r / rows, "Flushing grid to file.");
-			}
-		}
-	}
-
-	/**
-	 * \brief Destroy the raster.
-	 */
-	void destroy()  {
-
-		if(m_ds) {
-
-			GDALClose(m_ds);
-			m_ds = nullptr;
-
-		}
-
-		if(m_mapped) {
-
-			munmap(m_data, m_size);
-			m_mapped = false;
-			m_data = nullptr;
-
-		} else if(m_data) {
-
-			free(m_data);
-			m_data = nullptr;
-
-		}
-
-		m_size = 0;
-	}
-
-	/**
-	 * \brief Return true if the raster is using file-backed mapped memory.
-	 *
-	 * \return True if the raster is using file-backed mapped memory.
-	 */
-	bool mapped() const {
-		return m_mapped;
-	}
-
-	/**
-	 * \brief Re-map the file into memory according to the given Interleave type.
-	 *
-	 * \param interleave The Interleave type.
-	 */
-	void remap(Interleave interleave) {
-
-		if(props().interleave() == interleave)
-			return;
-
-		int cols = props().cols();
-		int rows = props().rows();
-		int bands = props().bands();
-
-		T* mem = (T*) mmap(0, m_size, PROT_READ|PROT_WRITE, MAP_ANONYMOUS|MAP_SHARED, 0, 0);
-		if(!mem)
-			g_runerr("Failed to reserve space for remap.")
-
-		GridProps nprops(props());
-		nprops.setInterleave(interleave);
-
-		for(int r = 0; r < rows; ++r) {
-			for(int c = 0; c < cols; ++c) {
-				for(int b = 0; b < bands; ++b)
-					mem[nprops.index(c, r, b)] = m_data[props().index(c, r, b)];
-			}
-		}
-
-		std::memcpy(m_data, mem, m_size);
-
-		m_props.setInterleave(interleave);
-
-	}
-
-	/**
-	 * \brief Vectorize the raster.
-	 *
-	 * \param filename The filename of the output vector.
-	 * \param layerName The name of the output layer.
-	 * \param idField A field name for the ID.
-	 * \param driver The name of the output driver. Any of the GDAL options.
-	 * \param srid The SRID of the projection for the database.
-	 * \param band The band to vectorize.
-	 * \param removeHoles Remove holes from the polygons.
-	 * \param removeDangles Remove small polygons attached to larger ones diagonally.
-	 * \param mask The name of a raster file that will be used to set the bounds for vectorization.
-	 * \param maskBand The band from the mask raster.
-	 * \param threads The number of threads to use.
-	 * \param d3 Set to true for 3D geometries; 2D otherwise.
-	 * \param fields A list of fields to add to the dataset.
-	 * \param status A Status object to receive progress updates.
-	 * \param cancel A boolean that will be set to true if the algorithm should quit.
-	 */
-	void polygonize(const std::string& filename, const std::string& layerName, const std::string& idField,
-			const std::string& driver, int srid, int band,
-			bool removeHoles = false, bool removeDangles = false,
-			const std::string& mask = "", int maskBand = 0, int threads = 1, bool d3 = false,
-			const std::vector<std::pair<std::string, OGRFieldType> >& fields = {},
-			Monitor* monitor = nullptr) {
-
-		if(!monitor)
-			monitor = getDefaultMonitor();
-
-		OGRSpatialReference sr;
-		sr.importFromEPSG(srid);
-		std::vector<char> buf(2048);
-		char* bufc = buf.data();
-		sr.exportToWkt(&bufc);
-		std::string projection(buf.data());
-
-		polygonize(filename, layerName, idField, driver, projection, band, removeHoles, removeDangles,
-				mask, maskBand, threads, d3, fields, monitor);
-	}
-
-	/**
-	 * \brief Vectorize the raster.
-	 *
-	 * \param filename The filename of the output vector.
-	 * \param layerName The name of the output layer.
-	 * \param idField A field name for the ID.
-	 * \param driver The name of the output driver. Any of the GDAL options.
-	 * \param projection The WKT projection for the database.
-	 * \param band The band to vectorize.
-	 * \param removeHoles Remove holes from the polygons.
-	 * \param removeDangles Remove small polygons attached to larger ones diagonally.
-	 * \param mask The name of a raster file that will be used to set the bounds for vectorization.
-	 * \param maskBand The band from the mask raster.
-	 * \param threads The number of threads to use.
-	 * \param d3 Set to true for 3D geometries; 2D otherwise.
-	 * \param fields A list of fields to add to the dataset.
-	 * \param status A Status object to receive progress updates.
-	 * \param cancel A boolean that will be set to true if the algorithm should quit.
-	 */
-	void polygonize(const std::string& filename, const std::string& layerName, const std::string& idField,
-			const std::string& driver, const std::string& projection, int band,
-			bool removeHoles = false, bool removeDangles = false,
-			const std::string& mask = "", int maskBand = 0, int threads = 1, bool d3 = false,
-			const std::vector<std::pair<std::string, OGRFieldType> >& fields = {},
-			Monitor* monitor = nullptr) {
-
-		if(!monitor)
-			monitor = getDefaultMonitor();
-
-		if(isFloat())
-			g_runerr("Only int rasters can be polygonized.");
-
-		// It's faster to work on a band-interleaved raster.
-		if(props().interleave() == Interleave::BIP)
-			remap(Interleave::BIL);
-
-		if(threads < 1)
-			threads = 1;
-
-		initGEOS(0, 0);
-
-		// Extract some grid properties.
-		int cols = props().cols();
-		int rows = props().rows();
-		double resX = props().resX();
-		double resY = props().resY();
-		const Bounds<T>& bounds = props().bounds();
-
-		// Create a buffer for the row.
-		std::vector<T> buf(cols);
-
-		// The starting corner coordinates.
-		double startX = resX > 0 ? bounds.minx() : bounds.maxx();
-		double startY = resY > 0 ? bounds.miny() : bounds.maxy();
-
-		// Create the output dataset
-		GEOSContextHandle_t gctx = OGRGeometry::createGEOSContext();
-
-		OGRSpatialReference* sr = nullptr;
-		if(!projection.empty())
-			sr = new OGRSpatialReference(projection.c_str());
-
-		GDALDataset* ds;
-		OGRLayer* layer;
-		polyMakeDataset(filename, driver, layerName, idField, sr,
-				d3 ? wkbMultiPolygon25D : wkbMultiPolygon, &ds, &layer);
-
-		if(sr)
-			sr->Release();
-
-		if(!fields.empty()) {
-			for(const std::pair<std::string, OGRFieldType>& field : fields) {
-				if(idField == field.first) {
-					g_warn("The ID field matches one of the additional field names. Ignored.")
-					continue;
-				}
-				OGRFieldDefn dfn(field.first.c_str(), field.second);
-				layer->CreateField(&dfn);
-			}
-		}
-
-		double eps = 0.001;
-
-		// Data containers.
-		std::unordered_map<int, std::vector<GEOSGeometry*> > geoms;
-		std::unordered_set<int> activeIds;
-		std::unordered_set<int> finalIds;
-
-		// Thread control features.
-		bool running = true;
-		std::list<std::thread> ths;
-
-		std::atomic<size_t> poly_fid(0);
-		std::mutex poly_gmtx;
-		std::mutex poly_fmtx;
-		std::mutex poly_omtx;
-		std::condition_variable poly_cv;
-
-		// Start output threads.
-		for(int i = 0; i < threads; ++i) {
-			ths.emplace_back(polyWriteToFile, &geoms, &finalIds, &idField, layer, &gctx,
-					removeHoles, removeDangles, &running, monitor,
-					&poly_fid, &poly_gmtx, &poly_fmtx, &poly_omtx, &poly_cv);
-		}
-
-		// Process raster.
-		for(int r = 0; r < rows; ++r) {
-
-			if(monitor->canceled()) break;
-
-			monitor->status((float) r / rows, "Polygonizing...");
-
-			// Load the row buffer.
-			getRow(r, band, buf.data());
-
-			// Initialize the corner coordinates.
-			double x0 = startX;
-			double y0 = startY + r * resY;
-			double x1 = x0;
-			double y1 = y0 + resY;
-
-			// For tracking cell values. TODO: An unsigned int is possible here: overflow.
-			int v0 = buf[0];
-			int v1 = -1;
-
-			// Reset the list of IDs extant in the current row.
-			activeIds.clear();
-
-			for(int c = 1; c < cols; ++c) {
-
-				if(monitor->canceled()) break;
-
-				// If the current cell value differs from the previous one...
-				if((v1 = buf[c]) != v0) {
-					// Update the right x coordinate.
-					x1 = startX + c * resX;
-					// If the value is a valid ID, create and the geometry and save it for writing.
-					if(v0 > 0) {
-						geoms[v0].push_back(polyMakeGeom(gctx, x0, y0, x1, y1, eps));
-						activeIds.insert(v0);
-					}
-					// Update values for next loop.
-					v0 = v1;
-					x0 = x1;
-				}
-			}
-
-			// IDs that are in the geoms array and not in the current row are ready to be finalized.
-			if(!monitor->canceled()) {
-				std::lock_guard<std::mutex> lk0(poly_gmtx);
-				std::lock_guard<std::mutex> lk1(poly_fmtx);
-				for(const auto& it : geoms) {
-					if(activeIds.find(it.first) == activeIds.end())
-						finalIds.insert(it.first);
-				}
-			}
-			poly_cv.notify_all();
-
-			while(!monitor->canceled() && !finalIds.empty())
-				std::this_thread::yield();
-		}
-
-		// Finalize all remaining geometries.
-		if(!monitor->canceled()) {
-			std::lock_guard<std::mutex> lk0(poly_gmtx);
-			std::lock_guard<std::mutex> lk1(poly_fmtx);
-			for(auto& it : geoms)
-				finalIds.insert(it.first);
-		}
-
-		// Let the threads shut down when they run out of geometries.
-		running = false;
-		poly_cv.notify_all();
-
-		for(std::thread& th : ths) {
-			if(th.joinable())
-				th.join();
-		}
-
-		OGRGeometry::freeGEOSContext(gctx);
-
-		// Release the layer -- GDAL will take care of it. But close the dataset so that can happen.
-		layer->Dereference();
-		GDALClose(ds);
-
-		monitor->status(1.0, "Finished polygonization");
-
-		finishGEOS();
-
-	}
-
-	/**
-	 * Destroy the grid.
-	 */
-	~Grid() {
-
-		flush();
-		destroy();
-
-	}
-
-};
-#endif
-
 template <class T>
 class MappedFile {
 private:
@@ -3083,6 +1237,43 @@ private:
 		DataType t = type();
 		return t == DataType::Float32 || t == DataType::Float64;
 	}
+
+	inline size_t toIdx(int c, int r) const {
+		return ((size_t) c << 32) | r;
+	}
+
+	inline int toCol(size_t i) {
+		return (i >> 32) & 0xffffffff;
+	}
+
+	inline int toRow(size_t i) const {
+		return i & 0xffffffff;
+	}
+
+	/**
+	 * \brief Writes an ordered path to the iterator from the map of cells.
+	 *
+	 * \param start The start index into the map.
+	 * \param parents The map of cell relationships.
+	 * \param inserter The insert iterator.
+	 */
+	template <class V>
+	void writeAStarPath(size_t start, std::unordered_map<size_t, size_t>& parents, V inserter) {
+		int cols = props().cols();
+		int rows = props().rows();
+		*inserter = std::make_pair(
+			props().toX(toCol(start)), props().toY(toRow(start))
+		);
+		++inserter;
+		while(parents.find(start) != parents.end()) {
+			start = parents[start];
+			*inserter = std::make_pair(
+				props().toX(toCol(start)), props().toY(toRow(start))
+			);
+			++inserter;
+		}
+	}
+
 
 public:
 
@@ -3323,8 +1514,11 @@ public:
 		GDALRasterBand* bnd = m_ds->GetRasterBand(band + 1);
 		GDALRasterIOExtraArg arg;
 		INIT_RASTERIO_EXTRA_ARG(arg);
+		struct gdalprg prg;
+		prg.p = 0;
+		prg.m = monitor;
 		arg.pfnProgress = gdalProgress;
-		arg.pProgressData = monitor;
+		arg.pProgressData = &prg;
 
 		if(CE_None != bnd->RasterIO(GF_Read, 0, 0, cols, rows,
 				m_data, cols, rows, m_type, 0, 0, &arg))
@@ -3627,6 +1821,8 @@ public:
 	 * \param ro The row buffer.
 	 */
 	void setTile(T* tile, int col, int row, int width, int height, int cb = 0, int rb = 0) {
+		if (!m_props.writable())
+			g_warn("This raster is not writable.");
 		int cols = props().cols();
 		int rows = props().rows();
 		T nodata = props().nodata();
@@ -3700,6 +1896,8 @@ public:
 	 */
 	template <class U>
 	void fill(U value) {
+		if (!m_props.writable())
+			g_warn("This raster is not writable.");
 		size_t cols = props().cols();
 		size_t rows = props().rows();
 		std::vector<T> buf(cols);
@@ -3749,7 +1947,7 @@ public:
 	template <class U>
 	void set(int col, int row, U value) {
 		if (!m_props.writable())
-			g_runerr("This raster is not writable.");
+			g_warn("This raster is not writable.");
 		if(col < 0 || row < 0 || col >= m_props.cols() || row >= m_props.rows())
 			g_argerr("Col or row out of bounds.");
 		size_t idx = (size_t) row * (size_t) m_props.cols() + (size_t) col;
@@ -3928,6 +2126,8 @@ public:
 	 * \brief Normalize the grid so that one standard deviation is +-1.
 	 */
 	void normalize()  {
+		if (!m_props.writable())
+			g_warn("This raster is not writable.");
 		GridStats st = stats();
 		const GridProps& gp = props();
 		double v, nodata = gp.nodata();
@@ -3950,6 +2150,8 @@ public:
 	 * \brief Normalize the grid so that the max value is equal to 1, and the minimum is zero.
 	 */
 	void logNormalize() {
+		if (!m_props.writable())
+			g_warn("This raster is not writable.");
 		GridStats st = stats();
 		const GridProps& gp = props();
 		double n = st.min;
@@ -4115,6 +2317,8 @@ public:
 	 * \param monitor  A reference to the Monitor.
 	 */
 	void smooth(Band<T>& smoothed, double sigma, int size, geo::Monitor* monitor = nullptr) {
+		if (!m_props.writable())
+			g_warn("This raster is not writable.");
 
 		if(!monitor)
 			monitor = getDefaultMonitor();
@@ -4143,8 +2347,9 @@ public:
 		int gc = gp.cols();
 		int gr = gp.rows();
 		// TODO: This is much faster when done in 2 passes.
+		int statusStep = std::max(1, gr / 10);
 		for(int r = 0; r < gr; ++r) {
-			if(r % 100 == 0)
+			if(r % statusStep == 0)
 				monitor->status(0.02 + ((float) r / gr - 0.02));
 			for(int c = 0; c < gc; ++c) {
 				double s = 0;
@@ -4214,9 +2419,9 @@ public:
 		TargetFillOperator<T, T> op2(&input, 0, &output, 0, 99999, nodata);
 		TargetFillOperator<T, T> op3(&input, 0, 0, 99999, 99998);
 		int outminc, outminr, outmaxc, outmaxr;
-
+		int statusStep = std::max(1, rows / 10);
 		for (int r = 0; r < rows; ++r) {
-			if(r % 100 == 0) {
+			if(r % statusStep == 0) {
 				std::cerr << "Row " << r << " of " << rows << "\n";
 			}
 			for (int c = 0; c < cols; ++c) {
@@ -4319,7 +2524,7 @@ public:
 	 * \param goalCol The column of the goal.
 	 * \param goalRow The row of the goal.
 	 * \param heuristic Used by the algorithm to estimate the future cost of the path.
-	 * \param inserter Used to accumulate the path results.
+	 * \param inserter Used to accumulate the path results, a list of pairs representing x, y.
 	 * \param maxCost If the total cost exceeds this amount, just quit and return false.
 	 * \return True if the search succeeded, false otherwise.
 	 */
@@ -4327,10 +2532,14 @@ public:
 	bool searchAStar(int startCol, int startRow, int goalCol, int goalRow,
 			U heuristic, V inserter, double maxCost = std::numeric_limits<double>::infinity()) {
 
-		static double offsets[4][2] = {{0, -1}, {-1, 0}, {1, 0}, {0, 1}};
+		static double offsets[8][2] = {
+			{-1, -1}, {0, -1}, {1, -1},
+			{-1, 0}, {1, 0},
+			{-1, 1}, {0, 1}, {1, 1}
+		};
 
-		size_t goal = ((size_t) goalCol << 32) | goalRow;
-		size_t start = ((size_t) startCol << 32) | startRow;
+		size_t goal = toIdx(goalCol, goalRow);
+		size_t start = toIdx(startCol, startRow);
 
 		std::unordered_map<size_t, size_t> parents;
 		std::unordered_map<size_t, double> gscore;
@@ -4341,7 +2550,7 @@ public:
 
 		openSet.insert(start);
 		gscore[start] = 0; 						// Distance from start to neighbour
-		fscore[start] = heuristic(start, goal); // Distance from neighbour to goal.
+		fscore[start] = heuristic(toCol(start), toRow(start), toCol(goal), toRow(goal)); // Distance from neighbour to goal.
 
 		int cols = props().cols();
 		int rows = props().rows();
@@ -4352,54 +2561,46 @@ public:
 				std::cerr << openSet.size() << "\n";
 			}
 
-			size_t top = minValue(fscore);
+			size_t cur = minValue(fscore);
 
-			if(top == goal) {
-				writeAStarPath(top, parents, inserter);
+			if(cur == goal) {
+				writeAStarPath(cur, parents, inserter);
 				return true;
 			}
 
-			double gscore0 = gscore[top];
+			openSet.erase(cur);
+			fscore.erase(cur);
+			gscore.erase(cur);
+			closedSet.insert(cur);
 
-			fscore.erase(top);
-			gscore.erase(top);
-
-			openSet.erase(top);
-			closedSet.insert(top);
-
-			int qcol = (top >> 32) & 0xffffffff;
-			int qrow = top & 0xffffffff;
-
-			for(int i = 0; i < 4; ++i) {
+			int qcol = toCol(cur);
+			int qrow = toRow(cur);
+			for(int i = 0; i < 8; ++i) {
 				int col = qcol + offsets[i][0];
 				int row = qrow + offsets[i][1];
 
-				if(col < 0 || row < 0 || col >= cols || row >= rows)
+				if(!props().hasCell(col, row))
 					continue;
 
-				size_t n = ((size_t) col << 32) | row;
+				size_t n = toIdx(col, row);
 
 				if(closedSet.find(n) != closedSet.end())
 					continue;
 
-				double tgscore = gscore0 + heuristic(top, n);
+				double tgscore = gscore[cur] + heuristic(toCol(cur), toRow(cur), toCol(n), toRow(n));
 
-				if(tgscore > maxCost)
-					return false;
-
-				if(openSet.find(n) == openSet.end()) {
-					openSet.insert(n);
-				} else if(tgscore >= gscore[n]) {
-					continue;
+				// If the neighbour is not in the gscore or is greater than tentative (implicit infinity value for missing n).
+				if(gscore.find(n) == gscore.end() || tgscore < gscore.at(n)) {
+					gscore[n] = tgscore;
+					fscore[n] = tgscore + heuristic(toCol(n), toRow(n), toCol(goal), toRow(goal));
+					parents[n] = cur;
+					if(openSet.find(n) == openSet.end())
+						openSet.insert(n);
 				}
-
-				parents[n] = top;
-				gscore[n] = tgscore;
-				fscore[n] = tgscore + heuristic(n, goal);
 			}
 		}
 
-		return true;
+		return false;
 	}
 
 	/**
@@ -4425,8 +2626,11 @@ public:
 			GDALRasterBand* band = m_ds->GetRasterBand(m_band + 1);
 			GDALRasterIOExtraArg arg;
 			INIT_RASTERIO_EXTRA_ARG(arg);
+			struct gdalprg prg;
+			prg.p = 0;
+			prg.m = monitor;
 			arg.pfnProgress = gdalProgress;
-			arg.pProgressData = monitor;
+			arg.pProgressData = &prg;
 
 			if(CE_None != band->RasterIO(GF_Write, 0, 0, cols, rows,
 					m_data, cols, rows, gdalType(), 0, 0, &arg)) {
@@ -4509,34 +2713,56 @@ public:
 	}
 
 	/**
+	 * \brief Draws a line of the given value from one point to the other.
+	 *
+	 * \param x0 The start x.
+	 * \param y0 The start y.
+	 * \param x1 The end x.
+	 * \param y1 The end y.
+	 * \param value The value to use to draw the line.
+	 */
+	void drawLine(double x0, double y0, double x1, double y1, T value) {
+		if (!m_props.writable())
+			g_warn("This raster is not writable.");
+		double slope = std::abs(y0 - y1) / std::abs(x0 - x1);
+		const GridProps& p = props();
+		double xstep = (slope >= 1 ? 1 / slope : 1) * std::abs(p.resX());
+		double ystep = (slope >= 1 ? 1 : slope) * std::abs(p.resY());
+		for(double y = y0; y <= y1; y += ystep) {
+			for(double x = x0; x <= x1; x += xstep) {
+				int c = p.toCol(x);
+				int r = p.toRow(y);
+				if(p.hasCell(c, r) && get(c, r) < value)
+					set(c, r, value);
+				if(p.hasCell(c + 1, r + 1) && get(c + 1, r + 1) < value)
+					set(c + 1, r + 1, value);
+			}
+		}
+	}
+
+	/**
 	 * \brief Vectorize the raster.
 	 *
 	 * \param filename The filename of the output vector.
 	 * \param layerName The name of the output layer.
 	 * \param idField A field name for the ID.
 	 * \param driver The name of the output driver. Any of the GDAL options.
-	 * \param srid The SRID of the projection for the database.
 	 * \param removeHoles Remove holes from the polygons.
 	 * \param removeDangles Remove small polygons attached to larger ones diagonally.
 	 * \param d3 Set to true for 3D geometries; 2D otherwise.
 	 * \param fields A list of fields to add to the dataset.
 	 * \param status A Monitor object to receive progress updates and cancel.
 	 */
-	void polygonizeToFile(const std::string& filename, const std::string& layerName, const std::string& idField,
-			const std::string& driver, int srid,
+	void polygonizeToFile(const std::string& filename, const std::string& layerName,
+			const std::string& idField, const std::string& driver,
 			bool removeHoles = false, bool removeDangles = false, bool d3 = false,
-			const std::vector<std::pair<std::string, OGRFieldType> >& fields = {},
+			const std::vector<PolygonValue>& fields = {},
 			Monitor* monitor = nullptr) {
 
 		if(!monitor)
 			monitor = getDefaultMonitor();
 
-		OGRSpatialReference sr;
-		sr.importFromEPSG(srid);
-		std::vector<char> buf(2048);
-		char* bufc = buf.data();
-		sr.exportToWkt(&bufc);
-		std::string projection(buf.data());
+		const std::string& projection = props().projection();
 
 		polygonizeToFile(filename, layerName, idField, driver, projection, removeHoles, removeDangles,
 				d3, fields, monitor);
@@ -4559,7 +2785,7 @@ public:
 	void polygonizeToFile(const std::string& filename, const std::string& layerName, const std::string& idField,
 			const std::string& driver, const std::string& projection,
 			bool removeHoles = false, bool removeDangles = false, bool d3 = false,
-			const std::vector<std::pair<std::string, OGRFieldType> >& fields = {},
+			const std::vector<PolygonValue>& fields = {},
 			Monitor* monitor = nullptr) {
 
 		// Create the output dataset
@@ -4574,15 +2800,14 @@ public:
 		GDALDataset* ds;
 		OGRLayer* layer;
 
-		polyMakeDataset(filename, driver, layerName, idField, sr,
-				d3 ? wkbMultiPolygon25D : wkbMultiPolygon, &ds, &layer);
+		polyMakeDataset(filename, driver, layerName, idField, fields,
+				sr, d3 ? wkbMultiPolygon25D : wkbMultiPolygon, &ds, &layer);
 
 		// Dispose of the spatial reference object.
 		if(sr)
 			sr->Release();
 
 		// Thread control objects.
-		std::atomic<int> fid(0);
 		bool running = true;
 		std::mutex gmtx;
 
@@ -4593,24 +2818,12 @@ public:
 		pc.removeHoles = removeHoles;
 		pc.monitor = monitor != nullptr ? monitor : getDefaultMonitor();
 
-		// Create the field set for the database.
-		if(!fields.empty()) {
-			for(const std::pair<std::string, OGRFieldType>& field : fields) {
-				if(idField == field.first) {
-					g_warn("The ID field matches one of the additional field names. Ignored.")
-					continue;
-				}
-				OGRFieldDefn dfn(field.first.c_str(), field.second);
-				layer->CreateField(&dfn);
-			}
-		}
-
 		// Start a transaction on the layer.
 		if(OGRERR_NONE != layer->StartTransaction())
 			g_runerr("Failed to start transaction.");
 
 		// Start the writer thread.
-		std::thread th(polyWriteToFile, &pc.geoms, layer, &idField, &fid, gctx, &running, monitor, &gmtx);
+		std::thread th(polyWriteToDB, &pc, &gmtx);
 
 		// Create the functor that will accept polygon objects.
 		struct fn {
@@ -4630,6 +2843,79 @@ public:
 
 		// Wait for the writer to exit and join.
 		running = false;
+		if(th.joinable())
+			th.join();
+
+		// Commit and release the layer -- GDAL will take care of it. But close the dataset so that can happen.
+		if(OGRERR_NONE != layer->CommitTransaction())
+			g_runerr("Failed to commit transaction.");
+		layer->Dereference();
+		GDALClose(ds);
+
+		OGRGeometry::freeGEOSContext(gctx);
+
+	}
+
+
+	void polygonizeToTable(const std::string& conn, const std::string& layerName, const std::string& idField,
+			const std::vector<PolygonValue>& fieldValues,
+			bool removeHoles = false, bool removeDangles = false, bool d3 = false,
+			Monitor* monitor = nullptr) {
+
+		if(!monitor)
+			monitor = getDefaultMonitor();
+
+		// Create the output dataset
+		GEOSContextHandle_t gctx = OGRGeometry::createGEOSContext();
+
+		// Create the output dataset
+		GDALDataset* ds = (GDALDataset*) GDALOpenEx(conn.c_str(), GDAL_OF_VECTOR | GDAL_OF_UPDATE, nullptr, nullptr, nullptr);
+		if(!ds)
+			g_runerr("Could not connect to database.");
+
+		OGRLayer* layer = ds->GetLayerByName(layerName.c_str());
+		if(!layer)
+			g_runerr("Could not find layer.");
+
+		// Thread control objects.
+		std::mutex gmtx;
+
+		// The polygonization context will be passed into the poly threads.
+		PolygonContext pc;
+		pc.gctx = gctx;
+		pc.removeDangles = removeDangles;
+		pc.removeHoles = removeHoles;
+		pc.monitor = monitor != nullptr ? monitor : getDefaultMonitor();
+		pc.layer = layer;
+		pc.idField = idField;
+		pc.fieldValues = fieldValues;
+		pc.writeRunning = true;
+
+		// Start a transaction on the layer.
+		if(OGRERR_NONE != layer->StartTransaction())
+			g_runerr("Failed to start transaction.");
+
+		// Start the writer thread.
+		std::thread th(polyWriteToDB, &pc, &gmtx);
+
+		// Create the functor that will accept polygon objects.
+		struct fn {
+			PolygonContext* pc;
+			std::mutex* gmtx;
+			void operator()(int id, GEOSGeometry* geom, GEOSContextHandle_t gctx) {
+				std::lock_guard<std::mutex> lk(*gmtx);
+				pc->geoms.emplace_back(id, geom);
+			}
+		};
+
+		// Run the polygonization.
+		struct fn f;
+		f.pc = &pc;
+		f.gmtx = &gmtx;
+		polygonize(f, &pc);
+
+		// Wait for the writer to exit and join.
+		pc.writeRunning = false;
 		if(th.joinable())
 			th.join();
 
@@ -4708,7 +2994,7 @@ public:
 		double eps = 0.0001;
 
 		// Thread control features.
-		pc->running = true;
+		pc->mergeRunning = true;
 
 		// Start merge and write threads.
 		int nth = 2;
@@ -4723,12 +3009,15 @@ public:
 		// The list of geometries currently being built.
 		std::unordered_set<int> activeIds;
 
+		int statusStep = std::max(1, pc->rows / 10);
+
 		// Process raster.
 		for(int tr = 0; tr < pc->rows; ++tr) {
 
 			if(pc->monitor->canceled()) break;
 
-			pc->monitor->status((float) tr / pc->rows, "Polygonizing...");
+			if(tr % statusStep == 0)
+				pc->monitor->status((float) tr / pc->rows, "Polygonizing...");
 
 			while(pc->geomBuf.size() > 10000 && !pc->monitor->canceled())
 				std::this_thread::yield();
@@ -4756,7 +3045,7 @@ public:
 					break;
 
 				// If the current cell value differs from the previous one...
-				if(c == pc->cols || (v1 = buf[c]) != v0) {
+				if(c == pc->cols - 1 || (v1 = buf[c]) != v0) {
 					// Update the right x coordinate.
 					x1 = pc->startX + c * pc->resX;
 					// If the value is a valid ID, create and the geometry and save it for writing.
@@ -4799,7 +3088,7 @@ public:
 		}
 
 		// Let the threads shut down when they run out of geometries.
-		pc->running = false;
+		pc->mergeRunning = false;
 		pc->gcv.notify_all();
 
 		for(int i = 0; i < nth; ++i) {
@@ -4807,8 +3096,8 @@ public:
 				th[i].join();
 		}
 
-		for(auto& it : pc->geoms)
-			GEOSGeom_destroy_r(pc->gctx, it.second);
+		//for(auto& it : pc->geoms)
+		//	GEOSGeom_destroy_r(pc->gctx, it.second);
 
 		pc->monitor->status(1.0, "Finished polygonization");
 
@@ -4896,7 +3185,9 @@ public:
 	 * \return True if the given cell should be filled.
 	 */
 	bool shouldFill(int col, int row) const {
-		return m_src->get(col, row, m_srcBand) == m_target;
+		if(m_src->props().hasCell(col, row))
+			return m_src->get(col, row) == m_target;
+		return false;
 	}
 
 	/**
@@ -4906,7 +3197,8 @@ public:
 	 * \param row A row index.
 	 */
 	void fill(int col, int row) const {
-		m_dst->set(col, row, (U) m_fill, m_dstBand);
+		if(m_dst->props().hasCell(col, row))
+			m_dst->set(col, row, (U) m_fill);
 	}
 
 	~TargetFillOperator() {}

@@ -36,50 +36,67 @@ size_t geo::grid::detail::minValue(std::unordered_map<size_t, double>& m) {
 }
 
 
-void geo::grid::detail::polyWriteToFile(std::list<std::pair<int, GEOSGeometry*>>* geoms,
-		OGRLayer* layer, const std::string* idField, std::atomic<int>* fid,
-		GEOSContextHandle_t gctx,
-		bool* running, Monitor* monitor, std::mutex* gmtx) {
+void geo::grid::detail::polyWriteToDB(PolygonContext* pc, std::mutex* gmtx) {
 
 	GEOSGeometry* geom = nullptr;
 	int id;
 
-	while(!monitor->canceled() && (*running || !geoms->empty())) {
+	while(!pc->monitor->canceled() && (pc->writeRunning || !pc->geoms.empty())) {
 
 		// Get an ID and the list of polys from the queue.
 		{
 			// Wait for if the queue is empty.
-			while(!monitor->canceled() && *running && geoms->empty())
+			while(!pc->monitor->canceled() && pc->writeRunning && pc->geoms.empty())
 				std::this_thread::yield();
 			// If the wakeup is spurious, skip.
 			std::unique_lock<std::mutex> lk(*gmtx);
-			if(geoms->empty())
+			if(pc->geoms.empty())
 				continue;
 			// Get the ID.
-			id = geoms->front().first;
-			geom = std::move(geoms->front().second);
-			geoms->pop_front();
+			id = pc->geoms.front().first;
+			geom = pc->geoms.front().second;
+			pc->geoms.pop_front();
 		}
 
-		if(monitor->canceled()) {
-			GEOSGeom_destroy_r(gctx, geom);
+		if(pc->monitor->canceled()) {
+			GEOSGeom_destroy_r(pc->gctx, geom);
 			continue;
 		}
 
 		// Create and write the OGR geometry.
-		OGRGeometry* ogeom = OGRGeometryFactory::createFromGEOS(gctx, (GEOSGeom) geom);
-		GEOSGeom_destroy_r(gctx, geom);
+		OGRGeometry* ogeom = OGRGeometryFactory::createFromGEOS(pc->gctx, (GEOSGeom) geom);
 
 		// Create and configure the feature. Feature owns the OGRGeometry.
-		OGRFeatureDefn* fdef = layer->GetLayerDefn();
+		OGRFeatureDefn* fdef = pc->layer->GetLayerDefn();
 		OGRFeature* feat = OGRFeature::CreateFeature(fdef); // Creates on the OGR heap.
 		feat->SetGeometryDirectly(ogeom);
-		feat->SetField(idField->c_str(), (GIntBig) id);
-		feat->SetFID(++*fid);
+		feat->SetFID((GIntBig) id);
+		feat->SetField(pc->idField.c_str(), (GIntBig) id);
+		for(PolygonValue v : pc->fieldValues) {
+			switch(v.type) {
+			case OFTInteger:
+				feat->SetField(v.name.c_str(), v.ivalue);
+				break;
+			case OFTReal:
+				feat->SetField(v.name.c_str(), v.dvalue);
+				break;
+			case OFTWideString:
+				feat->SetField(v.name.c_str(), v.svalue.c_str());
+				break;
+			default:
+				g_runerr("Unknown field type: " << v.type);
+			}
+		}
 
 		// Write to the output file.
-		int err = layer->CreateFeature(feat);
+		int err = OGRERR_NONE;
+		{
+			std::lock_guard<std::mutex> lk(pc->lmtx);
+			err = pc->layer->CreateFeature(feat);
+		}
+
 		OGRFeature::DestroyFeature(feat);
+		GEOSGeom_destroy_r(pc->gctx, geom);
 
 		if(OGRERR_NONE != err)
 			g_runerr("Failed to add geometry.");
@@ -115,10 +132,13 @@ GEOSGeometry* geo::grid::detail::polyMakeGeom(GEOSContextHandle_t gctx, double x
 	return prec;
 }
 
-void geo::grid::detail::polyMakeDataset(const std::string& filename, const std::string& driver, const std::string& layerName,
-		const std::string& idField,
+void geo::grid::detail::polyMakeDataset(const std::string& filename, const std::string& driver,
+		const std::string& layerName, const std::string& idField,
+		const std::vector<PolygonValue>& fields,
 		OGRSpatialReference* sr, OGRwkbGeometryType gType,
 		GDALDataset** ds, OGRLayer** layer) {
+
+	rem(filename);
 
 	*ds = (GDALDataset*) GDALOpenEx(filename.c_str(), GDAL_OF_VECTOR | GDAL_OF_UPDATE, nullptr, nullptr, nullptr);
 
@@ -158,6 +178,14 @@ void geo::grid::detail::polyMakeDataset(const std::string& filename, const std::
 	// There's only one field -- an ID.
 	OGRFieldDefn field(idField.c_str(), OFTInteger);
 	(*layer)->CreateField(&field, TRUE);
+
+	// Make fields if necessary.
+	for(const PolygonValue& v : fields) {
+		if(v.name != idField) {
+			OGRFieldDefn field(v.name.c_str(), v.type);
+			(*layer)->CreateField(&field, TRUE);
+		}
+	}
 
 }
 
@@ -297,6 +325,11 @@ bool geo::grid::detail::fixCoords(int& srcCol, int& srcRow, int& dstCol, int& ds
 }
 
 int geo::grid::detail::gdalProgress(double dfComplete, const char *pszMessage, void *pProgressArg) {
-	static_cast<Monitor*>(pProgressArg)->status((float) dfComplete, std::string(pszMessage));
+	struct gdalprg* prg = (struct gdalprg*) pProgressArg;
+	int p0 = (int) (dfComplete * 100);
+	if(prg->p != p0 && p0 % 10 == 0) {
+		static_cast<Monitor*>(prg->m)->status((float) dfComplete, std::string(pszMessage));
+		prg->p = p0;
+	}
 	return 1;
 };
