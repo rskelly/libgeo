@@ -3009,7 +3009,7 @@ public:
 		// The list of geometries currently being built.
 		std::unordered_set<int> activeIds;
 
-		int statusStep = std::max(1, pc->rows / 10);
+		int statusStep = std::max(1, pc->rows / 40);
 
 		// Process raster.
 		for(int tr = 0; tr < pc->rows; ++tr) {
