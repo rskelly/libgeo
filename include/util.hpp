@@ -385,6 +385,23 @@ G_DLL_EXPORT double random(double min, double max);
  */
 G_DLL_EXPORT uint64_t microtime();
 
+/**
+ * \brief Get the distance from the point to the line.
+ *
+ * \param x The point x.
+ * \param y The point y.
+ * \param x1 The line end x.
+ * \param y1 The line end y.
+ * \param x2 The line end x.
+ * \param y2 The line end y.
+ * \return The distance.
+ */
+template <class T>
+G_DLL_EXPORT T linedist(T x, T y, T x1, T y1, T x2, T y2) {
+	return std::abs((y2 - y1) * x - (y2 - y1) * y + x2 * y1 - y2 * x1) /
+		std::sqrt(geo::sq(y2 - y1) + geo::sq(x2 - x1));
+}
+
 template <class T> 
 class G_DLL_EXPORT Bounds {
 private:
