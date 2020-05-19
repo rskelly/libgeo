@@ -35,7 +35,7 @@ typedef int mode_t;
 #include "geo.hpp"
 #include "util.hpp"
 
-#define BUF_SIZE (512 * 1024)
+#define BUF_SIZE 1024
 
 using namespace geo::util;
 
@@ -137,9 +137,9 @@ public:
 	void load(const std::string& path) {
 		if(path != m_path) {
 			flush();
-			m_path = path;
 			int handle;
 			size_t size;
+			m_path = path;
 			m_buf.init(bufSize());
 			if((handle = open(path.c_str(), O_RDWR, 0777)) > 0) {
 				if(read(handle, m_buf.data, m_buf.size) > sizeof(T)) {
@@ -503,6 +503,22 @@ public:
 		return n;
 	}
 
+	double minx() const {
+		return m_bounds[0];
+	}
+
+	double miny() const {
+		return m_bounds[1];
+	}
+
+	double maxx() const {
+		return m_bounds[2];
+	}
+
+	double maxy() const {
+		return m_bounds[3];
+	}
+
 	/**
 	 * \brief When the node's capacity is exceeded, split it into quadrants.
 	 */
@@ -553,7 +569,7 @@ public:
 				lrunode<T>* n = m_tree->lru().get(m_key, path());
 				const std::vector<T>& c = n->cache();
 				for(const T& item : c) {
-					d = std::pow(item.x() - pt.x(), 2.0) + std::pow(item.y() - pt.y(), 2.0);
+					d = geo::sq(item.x() - pt.x()) + geo::sq(item.y() - pt.y());
 					if(d <= r2) {
 						piter = item;
 						++count;
@@ -563,6 +579,100 @@ public:
 			}
 		}
 		return count;
+	}
+
+	/**
+	 * \brief Container class for priority_queue in knn.
+	 */
+	class kqitem {
+	public:
+		T item;				// A leaf item.
+		mqnode<T>* node;	// A node.
+
+		/**
+		 * Construct the instance with a node.
+		 */
+		kqitem(mqnode<T>* node) :
+			node(node) {}
+
+		/**
+		 * Construct the instance with a leaf.
+		 */
+		kqitem(T& item) :
+			item(item), node(nullptr) {}
+
+		/**
+		 * Return true if this is a leaf; false if a node.
+		 */
+		bool isItem() const {
+			return node == nullptr;
+		}
+
+		/**
+		 * Return the distance from the point to the contained object.
+		 */
+		double dist(const T& pt) const {
+			if(node) {
+				// TODO: Inefficient.
+				double minx = node->minx();
+				double miny = node->miny();
+				double maxx = node->maxx();
+				double maxy = node->maxy();
+				double d0 = linedist(pt.x(), pt.y(), minx, miny, minx, maxy);
+				double d1 = linedist(pt.x(), pt.y(), minx, miny, maxx, miny);
+				double d2 = linedist(pt.x(), pt.y(), maxx, miny, maxx, miny);
+				double d3 = linedist(pt.x(), pt.y(), minx, maxy, maxx, maxy);
+				return std::min(std::min(d0, d1), std::min(d2, d3));
+			} else {
+				return std::sqrt(geo::sq(item.x() - pt.x()) + geo::sq(item.y() - pt.y()));
+			}
+		}
+
+	};
+
+	class kqcomp {
+	public:
+		T pt;
+		kqcomp(const T& pt) :
+			pt(pt) {}
+		bool operator()(const kqitem& a, const kqitem& b) {
+			return a.dist(pt) < b.dist(pt);
+		}
+	};
+
+	template <class TIter>
+	size_t knn(const T& pt, int count, TIter& piter) {
+		// 1) Add nodes to queue.
+		// 2) Unpack node at top of queue. Repeat until top of queue contains leaves.
+		// 3) Remove leaves. If count satisfied, return, else goto 3.
+		kqcomp comp(pt);
+		std::priority_queue<kqitem, std::vector<kqitem>, kqcomp> q(comp);
+		q.emplace(this);
+		int found = 0;
+		while(!q.empty() && found < count) {
+			if(q.top().isItem()) {
+				// If the front of the queue is an item, add to the output and continue.
+				piter = q.top().item;
+				q.pop();
+				++found;
+				continue;
+			} else {
+				// If the front of the queue is a node, expand it and continue.
+				mqnode<T>* node = q.top().node;
+				if(!node->m_split) {
+					node->reset();
+					T item;
+					while(node->next(item))
+						q.emplace(item);
+				} else {
+					for(int i = 0; i < 4; ++i) {
+						if(node->m_nodes[i])
+							q.emplace(node->m_nodes[i]);
+					}
+				}
+			}
+		}
+		return found;
 	}
 
 	void reset() {
@@ -660,7 +770,8 @@ public:
 	 * \param maxDepth The maximum depth of the tree. Zero is no limit.
 	 * \param mode Determines whether file-backed storage is used, or memory.
 	 */
-	mqtree<T>(double minx, double miny, double maxx, double maxy, int maxDepth = 100, int cacheSize = 1000) {
+	mqtree<T>(double minx, double miny, double maxx, double maxy, int maxDepth = 100, int cacheSize = 1000) :
+		mqtree<T>() {
 		init(minx, miny, maxx, maxy, maxDepth , cacheSize);
 	}
 
@@ -669,15 +780,11 @@ public:
 		m_lru.size(cacheSize);
 
 		// Create a root path.
-		std::string dirname = "mqtree_" + std::to_string(geo::util::pid());
-		m_rootPath = util::tmpdir(dirname.c_str());
+		m_rootPath = util::tmpdir("mqtree");
 
 		// Get the side length of the table region.
-#ifdef _WIN32 
-		double side = max(maxx - minx, maxy - miny); // TODO: Windows is stupid.
-#else
-		double side = std::max(maxx - minx, maxy - miny);
-#endif
+		double side = geo::max(maxx - minx, maxy - miny);
+
 		// Get the block size for IO.
 #ifdef _WIN32
 		m_blkSize = 4096; // TODO: Hack. Find out how windows does this.
@@ -788,8 +895,7 @@ public:
 	 */
 	template <class TIter>
 	size_t knn(const T& pt, size_t n, TIter iter) {
-		g_runerr("Not implemented.")
-		return 0;
+		return m_root->knn(pt, n, iter);
 	}
 
 	/**
