@@ -38,6 +38,12 @@ constexpr char pathsep = '/';
 
 using namespace geo::util;
 
+//#if __cplusplus == 201704L
+#include <experimental/filesystem>
+namespace fs = std::experimental::filesystem;
+//#else 
+//namespace fs = std::filesystem;
+//#endif
 
 namespace {
 
@@ -150,15 +156,22 @@ bool geo::util::isnonzero(const double& v) {
 }
 
 bool geo::util::isdir(const std::string& path) {
-	return std::filesystem::is_directory(path);
+	return fs::is_directory(path);
 }
 
 bool geo::util::isfile(const std::string& path) {
-	return std::filesystem::is_regular_file(path);
+	return fs::is_regular_file(path);
 }
 
 bool geo::util::rem(const std::string& dir) {
-	std::filesystem::remove_all(dir);
+	try {
+		fs::path p(dir);
+		fs::remove_all(p);
+	}
+	catch (const std::exception& ex) {
+		g_warn(ex.what());
+		return false;
+	}
 	return true;
 }
 
@@ -182,7 +195,7 @@ std::string geo::util::parent(const std::string& path) {
 bool geo::util::rename(const std::string& from, const std::string& to) {
 	if (isdir(to))
 		g_runerr(to << " is a directory.")
-	return std::filesystem::copy_file(from, to);
+	return fs::copy_file(from, to);
 }
 
 std::string geo::util::join(const std::string& a, const std::string& b) {
@@ -229,7 +242,7 @@ std::string geo::util::extension(const std::string& path) {
 }
 
 std::string geo::util::gettmpdir() {
-	std::filesystem::path p = std::filesystem::temp_directory_path();
+	fs::path p = fs::temp_directory_path();
 	return p.string();
 }
 
@@ -279,9 +292,9 @@ std::string geo::util::tmpfile(const std::string& prefix, const std::string& dir
 }
 
 bool geo::util::makedir(const std::string& path) {
-	bool res = std::filesystem::create_directories(path);
+	bool res = fs::create_directories(path);
 	if (res)
-		std::filesystem::permissions(path, std::filesystem::perms::owner_all | std::filesystem::perms::group_all);
+		fs::permissions(path, fs::perms::owner_all | fs::perms::group_all);
 	return res;
 }
 
@@ -377,7 +390,7 @@ uint64_t geo::util::microtime() {
 #ifdef _WIN32
 	FILETIME ft;
 	GetSystemTimePreciseAsFileTime(&ft);
-	return (ft.dwHighDateTime << 32) | ft.dwLowDateTime;
+	return ((uint64_t) ft.dwHighDateTime << 32) | ft.dwLowDateTime;
 #else
 	struct timeval t;
 	gettimeofday(&t, NULL);

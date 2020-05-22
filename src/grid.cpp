@@ -36,7 +36,7 @@ size_t geo::grid::detail::minValue(std::unordered_map<size_t, double>& m) {
 }
 
 
-void geo::grid::detail::polyWriteToDB(PolygonContext* pc, std::mutex* gmtx) {
+void geo::grid::detail::polyWriteToDB(PolygonContext* pc) {
 
 	GEOSGeometry* geom = nullptr;
 	int id;
@@ -46,13 +46,13 @@ void geo::grid::detail::polyWriteToDB(PolygonContext* pc, std::mutex* gmtx) {
 		// Get an ID and the list of polys from the queue.
 		{
 			// Wait for if the queue is empty.
-			while(!pc->monitor->canceled() && pc->writeRunning && pc->geoms.empty())
-				std::this_thread::yield();
+			std::unique_lock<std::mutex> lk(pc->gmtx);
+			while (!pc->monitor->canceled() && pc->writeRunning && pc->geoms.empty())
+				pc->gcv.wait(lk);
 			// If the wakeup is spurious, skip.
-			std::unique_lock<std::mutex> lk(*gmtx);
 			if(pc->geoms.empty())
 				continue;
-			// Get the ID.
+			// Get the ID and geom.
 			id = pc->geoms.front().first;
 			geom = pc->geoms.front().second;
 			pc->geoms.pop_front();
