@@ -2838,7 +2838,7 @@ public:
 
 		// Cleanup any waiting to be written.
 		pc.writeRunning = false;
-		pc->gcv.notify_all();
+		pc.gcv.notify_all();
 
 		// Wait for the writer to exit and join.
 		if(th.joinable())
@@ -2891,7 +2891,7 @@ public:
 			g_runerr("Failed to start transaction.");
 
 		// Start the writer thread.
-		std::thread th(polyWriteToDB, &pc, &gmtx);
+		std::thread th(polyWriteToDB, &pc);
 
 		// Create the functor that will accept polygon objects.
 		struct fn {
@@ -2908,7 +2908,7 @@ public:
 
 		// Cleanup any waiting to be written.
 		pc.writeRunning = false;
-		pc->gcv.notify_all();
+		pc.gcv.notify_all();
 
 		// Wait for the writer to exit and join.
 		if(th.joinable())

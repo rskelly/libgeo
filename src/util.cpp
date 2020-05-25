@@ -27,7 +27,6 @@ constexpr char pathsep = '/';
 #include <regex>
 #include <fstream>
 #include <random>
-#include <filesystem>
 
 #include <gdal_priv.h>
 #include <ogr_spatialref.h>
@@ -38,12 +37,13 @@ constexpr char pathsep = '/';
 
 using namespace geo::util;
 
-//#if __cplusplus == 201704L
+#if __cplusplus == 201704L
 #include <experimental/filesystem>
 namespace fs = std::experimental::filesystem;
-//#else 
-//namespace fs = std::filesystem;
-//#endif
+#else 
+#include <filesystem>
+namespace fs = std::filesystem;
+#endif
 
 namespace {
 
