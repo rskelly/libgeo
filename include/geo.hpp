@@ -90,10 +90,11 @@ namespace geo {
 	 * Provides access to status-tracking functions, and cancelation flags.
 	 */
 	class Monitor {
-	private:
+	protected:
 		bool m_cancel;
 		float m_start;
 		float m_end;
+		float m_lastStatus;
 		Monitor* m_monitor;
 
 	public:
@@ -101,11 +102,7 @@ namespace geo {
 		/**
 		 * \brief Initialize a Monitor whose progress range is 0-1 (0-100%).
 		 */
-		Monitor() :
-			m_cancel(false),
-			m_start(0), m_end(1),
-			m_monitor(nullptr) {
-		}
+		Monitor() : Monitor(nullptr, 0, 1) {}
 
 		/**
 		 * \brief Initialize a Monitor whose progress range is {start} to {end}.
@@ -119,6 +116,7 @@ namespace geo {
 		Monitor(Monitor* monitor, float start, float end) :
 			m_cancel(false),
 			m_start(start), m_end(end),
+			m_lastStatus(start),
 			m_monitor(monitor) {
 		}
 
@@ -144,6 +142,9 @@ namespace geo {
 		}
 
 		virtual void status(float status, const std::string& message = "") {
+			if(status < 0)
+				status = m_lastStatus;
+			m_lastStatus = status;
 			std::cout << std::setprecision(1) << std::fixed << message << " " << (m_start + status * (m_end - m_start)) * 100.0f << "%\n";
 		}
 

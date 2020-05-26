@@ -245,6 +245,7 @@ namespace detail {
 			}
 
 			{
+				pc->monitor->status(-1, "Merging polygons. This could take a long time.");
 				GEOSGeometry* multi = GEOSGeom_createCollection_r(pc->gctx, GEOS_GEOMETRYCOLLECTION, polys.data(), polys.size());
 				geom = GEOSUnaryUnion_r(pc->gctx, multi);
 				GEOSGeom_destroy_r(pc->gctx, multi);
@@ -2554,6 +2555,7 @@ public:
 
 		int cols = props().cols();
 		int rows = props().rows();
+		double nodata = props().nodata();
 
 		while(!openSet.empty()) {
 
@@ -2579,7 +2581,7 @@ public:
 				int col = qcol + offsets[i][0];
 				int row = qrow + offsets[i][1];
 
-				if(!props().hasCell(col, row))
+				if(!props().hasCell(col, row) || (double) get(col, row) == nodata)
 					continue;
 
 				size_t n = toIdx(col, row);
