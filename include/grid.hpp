@@ -99,8 +99,10 @@ namespace grid {
 		bool removeHoles;
 		bool removeDangles;
 
-		std::mutex gmtx;
-		std::condition_variable gcv;
+		std::mutex gmtx;												///<! Mutext for geometry writing.
+		std::condition_variable gcv;									///<! Condition variable for geometry writing.
+		std::mutex mmtx;												///<! Mutex for geometry merging.
+		std::condition_variable mcv;									///<! Condition variable for geometry merging.
 
 		std::string idField;
 		std::vector<PolygonValue> fieldValues;							///<! A list of field values that will be saved with every poly in the set.
@@ -190,26 +192,16 @@ namespace detail {
 	 * On each loop, extracts a single finalized poly ID and loads those polys for unioning.
 	 *
 	 * \param pc A PolygonContext.
-	 * \param poly_gmtx Mutex for the geom list.
 	 */
-	G_DLL_EXPORT void polyWriteToDB(PolygonContext* pc, std::mutex* gmtx);
+	G_DLL_EXPORT void polyWriteToDB(PolygonContext* pc);
 
 	G_DLL_EXPORT void printGEOSGeom(GEOSGeometry* geom, GEOSContextHandle_t gctx);
 
 	/**
 	 * Waits for finalized collections of polygon parts or unioning.
 	 *
-	 * \param geoms The list of ID/geometry pairs.
-	 * \param geomParts A mapping from ID to vectors of geometry parts to be unioned.
-	 * \param gctx The GEOS context object.
-	 * \param removeHoles If true, removes holes from polygons.
-	 * \param removeDangles If true, removes degeneracies from the edges of polygons.
-	 * \param running If false, the operation is canceled.
-	 * \param monitor The Monitor instance.
-	 * \param poly_fmtx Mutex for For the final ID list.
-	 * \param poly_gmtx Mutex for For the output geom list.
-	 * \param poly_cv For waiting on the geometry input queue.
-	 * \param geom_cv For notifying the geometry write queue.
+	 * \param callback The callback functor, which accepts the id, geometry and context pointer.
+	 * \param pc The PolygonContext pointer.
 	 */
 	template <class C>
 	G_DLL_EXPORT void polyMerge(C* callback, PolygonContext* pc) {
@@ -222,10 +214,10 @@ namespace detail {
 
 			// Get an ID and the list of polys from the queue.
 			{
-				std::unique_lock<std::mutex> lk(pc->gmtx);
+				std::unique_lock<std::mutex> lk(pc->mmtx);
 				// Wait for a notification if the queue is empty.
 				while(!pc->monitor->canceled() && pc->mergeRunning && pc->geomBuf.empty())
-					pc->gcv.wait(lk);
+					pc->mcv.wait(lk);
 				// If the wakeup is spurious, skip.
 				if(pc->geomBuf.empty())
 					continue;
@@ -305,7 +297,7 @@ namespace detail {
 			if(!geom) {
 				g_warn("Null geometry.");
 			} else {
-				(*callback)(id, geom, pc->gctx);
+				(*callback)(id, geom, pc);
 			}
 		}
 	}
@@ -1076,15 +1068,25 @@ public:
 		} else {
 			geo::util::rem(m_filename);
 		}
-		m_file = CreateFile(m_filename.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-		m_mapFile = CreateFileMapping(
-			INVALID_HANDLE_VALUE,    // use paging file
-			NULL,                    // default security
-			PAGE_READWRITE,          // read/write access
-			0,                       // maximum object size (high-order DWORD)
-			size,                    // maximum object size (low-order DWORD)
-			"_mapped");              // name of mapping object
+		m_file = CreateFile(m_filename.c_str(), 
+			GENERIC_READ | GENERIC_WRITE, 
+			FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE, 
+			NULL, 
+			CREATE_ALWAYS, 
+			FILE_ATTRIBUTE_NORMAL, 
+			NULL
+		);
+		if (m_file == INVALID_HANDLE_VALUE)
+			g_runerr("Failed to create file for mapping: " << GetLastError());
 
+		m_mapFile = CreateFileMapping(
+			m_file,							// use opened file
+			NULL,							// default security
+			PAGE_READWRITE,					// read/write access
+			(size >> 32) & 0xffffffff,		// maximum object size (high-order DWORD)
+			size & 0xffffffff,				// maximum object size (low-order DWORD)
+			basename(m_filename).c_str()	// name of mapping object
+		);
 		if (m_mapFile == NULL)
 			g_runerr("Could not create file mapping object: " << GetLastError());
 
@@ -2809,10 +2811,6 @@ public:
 		if(sr)
 			sr->Release();
 
-		// Thread control objects.
-		bool running = true;
-		std::mutex gmtx;
-
 		// The polygonization context will be passed into the poly threads.
 		PolygonContext pc;
 		pc.gctx = gctx;
@@ -2825,26 +2823,26 @@ public:
 			g_runerr("Failed to start transaction.");
 
 		// Start the writer thread.
-		std::thread th(polyWriteToDB, &pc, &gmtx);
+		std::thread th(polyWriteToDB, &pc);
 
 		// Create the functor that will accept polygon objects.
 		struct fn {
-			PolygonContext* pc;
-			std::mutex* gmtx;
-			void operator()(int id, GEOSGeometry* geom, GEOSContextHandle_t gctx) {
-				std::lock_guard<std::mutex> lk(*gmtx);
+			void operator()(int id, GEOSGeometry* geom, PolygonContext* pc) {
+				std::lock_guard<std::mutex> lk(pc->gmtx);
 				pc->geoms.emplace_back(id, geom);
+				pc->gcv.notify_one();
 			}
 		};
 
 		// Run the polygonization.
 		struct fn f;
-		f.pc = &pc;
-		f.gmtx = &gmtx;
 		polygonize(f, &pc);
 
+		// Cleanup any waiting to be written.
+		pc.writeRunning = false;
+		pc.gcv.notify_all();
+
 		// Wait for the writer to exit and join.
-		running = false;
 		if(th.joinable())
 			th.join();
 
@@ -2879,9 +2877,6 @@ public:
 		if(!layer)
 			g_runerr("Could not find layer.");
 
-		// Thread control objects.
-		std::mutex gmtx;
-
 		// The polygonization context will be passed into the poly threads.
 		PolygonContext pc;
 		pc.gctx = gctx;
@@ -2898,28 +2893,29 @@ public:
 			g_runerr("Failed to start transaction.");
 
 		// Start the writer thread.
-		std::thread th(polyWriteToDB, &pc, &gmtx);
+		std::thread th(polyWriteToDB, &pc);
 
 		// Create the functor that will accept polygon objects.
 		struct fn {
-			PolygonContext* pc;
-			std::mutex* gmtx;
-			void operator()(int id, GEOSGeometry* geom, GEOSContextHandle_t gctx) {
-				std::lock_guard<std::mutex> lk(*gmtx);
+			void operator()(int id, GEOSGeometry* geom, PolygonContext* pc) {
+				std::lock_guard<std::mutex> lk(pc->gmtx);
 				pc->geoms.emplace_back(id, geom);
+				pc->gcv.notify_one();
 			}
 		};
 
 		// Run the polygonization.
 		struct fn f;
-		f.pc = &pc;
-		f.gmtx = &gmtx;
 		polygonize(f, &pc);
 
-		// Wait for the writer to exit and join.
+		// Cleanup any waiting to be written.
 		pc.writeRunning = false;
+		pc.gcv.notify_all();
+
+		// Wait for the writer to exit and join.
 		if(th.joinable())
 			th.join();
+
 
 		// Commit and release the layer -- GDAL will take care of it. But close the dataset so that can happen.
 		if(OGRERR_NONE != layer->CommitTransaction())
@@ -3064,7 +3060,7 @@ public:
 
 			// IDs that are in the geoms array and not in the current row are ready to be finalized.
 			if(!pc->monitor->canceled()) {
-				std::lock_guard<std::mutex> lk(pc->gmtx);
+				std::lock_guard<std::mutex> lk(pc->mmtx);
 				std::vector<int> rem;
 				for(const auto& it : geomParts) {
 					if(activeIds.find(it.first) == activeIds.end()) {
@@ -3077,12 +3073,12 @@ public:
 			}
 
 			// Notify the waiting processor thread.
-			pc->gcv.notify_all();
+			pc->mcv.notify_all();
 		}
 
 		// Finalize all remaining geometries.
 		if(!pc->monitor->canceled()) {
-			std::lock_guard<std::mutex> lk1(pc->gmtx);
+			std::lock_guard<std::mutex> lk(pc->mmtx);
 			for(const auto& it : geomParts) {
 				pc->geomBuf.push_back(std::make_pair(it.first, std::move(geomParts[it.first])));
 			}
@@ -3091,18 +3087,16 @@ public:
 
 		// Let the threads shut down when they run out of geometries.
 		pc->mergeRunning = false;
-		pc->gcv.notify_all();
+		pc->mcv.notify_all();
 
 		for(int i = 0; i < nth; ++i) {
 			if(th[i].joinable())
 				th[i].join();
 		}
 
-		//for(auto& it : pc->geoms)
-		//	GEOSGeom_destroy_r(pc->gctx, it.second);
-
 		pc->monitor->status(1.0, "Finished polygonization");
 
+		// Destroy the context if it was only created in this call.
 		if(destroyGeos)
 			GEOS_finish_r(pc->gctx);
 	}
