@@ -5,18 +5,11 @@
  *      Author: rob
  */
 
-#include <geos/geom/LinearRing.h>
-#include <geos/geom/GeometryFactory.h>
-#include <geos/geom/Point.h>
-#include <geos/geom/Polygon.h>
-#include <geos/geom/Coordinate.h>
-#include <geos/geom/CoordinateArraySequence.h>
-#include <geos/geom/PrecisionModel.h>
-#include <geos/simplify/TopologyPreservingSimplifier.h>
+#include <geos_c.h>
 
-#include <grid.hpp>
+#include "grid.hpp"
 
-using namespace geo::raster;
+using namespace geo::grid;
 
 void usage() {
 	std::cerr << "Usage: voidfill [options] <input raster> <output raster>\n"
@@ -25,8 +18,8 @@ void usage() {
 			<< " -e               Fill voids on edges (otherwise don't).\n";
 }
 
-int fillVoid(Grid& mask, Grid& rast, int col, int row) {
-	if(mask.getInt(col, row, 1) != 1)
+int fillVoid(Band<int>& mask, Band<float>& rast, int col, int row) {
+	if(mask.get(col, row) != 1)
 		return 0;
 	const GridProps& props = mask.props();
 	double nd = rast.props().nodata();
@@ -34,15 +27,15 @@ int fillVoid(Grid& mask, Grid& rast, int col, int row) {
 	int ct = 0;
 	for(int r = std::max(0, row - 1); r < std::min(props.rows(), row + 2); ++r) {
 		for(int c = std::max(0, col - 1); c < std::min(props.cols(), col + 2); ++c) {
-			if((v = rast.getFloat(c, r, 1)) != nd) {
+			if((v = rast.get(c, r)) != nd) {
 				s += v;
 				++ct;
 			}
 		}
 	}
 	if(ct) {
-		rast.setFloat(col, row, s / ct - std::numeric_limits<double>::min(), 1);
-		mask.setInt(col, row, 2, 1);
+		rast.set(col, row, s / ct - std::numeric_limits<double>::min());
+		mask.set(col, row, 2);
 		return 1;
 	}
 	return 0;
@@ -93,20 +86,19 @@ int main(int argc, char** argv) {
 		return 1;
 	}
 
-	MemRaster mask;
-	MemRaster rast;
+	Band<int> mask;
+	Band<float> rast;
 	int pxarea;
 	{
-		Raster input(infile);
-		GridProps props(input.props());
-		pxarea = (int) std::ceil(maxarea / std::abs(props.resolutionX()) * std::abs(props.resolutionY()));
+		rast.init(infile, 0, true, nullptr);
+		GridProps props(rast.props());
+		pxarea = (int) std::ceil(maxarea / std::abs(props.resX()) * std::abs(props.resY()));
 		props.setWritable(true);
 		props.setBands(1);
 		rast.init(props, true);
 		props.setDataType(DataType::Byte);
 		mask.init(props, true);
-		input.writeTo(rast, props.cols(), props.rows(), 0, 0, 0, 0, band, 1);
-		mask.fillInt(0, 1);
+		mask.fill(0);
 	}
 
 
@@ -116,8 +108,8 @@ int main(int argc, char** argv) {
 	const GridProps& rprops = rast.props();
 	double nd = rprops.nodata();
 
-	geo::raster::TargetFillOperator<double, int> op1(&rast, 1, &mask, 1, nd, 1); // Mark for filling (nd --> 1)
-	geo::raster::TargetFillOperator<int, int> op2(&mask, 1, &mask, 1, 1, 2); // Mark for filling (1 --> 2)
+	geo::grid::TargetFillOperator<float, int> op1(&rast, 1, &mask, 1, nd, 1); // Mark for filling (nd --> 1)
+	geo::grid::TargetFillOperator<int, int> op2(&mask, 1, &mask, 1, 1, 2); // Mark for filling (1 --> 2)
 	int cmin = 0, cmax = 0, rmin = 0, rmax = 0, area = 0;
 	int v;
 
@@ -127,21 +119,21 @@ int main(int argc, char** argv) {
 	if(useGeomMask){
 		// Build concave hull to produce mask.
 		std::cerr << "Building concave hull mask.\n";
-		std::vector<geos::geom::Coordinate> chull;
+		std::vector<std::pair<int, int>> chull;
 		double v;
 		for(int row = 0; row < rows; ++row) {
 			if(row % 100 == 0)
 				std::cerr << "Row " << row << " of " << rows << "\n";
 			for(int col = 0; col < cols; ++col) {
 
-				if((v = rast.getFloat(col, row, 1)) == nd)
+				if((v = rast.get(col, row)) == nd)
 					continue;
 
 				bool isEdge = false;
 				for(int rr = row - 1; !isEdge && rr < row + 2; ++rr) {
 					for(int cc = col - 1; !isEdge && cc < col + 2; ++cc) {
 						if(rprops.hasCell(cc, rr))
-							isEdge = (rast.getFloat(cc, rr, 1) == nd);
+							isEdge = (rast.get(cc, rr) == nd);
 					}
 				}
 
@@ -150,27 +142,28 @@ int main(int argc, char** argv) {
 			}
 		}
 
-		geos::geom::CoordinateArraySequence seq(&chull, 2);
-		geos::geom::GeometryFactory::unique_ptr gf = geos::geom::GeometryFactory::getDefaultInstance()->create(new geos::geom::PrecisionModel(0.001));
-		geos::geom::Geometry* mp = gf->createMultiPoint(seq);
-		geos::geom::Geometry* hull = mp->convexHull();
-		std::auto_ptr<geos::geom::Geometry> shull = geos::simplify::TopologyPreservingSimplifier::simplify(hull, 500.0);
-		gf->destroyGeometry(hull);
-		gf->destroyGeometry(mp);
+		GEOSContextHandle_t gctx = initGEOS_r(0, 0);
+		GEOSCoordSequence* seq = GEOSCoordSeq_create_r(gctx, chull.size(), 2);
+		GEOSGeometry* mp = GEOSGeom_createPoint_r(gctx, seq);
+		GEOSGeometry* hull = GEOSConvexHull_r(gctx, mp);
+		GEOSGeometry* shull = GEOSSimplify_r(gctx, hull, 500.0);
+		GEOSGeom_destroy_r(gctx, mp);
+		GEOSGeom_destroy_r(gctx, hull);
 
+		GEOSCoordSequence* cseq = GEOSCoordSeq_create_r(gctx, 1, 2);
 		for(int row = 0; row < rows; ++row) {
 			if(row % 100 == 0)
 				std::cerr << "Row " << row << " of " << rows << "\n";
 			for(int col = 0; col < cols; ++col) {
-				geos::geom::Coordinate coord(col, row, 0);
-				geos::geom::Point* pt = gf->createPoint(coord);
-				if(!shull->contains(pt) && rast.getFloat(col, row, 1) == nd)
-					rast.setFloat(col, row, tnd, 1);
-				gf->destroyGeometry(pt);
+				GEOSCoordSeq_setX_r(gctx, cseq, 0, (double) col);
+				GEOSCoordSeq_setY_r(gctx, cseq, 0, (double) row);
+				GEOSGeometry* pt = GEOSGeom_createPoint_r(gctx, cseq);
+				if(GEOSContains_r(gctx, shull, pt) == 0 && rast.get(col, row) == nd)
+					rast.set(col, row, tnd);
+				GEOSGeom_destroy_r(gctx, pt);
 			}
 		}
-
-		gf->destroy();
+		GEOSCoordSeq_destroy_r(gctx, cseq);
 	}
 
 	for(int row = 0; row < rows; ++row) {
@@ -178,15 +171,15 @@ int main(int argc, char** argv) {
 			std::cerr << "Row " << row << " of " << rows << "\n";
 		for(int col = 0; col < cols; ++col) {
 
-			if(mask.getInt(col, row, 1) != 0 || (v = rast.getFloat(col, row, 1)) != nd)
+			if(mask.get(col, row) != 0 || (v = rast.get(col, row)) != nd)
 				continue;
 
-			Grid::floodFill(col, row, op1, false, &cmin, &rmin, &cmax, &rmax, &area);
+			Band<float>::floodFill(col, row, op1, false, &cmin, &rmin, &cmax, &rmax, &area);
 
 			// Skip if the area is too large, or if it's on the edge and
 			// edges are not desired.
 			if(area == 0 || (pxarea > 0 && area > pxarea) || (!edges && (cmin == 0 || rmin == 0 || cmax >= cols - 1 || rmax >= rows - 1))) {
-				Grid::floodFill(col, row, op2, false);
+				Band<int>::floodFill(col, row, op2, false);
 				continue;
 			}
 
@@ -206,16 +199,16 @@ int main(int argc, char** argv) {
 		if(row % 100 == 0)
 			std::cerr << "Row " << row << " of " << rows << "\n";
 		for(int col = 0; col < cols; ++col) {
-			if(rast.getFloat(col, row, 1) == tnd)
-				rast.setFloat(col, row, nd, 1);
+			if(rast.get(col, row) == tnd)
+				rast.set(col, row, nd);
 		}
 	}
 
 	{
 		GridProps props(rast.props());
 		props.setWritable(true);
-		Raster output(outfile, props);
-		rast.writeTo(output, props.cols(), props.rows(), 0, 0, 0, 0, 1, 1);
+		Band<float> output(outfile, props);
+		rast.writeTo(output);
 	}
 
 	return 0;
