@@ -90,7 +90,7 @@ int main(int argc, char** argv) {
 	Band<float> rast;
 	int pxarea;
 	{
-		rast.init(infile, 0, true, nullptr);
+		rast.init(infile, 0, false, true, nullptr);
 		GridProps props(rast.props());
 		pxarea = (int) std::ceil(maxarea / std::abs(props.resX()) * std::abs(props.resY()));
 		props.setWritable(true);

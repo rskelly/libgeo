@@ -160,8 +160,8 @@ if(${BUILD_APPS})
 	# add_executable (geoinfo src/apps/geoinfo.cpp)
 	# target_link_libraries (geoinfo geoutil ${GDAL_LIBRARY} ${LIBLAS_LIBRARY} ${JSONCPP_LIBRARY})
 
-	# add_executable (voidfill src/apps/voidfill.cpp)
-	# target_link_libraries (voidfill geoutil geogrid ${GDAL_LIBRARY})
+	add_executable (voidfill src/apps/voidfill.cpp)
+	target_link_libraries (voidfill geoutil geogrid ${GDAL_LIBRARY})
 
 	# add_executable (datumshift src/apps/datumshift.cpp)
 	# target_link_libraries (datumshift geoutil geogrid ${GDAL_LIBRARY} ${PROJ_LIBRARY})
@@ -186,7 +186,7 @@ if(${BUILD_APPS})
 	
 endif()
 
-install(TARGETS ${ANN_LIB} ${PC_LIB} geogrid geoutil geodb fitpack_mod RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
+install(TARGETS voidfill ${ANN_LIB} ${PC_LIB} geogrid geoutil geodb fitpack_mod RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
 
 if(${BUILD_TESTS})
 
