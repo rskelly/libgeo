@@ -183,10 +183,15 @@ if(${BUILD_APPS})
 
 	# add_executable (rbf src/tests/rbf.cpp)
 	# target_link_libraries (rbf)
+
+	install(TARGETS voidfill ${ANN_LIB} ${PC_LIB} geogrid geoutil geodb fitpack_mod RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
 	
+else()
+
+	install(TARGETS ${ANN_LIB} ${PC_LIB} geogrid geoutil geodb fitpack_mod RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
+
 endif()
 
-install(TARGETS voidfill ${ANN_LIB} ${PC_LIB} geogrid geoutil geodb fitpack_mod RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
 
 if(${BUILD_TESTS})
 
