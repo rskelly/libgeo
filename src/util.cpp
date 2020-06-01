@@ -37,7 +37,7 @@ constexpr char pathsep = '/';
 
 using namespace geo::util;
 
-#if __cplusplus == 201704L
+#if __cplusplus == 201704L || _GNUC_ < 8
 #include <experimental/filesystem>
 namespace fs = std::experimental::filesystem;
 #else 
