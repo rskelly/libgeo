@@ -331,5 +331,8 @@ int geo::grid::detail::gdalProgress(double dfComplete, const char *pszMessage, v
 		static_cast<Monitor*>(prg->m)->status((float) dfComplete, std::string(pszMessage));
 		prg->p = p0;
 	}
-	return 1;
+	Monitor* m = prg->m;
+	if(!m)
+		m = getDefaultMonitor();
+	return m->canceled() ? 0 : 1;
 };

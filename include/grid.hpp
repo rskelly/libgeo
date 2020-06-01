@@ -1524,8 +1524,14 @@ public:
 		arg.pProgressData = &prg;
 
 		if(CE_None != bnd->RasterIO(GF_Read, 0, 0, cols, rows,
-				m_data, cols, rows, m_type, 0, 0, &arg))
-			g_runerr("Failed to copy raster row.");
+				m_data, cols, rows, m_type, 0, 0, &arg)) {
+			// If the load was deliberately canceled, don't raise an error.
+			if(!monitor->canceled()) {
+				g_runerr("Failed to copy raster row.");
+			} else {
+				monitor->status(0.0f, "Load canceled.");
+			}
+		}
 
 		m_props.setWritable(writable);
 	}
@@ -1824,8 +1830,6 @@ public:
 	 * \param ro The row buffer.
 	 */
 	void setTile(T* tile, int col, int row, int width, int height, int cb = 0, int rb = 0) {
-		if (!m_props.writable())
-			g_warn("This raster is not writable.");
 		int cols = props().cols();
 		int rows = props().rows();
 		T nodata = props().nodata();
@@ -1899,8 +1903,6 @@ public:
 	 */
 	template <class U>
 	void fill(U value) {
-		if (!m_props.writable())
-			g_warn("This raster is not writable.");
 		size_t cols = props().cols();
 		size_t rows = props().rows();
 		std::vector<T> buf(cols);
@@ -1949,8 +1951,6 @@ public:
 	 */
 	template <class U>
 	void set(int col, int row, U value) {
-		if (!m_props.writable())
-			g_warn("This raster is not writable.");
 		if(col < 0 || row < 0 || col >= m_props.cols() || row >= m_props.rows())
 			g_argerr("Col or row out of bounds.");
 		size_t idx = (size_t) row * (size_t) m_props.cols() + (size_t) col;
@@ -2129,8 +2129,6 @@ public:
 	 * \brief Normalize the grid so that one standard deviation is +-1.
 	 */
 	void normalize()  {
-		if (!m_props.writable())
-			g_warn("This raster is not writable.");
 		GridStats st = stats();
 		const GridProps& gp = props();
 		double v, nodata = gp.nodata();
@@ -2153,8 +2151,6 @@ public:
 	 * \brief Normalize the grid so that the max value is equal to 1, and the minimum is zero.
 	 */
 	void logNormalize() {
-		if (!m_props.writable())
-			g_warn("This raster is not writable.");
 		GridStats st = stats();
 		const GridProps& gp = props();
 		double n = st.min;
@@ -2320,9 +2316,6 @@ public:
 	 * \param monitor  A reference to the Monitor.
 	 */
 	void smooth(Band<T>& smoothed, double sigma, int size, geo::Monitor* monitor = nullptr) {
-		if (!m_props.writable())
-			g_warn("This raster is not writable.");
-
 		if(!monitor)
 			monitor = getDefaultMonitor();
 
@@ -2343,17 +2336,20 @@ public:
 		std::vector<double> weights(size * size * getTypeSize(DataType::Float64));
 		Band::gaussianWeights(weights.data(), size, sigma);
 
-		monitor->status(0.02);
+		if(monitor->canceled())
+			return;
 
 		double k, v, nodata = gp.nodata();
 		std::vector<T> buf(size * size);
 		int gc = gp.cols();
 		int gr = gp.rows();
 		// TODO: This is much faster when done in 2 passes.
-		int statusStep = std::max(1, gr / 10);
+		int statusStep = std::max(1, gr / 25);
 		for(int r = 0; r < gr; ++r) {
 			if(r % statusStep == 0)
 				monitor->status(0.02 + ((float) r / gr - 0.02));
+			if(monitor->canceled())
+				return;
 			for(int c = 0; c < gc; ++c) {
 				double s = 0;
 				getTile(buf.data(), c - size / 2, r - size / 2, size, size);
@@ -2638,7 +2634,12 @@ public:
 
 			if(CE_None != band->RasterIO(GF_Write, 0, 0, cols, rows,
 					m_data, cols, rows, gdalType(), 0, 0, &arg)) {
-				monitor->error("Failed to write to raster.");
+				// If the load was deliberately canceled, don't raise an error.
+				if(!monitor->canceled()) {
+					g_runerr("Failed to write to raster.");
+				} else {
+					monitor->status(0.0f, "Load canceled.");
+				}
 			}
 
 			band->FlushCache();
@@ -2726,8 +2727,6 @@ public:
 	 * \param value The value to use to draw the line.
 	 */
 	void drawLine(double x0, double y0, double x1, double y1, T value) {
-		if (!m_props.writable())
-			g_warn("This raster is not writable.");
 		double slope = std::abs(y0 - y1) / std::abs(x0 - x1);
 		const GridProps& p = props();
 		double xstep = (slope >= 1 ? 1 / slope : 1) * std::abs(p.resX());
