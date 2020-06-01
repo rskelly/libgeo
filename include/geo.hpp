@@ -141,6 +141,14 @@ namespace geo {
 			}
 		}
 
+		virtual void setCanceled(bool cancel) {
+			if(m_monitor) {
+				m_monitor->setCanceled(cancel);
+			} else {
+				m_cancel = cancel;
+			}
+		}
+
 		virtual void status(float status, const std::string& message = "") {
 			if(status < 0)
 				status = m_lastStatus;
