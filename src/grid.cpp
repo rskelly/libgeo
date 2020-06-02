@@ -111,10 +111,10 @@ void geo::grid::detail::printGEOSGeom(GEOSGeometry* geom, GEOSContextHandle_t gc
 	GEOSWKTWriter_destroy_r(gctx, wtr);
 }
 
-GEOSGeometry* geo::grid::detail::polyMakeGeom(GEOSContextHandle_t gctx, double x0, double y0, double x1, double y1, double eps) {
+GEOSGeometry* geo::grid::detail::polyMakeGeom(GEOSContextHandle_t gctx, double x0, double y0, double x1, double y1, double eps, int dims) {
 
 	// Build the geometry.
-	GEOSCoordSequence* seq = GEOSCoordSeq_create_r(gctx, 5, 2);
+	GEOSCoordSequence* seq = GEOSCoordSeq_create_r(gctx, 5, dims);
 	GEOSCoordSeq_setX_r(gctx, seq, 0, x0);
 	GEOSCoordSeq_setY_r(gctx, seq, 0, y0);
 	GEOSCoordSeq_setX_r(gctx, seq, 1, x0);

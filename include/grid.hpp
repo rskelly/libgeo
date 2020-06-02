@@ -96,6 +96,8 @@ namespace grid {
 		double xeps;
 		double yeps;
 
+		int dimensions;													///<! Number of coordinate dimensions; usually 2 or 3. Default 2.
+
 		bool removeHoles;
 		bool removeDangles;
 
@@ -114,6 +116,7 @@ namespace grid {
 			mergeRunning(false), writeRunning(false),
 			monitor(nullptr),
 			cols(0), rows(0), resX(0), resY(0),
+			dimensions(2),
 			startX(0), startY(0), xeps(0), yeps(0),
 			removeHoles(false), removeDangles(false),
 			layer(nullptr) {
@@ -182,9 +185,10 @@ namespace detail {
 	 * \param x1 The maximum corner x.
 	 * \param y1 The maximum corner y.
 	 * \param eps A grid snap distance.
+	 * \param dims The number of dimensions.
 	 * \return A new geometry.
 	 */
-	G_DLL_EXPORT GEOSGeometry* polyMakeGeom(GEOSContextHandle_t gctx, double x0, double y0, double x1, double y1, double eps);
+	G_DLL_EXPORT GEOSGeometry* polyMakeGeom(GEOSContextHandle_t gctx, double x0, double y0, double x1, double y1, double eps, int dims = 2);
 
 	/**
 	 * \brief Write to the file from the map of geometry lists.
