@@ -840,7 +840,7 @@ std::string Stopwatch::time() {
 	std::stringstream ss;
 	ss << std::setfill('0');
 	ss << std::setw(2) << (t / 3600) << ':';
-	ss << std::setw(2) << (t / 60) << ':';
+	ss << std::setw(2) << (t / 60) % 60 << ':';
 	ss << std::setw(2) << (t % 60);
 	return ss.str();
 }
