@@ -1117,7 +1117,7 @@ public:
 #ifdef _WIN32
 		UnmapViewOfFile(m_data);
 		CloseHandle(m_mapFile);
-		rem(m_mapFile);
+		rem(m_filename);
 #else
 		munmap(m_data, m_size);
 #endif
