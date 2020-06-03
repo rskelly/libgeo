@@ -1068,9 +1068,9 @@ public:
 			m_mapFile = nullptr;
 		}
 		if(m_filename.empty()) {
-			m_filename = geo::util::tmpfile("geo");
+			m_filename = tmpfile("geo");
 		} else {
-			geo::util::rem(m_filename);
+			rem(m_filename);
 		}
 		m_file = CreateFile(m_filename.c_str(), 
 			GENERIC_READ | GENERIC_WRITE, 
@@ -1117,6 +1117,7 @@ public:
 #ifdef _WIN32
 		UnmapViewOfFile(m_data);
 		CloseHandle(m_mapFile);
+		rem(m_mapFile);
 #else
 		munmap(m_data, m_size);
 #endif
@@ -2666,7 +2667,7 @@ public:
 				m_ds = nullptr;
 			}
 			if(m_mapped) {
-				m_mapFile.release();
+				m_mapFile.reset(nullptr);
 				m_mapped = false;
 				m_data = nullptr;
 			} else if(m_data) {

@@ -339,7 +339,7 @@ std::string geo::util::projectionFromSRID(int srid) {
 
 TmpFile::TmpFile(size_t size) :
 	fd(0), size(0) {
-	filename = geo::util::tmpfile("geo_util");
+	filename = tmpfile("geo_util");
 	fd = ::open(filename.c_str(), O_CREAT|O_RDWR, 0777);
 	if(fd <= 0)
 		g_runerr("Failed to open temp file: " << strerror(errno));
@@ -367,7 +367,7 @@ void TmpFile::close() {
 
 TmpFile::~TmpFile() {
 	::close(fd);
-	unlink(filename.c_str());
+	rem(filename);
 }
 
 constexpr uint32_t MAX_UINT32 = 32768;
