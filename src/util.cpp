@@ -192,6 +192,11 @@ std::string geo::util::parent(const std::string& path) {
 
 }
 
+size_t geo::util::filesize(const std::string& f) {
+	fs::path p(f);
+	return fs::file_size(p);
+}
+
 bool geo::util::rename(const std::string& from, const std::string& to) {
 	if (isdir(to))
 		g_runerr(to << " is a directory.")

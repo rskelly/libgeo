@@ -190,6 +190,14 @@ G_DLL_EXPORT std::string tmpdir(const std::string& prefix, const std::string& di
 G_DLL_EXPORT std::string tmpfile(const std::string& prefix, const std::string& dir = "");
 
 /**
+ * \brief Return the size of the file in bytes.
+ *
+ * \param f The file path.
+ * \return The size of the file in bytes.
+ */
+G_DLL_EXPORT size_t filesize(const std::string& f);
+
+/**
  * \brief Renames or moves the file, across device boundaries if necessary.
  *
  * Uses rename for files on the same device. Throws an exception if the destination
