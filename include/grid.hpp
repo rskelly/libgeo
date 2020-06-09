@@ -1352,6 +1352,7 @@ public:
 
 		m_props = props;
 		m_props.setFilename(filename);
+		m_props.setWritable(true);
 
 		// Create GDAL dataset.
 		char **opts = NULL;
@@ -1682,7 +1683,7 @@ public:
 	 * \param mean The centre of the curve.
 	 */
 	template <class U>
-	static void gaussianWeights(U* weights, int size, U sigma, U mean = 0) {
+	static void gaussianWeights(U* weights, int size, double sigma, double mean = 0) {
 		// If size is an even number, bump it up.
 		if (size % 2 == 0) {
 			++size;
@@ -1816,10 +1817,10 @@ public:
 		// Fill the buffer with nodata for empty rows/ends.
 		std::fill(buf.begin(), buf.end(), nodata);
 
-		int endr = geo::min((size_t) row + h, rows);
+		int endr = geo::min((size_t) r + h, rows);
 		for(int rr = 0; r < endr; ++rr, ++r) {
 			std::memcpy(buf.data() + cb, m_data + (size_t) r * (size_t) cols + (size_t) c, w * sizeof(T)); // Casting to prevent overflow on large rasters.
-			std::memcpy(tile + (rr + rb) * tw, buf.data(), w * sizeof(T));
+			std::memcpy(tile + (rr + rb) * tw, buf.data() + cb, w * sizeof(T));
 		}
 	}
 
@@ -2233,6 +2234,9 @@ public:
 			col = cel.col;
 			q.pop();
 
+			if(row < 0 || col < 0 || row >= rows || col >= cols)
+				continue;
+
 			size_t idx = (size_t) row * cols + col;
 
 			if (!visited[idx] && op.shouldFill(col, row)) {
@@ -2310,9 +2314,6 @@ public:
 	/**
 	 * \brief Smooth the raster and write the smoothed version to the output raster.
 	 *
-	 * Callback is an optional function reference with a single float
-	 * between 0 and 1, for status tracking.
-	 *
 	 * Sigma defaults to 0.84089642, window size to 3.
 	 *
 	 * \param smoothed The smoothed grid.
@@ -2320,7 +2321,7 @@ public:
 	 * \param size     The window size.
 	 * \param monitor  A reference to the Monitor.
 	 */
-	void smooth(Band<T>& smoothed, double sigma, int size, geo::Monitor* monitor = nullptr) {
+	void smooth(Band<T>& smoothed, double sigma = 0.84089642, int size = 3, geo::Monitor* monitor = nullptr) {
 		if(!monitor)
 			monitor = getDefaultMonitor();
 
@@ -2338,13 +2339,13 @@ public:
 		}
 
 		// Compute the weights for Gaussian smoothing.
-		std::vector<double> weights(size * size * getTypeSize(DataType::Float64));
+		std::vector<T> weights(size * size);
 		Band::gaussianWeights(weights.data(), size, sigma);
 
 		if(monitor->canceled())
 			return;
 
-		double k, v, nodata = gp.nodata();
+		T k, v, nodata = gp.nodata();
 		std::vector<T> buf(size * size);
 		int gc = gp.cols();
 		int gr = gp.rows();
@@ -2356,15 +2357,23 @@ public:
 			if(monitor->canceled())
 				return;
 			for(int c = 0; c < gc; ++c) {
-				double s = 0;
+				T n, s = 0;
+				T norm = 0;
+				std::fill(buf.begin(), buf.end(), nodata);
 				getTile(buf.data(), c - size / 2, r - size / 2, size, size);
 				for(int rr = 0; rr < size; ++rr) {
 					for(int cc = 0; cc < size; ++cc) {
-						if((v = buf[rr * size + cc]) != nodata)
-							s += v * weights[rr * size + cc];
+						if((v = buf[rr * size + cc]) != nodata) {
+							s += v * (n = weights[rr * size + cc]);
+							norm += n;
+						}
 					}
 				}
-				smoothed.set(c, r, s);
+				if(norm > 0) {
+					smoothed.set(c, r, s / norm);
+				} else {
+					smoothed.set(c, r, nodata);
+				}
 			}
 		}
 
@@ -2647,7 +2656,7 @@ public:
 				}
 			}
 
-			band->FlushCache();
+			m_ds->FlushCache();
 			m_dirty = false;
 		}
 	}
