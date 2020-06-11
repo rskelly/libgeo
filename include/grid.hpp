@@ -1328,9 +1328,9 @@ public:
 	 * \param filename The path to the file.
 	 * \param props A GridProps instance containing a descriptor for the raster.
 	 */
-	Band(const std::string& filename, const GridProps& props) :
+	Band(const std::string& filename, const GridProps& props, bool mapped = false) :
 		Band() {
-		init(filename, props);
+		init(filename, props, mapped);
 	}
 
 	/**
@@ -1339,7 +1339,7 @@ public:
 	 * \param filename The path to the file.
 	 * \param props A GridProps instance containing a descriptor for the raster.
 	 */
-	void init(const std::string& filename, const GridProps& props) {
+	void init(const std::string& filename, const GridProps& props, bool mapped = false) {
 
 		if (props.resX() == 0 || props.resY() == 0)
 			g_argerr("Resolution must not be zero.");
@@ -1425,8 +1425,10 @@ public:
 
 		// Map the raster into virtual memory.
 
-		if(!initMapped())
-			g_runerr("Failed to map memory.")
+		if(mapped || !initMem()) {
+			if(!initMapped())
+				g_runerr("Failed to map memory.")
+		}
 	}
 
 
@@ -2045,7 +2047,7 @@ public:
 
 		for(int r = srcRow; r < srcRow + rows; ++r) {
 			for(int c = srcCol; c < srcCol + cols; ++c)
-				set(c - srcCol + dstCol, r - srcRow + dstRow, get(c, r));
+				grd.set(c - srcCol + dstCol, r - srcRow + dstRow, get(c, r));
 		}
 
 	}
@@ -2216,10 +2218,10 @@ public:
 		int cols = gp.cols();
 		int rows = gp.rows();
 		size_t size = gp.size();
-		int minc = cols + 1;
-		int minr = rows + 1;
-		int maxc = -1;
-		int maxr = -1;
+		int minc = geo::maxvalue<int>();
+		int minr = geo::maxvalue<int>();
+		int maxc = geo::minvalue<int>();
+		int maxr = geo::minvalue<int>();
 		int area = 0;
 
 		std::queue<Cell> q;
