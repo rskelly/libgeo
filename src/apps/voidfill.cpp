@@ -5,8 +5,6 @@
  *      Author: rob
  */
 
-#include <geos_c.h>
-
 #include "grid.hpp"
 
 using namespace geo::grid;
@@ -17,174 +15,198 @@ void usage() {
 			<< " -m  <area>       Maximum area to fill. Square map units.\n"
 			<< " -e               Fill voids on edges (otherwise don't).\n"
 			<< " -d  <mode>       Mode: 0=min, 1=mean, 2=median, 3=max. Default 0.\n"
-			<< " -n  <N>          N for concave hull. Usually 0-5. Default 2.5.\n";
+			<< " -n  <n>          The radius of the alpha disc.\n";
 }
 
-int fillVoid(Band<int>& mask, Band<float>& rast, int col, int row, int mode) {
-	if(mask.get(col, row) != 1)
-		return 0;
-	const GridProps& props = mask.props();
-	double nd = rast.props().nodata();
-	double v, s = 0;
+int fillVoids(Band<int>& mask, Band<float>& inrast, Band<float>& outrast, int col0, int row0, int col1, int row1, int mode) {
+
+	const GridProps& props = inrast.props();
+	float nd = props.nodata();
+	float v, s;
 	int ct = 0;
 	std::vector<float> v0;
-	for(int r = std::max(0, row - 1); r < std::min(props.rows(), row + 2); ++r) {
-		for(int c = std::max(0, col - 1); c < std::min(props.cols(), col + 2); ++c) {
-			if((v = rast.get(c, r)) != nd) {
-				if(mode == 2) {
-					v0.push_back(v);
-				} else {
-					s += v;
+
+	// Initialize the values.
+	switch(mode) {
+	case 0: s = geo::maxvalue<float>(); break;
+	case 3: s = geo::minvalue<float>(); break;
+	default: s = 0; break;
+	}
+
+	// Find the edge pixel values.
+	for(int r = row0; r <= row1; ++r) {
+		for(int c = col0; c <= col1; ++c) {
+			if(mask.get(c, r) != 2)
+				continue;
+			// Check the pixels around the masked pixel for values.
+			for(int rr = r - 1; rr < r + 2; ++rr) {
+				for(int cc = c - 1; cc < c + 2; ++cc) {
+					if(props.hasCell(cc, rr) && (v = inrast.get(cc, rr)) != nd) {
+						switch(mode) {
+						case 0:
+							if(v < s) s = v;
+							break;
+						case 3:
+							if(v > s) s = v;
+							break;
+						case 2:
+							v0.push_back(v);
+							break;
+						default:
+							s += v;
+							break;
+						}
+						++ct;
+					}
 				}
-				++ct;
 			}
 		}
 	}
+
+	float m = nd;
+
+	// Calculate the output value.
+	// TODO: Add a spline, IDW (etc.) interp method.
 	if(ct) {
-		float m;
-		if(mode == 2) {
+		switch(mode) {
+		case 0:
+		case 3:
+			m = s;
+			break;
+		case 2:
 			if(v0.size() % 2 == 0) {
 				std::sort(v0.begin(), v0.end());
 				m = (v0[v0.size() / 2 - 1] + v0[v0.size() / 2]) / 2.0;
 			} else {
 				m = v0[v0.size() / 2];
 			}
-		} else {
+			break;
+		default:
 			m = s / ct;
+			break;
 		}
-		rast.set(col, row, m);
-		mask.set(col, row, 2);
-		return 1;
 	}
+
+	// Write the new value to the null region, set mask to 3.
+	for(int r = row0; r <= row1; ++r) {
+		for(int c = col0; c <= col1; ++c) {
+			if(mask.get(c, r) == 2) {
+				outrast.set(c, r, m);
+				mask.set(c, r, 3);
+			}
+		}
+	}
+
 	return 0;
 }
 
-GEOSGeometry* makeLine(double x1, double y1, double x2, double y2, GEOSContextHandle_t gctx) {
-	GEOSCoordSequence* seq = GEOSCoordSeq_create_r(gctx, 2, 2);
-	GEOSCoordSeq_setX_r(gctx, seq, 0, x1);
-	GEOSCoordSeq_setY_r(gctx, seq, 0, y1);
-	GEOSCoordSeq_setX_r(gctx, seq, 1, x2);
-	GEOSCoordSeq_setY_r(gctx, seq, 1, y2);
-	return GEOSGeom_createLineString_r(gctx, seq);
+/**
+ * Set all edge-contacting null pixel regions to 2 in the mask.
+ */
+void edgeMask(Band<float>& dem, Band<int>& mask) {
+	float nd = dem.props().nodata();
+	int cols = dem.props().cols();
+	int rows = dem.props().rows();
+	TargetFillOperator<float, int> op1(&dem, 1, &mask, 1, nd, 2); // Mark for filling (nd --> 2)
+	int minc, minr, maxc, maxr, area;
+	mask.fill(0);
+	for(int c = 0; c < cols; ++c) {
+		if(mask.get(c, 0) != 2)
+			dem.floodFill(c, 0, op1, false, &minc, &minr, &maxc, &maxr, &area);
+		if(mask.get(c, rows - 1) != 2)
+			dem.floodFill(c, rows - 1, op1, false, &minc, &minr, &maxc, &maxr, &area);
+	}
+	for(int r = 0; r < rows; ++r) {
+		if(mask.get(0, r) != 2)
+			dem.floodFill(0, r, op1, false, &minc, &minr, &maxc, &maxr, &area);
+		if(mask.get(cols - 1, r) != 2)
+			dem.floodFill(cols - 1, r, op1, false, &minc, &minr, &maxc, &maxr, &area);
+	}
 }
 
-GEOSGeometry* makePoint(double x, double y, GEOSContextHandle_t gctx) {
-	GEOSCoordSequence* seq = GEOSCoordSeq_create_r(gctx, 1, 2);
-	GEOSCoordSeq_setX_r(gctx, seq, 0, x);
-	GEOSCoordSeq_setY_r(gctx, seq, 0, y);
-	return GEOSGeom_createPoint_r(gctx, seq);
-}
+/**
+ * Set all non-edge, null pixel regions to 1 in the mask; zero everywhere else.
+ */
+void ndMask(Band<float>& dem, Band<int>& mask) {
 
-bool getXY(const GEOSGeometry* geom, int i, double& x, double& y, GEOSContextHandle_t gctx) {
-	const GEOSGeometry* pt = GEOSGeomGetPointN_r(gctx, geom, i);
-	if(GEOSGeomGetX_r(gctx, pt, &x)) {
-		if(GEOSGeomGetY_r(gctx, pt, &y)) {
-			return true;
-		}
-	}
-	return false;
-}
+	edgeMask(dem, mask);
 
-// https://www.iis.sinica.edu.tw/page/jise/2012/201205_10.pdf
-GEOSGeometry* concaveHull(const std::vector<std::pair<double, double>>& pts, double N, GEOSContextHandle_t gctx) {
-
-	// Build the tree and list of points.
-	std::vector<GEOSGeometry*> treePts;
-	for(size_t i = 0; i < pts.size(); ++i)
-		treePts.push_back(makePoint(pts[i].first, pts[i].second, gctx));
-
-	// Build the hull and get the exterior ring.
-	GEOSGeometry* chull;
-	const GEOSGeometry* er;
-	{
-		GEOSGeometry* mp = GEOSGeom_createCollection_r(gctx, GEOS_MULTIPOINT, treePts.data(), treePts.size());
-		chull = GEOSConvexHull_r(gctx, mp);
-		er = GEOSGetExteriorRing_r(gctx, chull);
-	}
-
-	// Make the list of line segments.
-	double x1, y1, x2, y2;
-	int numPts = GEOSGeomGetNumPoints_r(gctx, er);
-	std::vector<GEOSGeometry*> lines;
-	GEOSSTRtree* tree = GEOSSTRtree_create_r(gctx, pts.size());
-
-	for(int i = 0; i < numPts; ++i) {
-		getXY(er, i, x1, y1, gctx);
-		getXY(er, (i + 1) % numPts, x2, y2, gctx);
-		GEOSGeometry* line = makeLine(x1, y1, x2, y2, gctx);
-		lines.push_back(line);
-		GEOSGeometry* pt = GEOSGeomGetPointN_r(gctx, er, i);
-		if(1 == GEOSRelatePattern_r(gctx, chull, pt, "T**FF*FF*"))
-			GEOSSTRtree_insert_r(gctx, tree, pt, pt);
-	}
-
-	// Do the "digging" operation.
-	double eh, dd, dd1, dd2, x, y;
-	//bool found = false;
-	//do {
-		std::vector<GEOSGeometry*> tmp;
-		std::vector<size_t> destid;
-		//found = false;
-		for(int i = 0; i < (int) lines.size(); ++i) {
-			GEOSGeometry* line = lines[i];
-			const GEOSGeometry* l1 = lines[(i - 1) % lines.size()];
-			const GEOSGeometry* l2 = lines[(i + 1) % lines.size()];
-			const GEOSGeometry* pt = GEOSSTRtree_nearest_r(gctx, tree, line);
-			GEOSDistance_r(gctx, pt, line, &dd);
-			GEOSDistance_r(gctx, pt, l1, &dd1);
-			GEOSDistance_r(gctx, pt, l2, &dd2);
-			if(dd1 < dd || dd2 < dd)
-				continue;
-			GEOSGeomGetLength_r(gctx, line, &eh);
-			if(dd > 0 && eh > 0 && eh / dd > N) {
-				getXY(pt, 0, x, y, gctx);
-				tmp.push_back(makeLine(x1, y1, x, y, gctx));
-				tmp.push_back(makeLine(x, y, x2, y2, gctx));
-				destid.push_back(i);
-				//found = true;
-				continue;
+	float nd = dem.props().nodata();
+	int cols = dem.props().cols();
+	int rows = dem.props().rows();
+	for(int r = 0; r < rows; ++r) {
+		for(int c = 0; c < cols; ++c) {
+			if(mask.get(c, r) != 2 && dem.get(c, r) == nd) {
+				mask.set(c, r, 1);
 			} else {
-				tmp.push_back(line);
+				mask.set(c, r, 0);
 			}
 		}
-		for(size_t i : destid)
-			GEOSGeom_destroy_r(gctx, lines[i]);
-		tmp.swap(lines);
-		tmp.clear();
-	//} while(found);
-
-	//
-	GEOSGeometry* hull = GEOSPolygonize_r(gctx, lines.data(), lines.size());
-
-	GEOSGeom_destroy_r(gctx, chull);
-
-	return hull;
+	}
 }
 
-#include <stdarg.h>
+/**
+ * Set all non-edge, null pixel regions to 1 in the mask, according to the alpha shape parameter; zero everywhere else.
+ */
+void hullMask(Band<float>& dem, Band<int>& mask, double alpha) {
 
-void msg(const char* fmt, ...) {
-	va_list v;
-	va_start(v, 1);
-	char* a = va_arg(v, char*);
-	char buf[256];
-	sprintf(buf, fmt, a);
-	g_warn(buf);
-}
+	edgeMask(dem, mask);
 
-void hullMask(Band<int>& mask, const std::vector<std::pair<double, double>>& pts, double N) {
-	GEOSContextHandle_t gctx = initGEOS_r(msg, msg);
-	GEOSGeometry* hull = concaveHull(pts, N, gctx);
-	for(int r = 0; r < mask.props().rows(); ++r) {
-		for(int c = 0; c < mask.props().cols(); ++c) {
-			GEOSGeometry* pt = makePoint((double) c, (double) r, gctx);
-			if(GEOSContains_r(gctx, hull, pt))
-				mask.set(c, r, 1);
-			GEOSGeom_destroy_r(gctx, pt);
+	float nd = dem.props().nodata();
+	int cols = dem.props().cols();
+	int rows = dem.props().rows();
+
+	// Build the round kernel.
+	int rad = (int) std::ceil(std::abs(alpha / dem.props().resX()));
+	std::vector<std::pair<int, int>> k;
+	for(int rr = -rad; rr < rad + 1; ++rr) {
+		for(int cc = -rad; cc < rad + 1; ++cc) {
+			if(geo::sq(rr) + geo::sq(cc) <= rad)
+				k.emplace_back(cc, rr);
 		}
 	}
-	GEOSGeom_destroy_r(gctx, hull);
-	finishGEOS_r(gctx);
+
+	// Fill the mask with 3 outside the alpha shape.
+	const GridProps& props = mask.props();
+	int step = rows / 100;
+	int cc, rr;
+	for(int r = 0; r < rows; ++r) {
+		if(r % step == 0)
+			g_debug("Row: " << r << " of " << rows);
+		for(int c = 0; c < cols; ++c) {
+			if(mask.get(c, r) == 2) {
+				bool fill = true;
+				for(const auto& it : k) {
+					cc = c + it.first;
+					rr = r + it.second;
+					if(props.hasCell(cc, rr) && mask.get(cc, rr) == 2 && dem.get(cc, rr) != nd) {
+						fill = false;
+						break;
+					}
+				}
+				if(fill) {
+					for(const auto& it : k) {
+						cc = c + it.first;
+						rr = r + it.second;
+						if(props.hasCell(cc, rr))
+							mask.set(cc, rr, 3);
+					}
+				}
+			}
+		}
+	}
+
+	// Set
+	for(int r = 0; r < rows; ++r) {
+		for(int c = 0; c < cols; ++c) {
+			if(mask.get(c, r) != 3 && dem.get(c, r) == nd) {
+				mask.set(c, r, 1);
+			} else {
+				mask.set(c, r, 0);
+			}
+		}
+	}
+
 }
 
 int main(int argc, char** argv) {
@@ -197,18 +219,15 @@ int main(int argc, char** argv) {
 	std::string infile;
 	std::string outfile;
 	int band = 1;
-	double maxarea = 0;
-	bool edges = false;
+	float maxarea = geo::maxvalue<float>();
 	int mode = 0;
 	bool useGeomMask = true;
 	int state = 0;
-	double n = 2.5;
+	float n = 100;
 
 	for(int i = 1; i < argc; ++i) {
 		std::string v = argv[i];
-		if(v == "-e") {
-			edges = true;
-		} else if(v == "-b") {
+		if(v == "-b") {
 			band = atoi(argv[++i]);
 		} else if(v == "-m") {
 			maxarea = atof(argv[++i]);
@@ -237,105 +256,66 @@ int main(int argc, char** argv) {
 		return 1;
 	}
 
-	Band<int> mask;
-	Band<float> rast;
-	int pxarea;
-	{
-		rast.init(infile, 0, false, true, nullptr);
-		GridProps props(rast.props());
-		pxarea = (int) std::ceil(maxarea / std::abs(props.resX()) * std::abs(props.resY()));
-		props.setWritable(true);
-		props.setBands(1);
-		props.setDataType(DataType::Byte);
-		mask.init(props, true);
-		mask.fill(0);
-	}
+	Band<float> inrast(infile, 0, false, true);
 
-	const GridProps& mprops = mask.props();
+	Band<float> outrast(outfile, inrast.props(), true);
+	inrast.writeTo(outrast);
+
+	GridProps mprops(inrast.props());
+	mprops.setWritable(true);
+	mprops.setBands(1);
+	mprops.setDataType(DataType::Byte);
+	Band<int> mask("/tmp/mask.tif", mprops, true);
+	mask.fill(0);
+
 	int cols = mprops.cols();
 	int rows = mprops.rows();
-	const GridProps& rprops = rast.props();
-	double nd = rprops.nodata();
 
-	geo::grid::TargetFillOperator<float, int> op1(&rast, 1, &mask, 1, nd, 1); // Mark for filling (nd --> 1)
-	geo::grid::TargetFillOperator<int, int> op2(&mask, 1, &mask, 1, 1, 2); // Mark for filling (1 --> 2)
+	geo::grid::TargetFillOperator<int, int> op1(&mask, 1, &mask, 1, 1, 2); // Mark for filling (1 --> 2)
+	geo::grid::TargetFillOperator<int, int> op2(&mask, 1, &mask, 1, 2, 3); // Mark for filling (2 --> 3)
 	int cmin = 0, cmax = 0, rmin = 0, rmax = 0, area = 0;
-
-	// Temp nodata for mask.
-	double tnd = rast.stats().min - 1;
 
 	if(useGeomMask){
 		// Build concave hull to produce mask.
 		std::cerr << "Building concave hull mask.\n";
-		std::vector<std::pair<double, double>> chull;
-		double v;
-		for(int row = 0; row < rows; ++row) {
-			if(row % 100 == 0)
-				std::cerr << "Row " << row << " of " << rows << "\n";
-			for(int col = 0; col < cols; ++col) {
-
-				if((v = rast.get(col, row)) == nd)
-					continue;
-
-				bool isEdge = false;
-				for(int rr = row - 1; !isEdge && rr < row + 2; ++rr) {
-					for(int cc = col - 1; !isEdge && cc < col + 2; ++cc) {
-						if(rprops.hasCell(cc, rr))
-							isEdge = (rast.get(cc, rr) == nd);
-					}
-				}
-
-				if(isEdge)
-					chull.emplace_back(col, row);
-			}
-		}
-
-		hullMask(mask, chull, n);
-
-		for(int row = 0; row < rows; ++row) {
-			if(row % 100 == 0)
-				std::cerr << "Row " << row << " of " << rows << "\n";
-			for(int col = 0; col < cols; ++col) {
-
-				if(mask.get(col, row) != 0 || (v = rast.get(col, row)) != nd)
-					continue;
-
-				Band<float>::floodFill(col, row, op1, false, &cmin, &rmin, &cmax, &rmax, &area);
-
-				// Skip if the area is too large, or if it's on the edge and
-				// edges are not desired.
-				if(area == 0 || (pxarea > 0 && area > pxarea) || (!edges && (cmin == 0 || rmin == 0 || cmax >= cols - 1 || rmax >= rows - 1))) {
-					Band<int>::floodFill(col, row, op2, false);
-					continue;
-				}
-
-				int count = 0;
-				do {
-					count = 0;
-					for(int r = rmin; r <= rmax; ++r) {
-						for(int c = cmin; c <= cmax; ++c) {
-							count += fillVoid(mask, rast, c, r, mode);
-						}
-					}
-				} while(count > 0);
-			}
-		}
+		hullMask(inrast, mask, n);
+	} else {
+		std::cerr << "Building edge mask.\n";
+		ndMask(inrast, mask);
 	}
+
+	int maxpxarea;
+	double q = maxarea / geo::sq(mprops.resX());
+	if(q > (double) geo::maxvalue<int>()) {
+		maxpxarea = geo::maxvalue<int>();
+	} else {
+		maxpxarea = (int) q;
+	}
+	if(maxpxarea < 1) maxpxarea = 1;
+
+	float nd = inrast.props().nodata();
 
 	for(int row = 0; row < rows; ++row) {
 		if(row % 100 == 0)
-			std::cerr << "Row " << row << " of " << rows << "\n";
+			std::cerr << "Filling. Row " << row << " of " << rows << "\n";
 		for(int col = 0; col < cols; ++col) {
-			if(rast.get(col, row) == tnd)
-				rast.set(col, row, nd);
-		}
-	}
 
-	{
-		GridProps props(rast.props());
-		props.setWritable(true);
-		Band<float> output(outfile, props);
-		rast.writeTo(output);
+			// Only hit pixels marked with 1.
+			if(mask.get(col, row) != 1)
+				continue;
+
+			// Fill the target region with 2.
+			Band<int>::floodFill(col, row, op1, false, &cmin, &rmin, &cmax, &rmax, &area);
+
+			if(area >= maxpxarea) {
+				// The filled area was too large. Ignore it by setting it to 3.
+				Band<int>::floodFill(col, row, op2, false, &cmin, &rmin, &cmax, &rmax, &area);
+			} else {
+				// Fill the voids.
+				fillVoids(mask, inrast, outrast, cmin, rmin, cmax, rmax, mode);
+			}
+
+		}
 	}
 
 	return 0;
