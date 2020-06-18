@@ -248,8 +248,20 @@ G_DLL_EXPORT std::string join(Iter begin, Iter end, const std::string& delim = "
 	return ss.str();
 }
 
+/**
+ * \brief Return the base name of the path. If it's a file with the extension, the extension (including separator) is removed.
+ *
+ * \param path A path.
+ * \return The base name.
+ */
 G_DLL_EXPORT std::string basename(const std::string& path);
 
+/**
+ * \brief Return the file extension including separator (.) if there is one, else an empty string.
+ *
+ * \param A file path.
+ * \return The file extension.
+ */
 G_DLL_EXPORT std::string extension(const std::string& path);
 
 /**
