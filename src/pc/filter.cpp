@@ -76,10 +76,10 @@ PointFilter* PCPointFilter::getFilter(const std::string& v, char** argv, int& id
 		return new PointFirstOnlyFilter(true);
 	} else if(v == "minz") {
 		double minZ = atof(argv[++idx]);
-		return new PointZRangeFilter(minZ, G_DBL_MAX_POS);
+		return new PointZRangeFilter(minZ, geo::maxvalue<double>());
 	} else if(v == "maxz") {
 		double maxZ = atof(argv[++idx]);
-		return new PointZRangeFilter(-G_DBL_MAX_NEG, maxZ);
+		return new PointZRangeFilter(-geo::minvalue<double>(), maxZ);
 	} else if(v == "z") {
 		std::string arg = argv[++idx];
 		std::vector<std::string> parts;
@@ -157,7 +157,7 @@ double PCPointFilter::minZRange() const {
 			}
 		}
 	}
-	return found ? z : G_DBL_MAX_NEG; // NOTE: Compromise -- if there's no filter, it's the minimum. This ensures that when no filter is set all >0 points are kept (with maxZRange).
+	return found ? z : geo::minvalue<double>(); // NOTE: Compromise -- if there's no filter, it's the minimum. This ensures that when no filter is set all >0 points are kept (with maxZRange).
 }
 
 double PCPointFilter::maxZRange() const {
@@ -172,7 +172,7 @@ double PCPointFilter::maxZRange() const {
 			}
 		}
 	}
-	return found ? z : G_DBL_MAX_POS; // NOTE: Compromise -- if there's no filter, it's zero. This ensures that when no filter is set all >0 points are kept (with maxZRange).
+	return found ? z : geo::maxvalue<double>(); // NOTE: Compromise -- if there's no filter, it's zero. This ensures that when no filter is set all >0 points are kept (with maxZRange).
 }
 
 

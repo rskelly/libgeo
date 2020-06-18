@@ -170,7 +170,7 @@ int HLRGBiometricsComputer::compute(double x, double y, const std::vector<geo::p
 	// the ground density, even though the cover seemed to be completely uniform due to a
 	// postprocessing error.
 
-	double thresh = G_DBL_MAX_NEG;
+	double thresh = geo::minvalue<double>();
 	for(const PointFilter* filter : filters()) {
 		const PointZRangeFilter* f;
 		if((f = dynamic_cast<const PointZRangeFilter*>(filter)) != nullptr)
@@ -223,18 +223,24 @@ int HLRGBiometricsComputer::compute(double x, double y, const std::vector<geo::p
 	return bandCount();
 }
 
-std::vector<std::string> HLRGBiometricsComputer::bandMeta() const {
-	std::vector<std::string> ret;
-	ret.push_back("Rugosity (Std. Dev.)");
-	ret.push_back("Gap Fraction");
-	ret.push_back("85th Percentile");
-	for(int i = 0; i < 4; ++i)
-		ret.push_back("L-Moment " + std::to_string(i + 1));
+std::vector<std::pair<std::string, std::string>> HLRGBiometricsComputer::bandMeta() const {
+	std::vector<std::pair<std::string, std::string>> ret;
+	ret.emplace_back("hlrg_rugosity", "Rugosity (Std. Dev.)");
+	ret.emplace_back("hlrg_gap", "Gap Fraction");
+	ret.emplace_back("hlrg_p85", "85th Percentile");
+	for(int i = 0; i < 4; ++i) {
+		std::string l = std::to_string(i + 1);
+		ret.emplace_back("hlrg_lmoment_" + l, "L-Moment " + l);
+	}
 	float slice = 100.0 / m_bands;
-	for(int i = 0; i <= m_bands; ++i)
-		ret.push_back("LHQ " + std::to_string((int) (i * slice)) + "%");
-	for(int i = 0; i <= m_bands; ++i)
-		ret.push_back("CCF " + std::to_string((int) (i * slice)) + "%");
+	for(int i = 0; i <= m_bands; ++i) {
+		std::string s = std::to_string((int) (i * slice));
+		ret.emplace_back("hlrg_lhq_" + s, "LHQ " + s + "%");
+	}
+	for(int i = 0; i <= m_bands; ++i) {
+		std::string s = std::to_string((int) (i * slice));
+		ret.emplace_back("hlrg_ccf_" + std::to_string((int) (i * slice)), "CCF " + s + "%");
+	}
 	return ret;
 }
 
@@ -242,223 +248,3 @@ int HLRGBiometricsComputer::bandCount() const {
 	return 7 + (m_bands + 1) * 2;
 }
 
-
-
-/*	if(zValues.empty() || zValues.size() == pts.size())
-		g_warn("To calculate CCF, points must have both veg (1) and ground classes (2).")
-
- * void fcLidarBLa(const std::list<std::unique_ptr<LiDARPoint> > &values, double *result) {
-	double gnd = 0.0;
-	double all = 0.0;
-	for (const std::unique_ptr<LiDARPoint>& pt : values) {
-		if (pt->isGround())
-			gnd += pt->intensity();
-		if (pt->cls() < 2) // TODO: This should perhaps be filtered by class to remove bogus points.
-			all += pt->intensity();
-	}
-	result[0] = all != 0.0 ? 1.0 - std::sqrt(gnd / all) : -9999.0;
-}
-
-void fcLidarBLb(const std::list<std::unique_ptr<LiDARPoint> > &values, double *result) {
-	double gndSingle = 0.0, gndLast = 0.0, first = 0.0, single = 0.0,
-			intermediate = 0.0, last = 0.0, total = 0.0;
-	for (const std::unique_ptr<LiDARPoint>& pt : values) {
-		if (pt->isGround()) {
-			if (pt->isSingle())
-				gndSingle += pt->intensity();
-			if (pt->isLast())
-				gndLast += pt->intensity();
-		}
-		if (pt->isFirst())
-			first += pt->intensity();
-		if (pt->isSingle())
-			single += pt->intensity();
-		if (pt->isIntermediate())
-			intermediate += pt->intensity();
-		if (pt->isLast())
-			last += pt->intensity();
-		total += pt->intensity(); // TODO: This should perhaps be filtered by class to remove bogus points.
-	}
-	if (total == 0.0) {
-		result[0] = -9999.0;
-	} else {
-		double denom = (first + single) / total
-				+ std::sqrt((intermediate + last) / total);
-		if (denom == 0.0) {
-			result[0] = -9999.;
-		} else {
-			result[0] = (gndSingle / total + std::sqrt(gndLast / total))
-					/ denom;
-		}
-	}
-}
-
-void fcLidarIR(const std::list<std::unique_ptr<LiDARPoint> > &values, double *result) {
-	double canopy = 0.0, total = 0.0;
-	for (const std::unique_ptr<LiDARPoint>& pt : values) {
-		if (!pt->isGround())
-			canopy += pt->intensity();
-		total += pt->intensity();
-	}
-	result[0] = total != 0.0 ? canopy / total : -9999.0;
-}
-
-void fcLidarRR(const std::list<std::unique_ptr<LiDARPoint> > &values, double *result) {
-	unsigned int canopy = 0, total = 0;
-	for (const std::unique_ptr<LiDARPoint>& pt : values) {
-		if (!pt->isGround())
-			++canopy;
-		++total;
-	}
-	result[0] = total != 0.0 ? (double) canopy / total : -9999.0;
-}
-
-void fcLidarFR(const std::list<std::unique_ptr<LiDARPoint> > &values, double *result) {
-	unsigned int canopy = 0, total = 0;
-	for (const std::unique_ptr<LiDARPoint>& pt : values) {
-		if (pt->isFirst()) {
-			if (!pt->isGround())
-				++canopy;
-			++total;
-		}
-	}
-	result[0] = total != 0.0 ? (double) canopy / total : -9999.0;
-}
-
-void ccf(const std::list<std::unique_ptr<LiDARPoint> >& values, double *result, double threshold) {
-	if (values.size() < 75) {
-		result[0] = -9999.0;
-	} else {
-		double maxZ = -9999.0;
-		for (const std::unique_ptr<LiDARPoint>& pt : values)
-			maxZ = g_max(maxZ, pt->z());
-		double htIncrement = (maxZ - threshold) / 20.0;
-		double curHeight = threshold;
-		for (int band = 0; band <= 20; ++band) {
-			double count = 0;
-			for (const std::unique_ptr<LiDARPoint>& pt : values) {
-				if (pt->z() > curHeight)
-					++count;
-			}
-			result[band] = (double) count / values.size();
-			curHeight += htIncrement;
-		}
-	}
-}
-
-void gap(const std::list<std::unique_ptr<LiDARPoint> > &values, double *result, double threshold) {
-	if (!values.size()) {
-		result[0] = -9999.0;
-	} else {
-		int cnt = 0;
-		for (const std::unique_ptr<LiDARPoint>& p : values) {
-			if (p->z() > threshold)
-				++cnt;
-		}
-		result[0] = 1.0 - ((double) cnt / values.size());
-	}
-}
-
-CellGapFraction::CellGapFraction(unsigned char type, double threshold) :
-		CellStats(), m_type(type), m_threshold(threshold) {
-}
-
-void CellGapFraction::threshold(double t) {
-	m_threshold = t;
-}
-
-int CellGapFraction::bands() const {
-	switch (m_type) {
-	case GAP_CCF:
-		return 21;
-	default:
-		return 1;
-	}
-}
-
-void CellGapFraction::compute(double x, double y,
-		const std::list<std::unique_ptr<LiDARPoint> > &values, double *result) {
-	if (!values.size()) {
-		result[0] = -9999.0;
-	} else {
-		switch (m_type) {
-		case GAP_BLA:
-			fcLidarBLa(values, result);
-			break;
-		case GAP_BLB:
-			fcLidarBLb(values, result);
-			break;
-		case GAP_IR:
-			fcLidarIR(values, result);
-			break;
-		case GAP_RR:
-			fcLidarRR(values, result);
-			break;
-		case GAP_FR:
-			fcLidarFR(values, result);
-			break;
-		case GAP_CCF:
-			ccf(values, result, m_threshold);
-			break;
-		case GAP_GAP:
-			gap(values, result, m_threshold);
-			break;
-		default:
-			g_argerr("Unknown Gap Fraction method: " << m_type);
-		}
-	}
-}
- *
- */
-
-
-
-/*
- *         namespace pointstats_config {
-
-            std::map<std::string, uint8_t> types = {
-                {"Minimum", TYPE_MIN},
-                {"Maximum", TYPE_MAX},
-                {"Mean", TYPE_MEAN},
-                {"Density", TYPE_DENSITY},
-                {"Sample Variance", TYPE_VARIANCE},
-                {"Sample Std. Dev.", TYPE_STDDEV},
-                {"Population Variance", TYPE_PVARIANCE},
-                {"Population Std. Dev.", TYPE_PSTDDEV},
-                {"Count", TYPE_COUNT},
-                {"Quantile", TYPE_QUANTILE},
-                {"Median", TYPE_MEDIAN},
-                {"Rugosity", TYPE_RUGOSITY},
-                {"Kurtosis", TYPE_KURTOSIS},
-                {"Skewness", TYPE_SKEW},
-                {"Gap Fraction", TYPE_GAP_FRACTION},
-                {"CoV", TYPE_COV}
-            };
-            std::map<std::string, uint8_t> attributes = {
-                {"Height", ATT_HEIGHT},
-                {"Intensity", ATT_INTENSITY}
-            };
-            std::map<std::string, uint8_t> gapFractionTypes = {
-                {"IR", GAP_IR},
-                {"BLa", GAP_BLA},
-                {"BLb", GAP_BLB},
-                {"RR", GAP_RR},
-                {"FR", GAP_FR},
-                {"CCF", GAP_CCF},
-                {"GAP", GAP_GAP}
-            };
-
-            std::map<std::string, uint8_t> snapModes = {
-                {"None" , SNAP_NONE},
-                {"Grid" , SNAP_GRID},
-                {"Origin" , SNAP_ORIGIN}
-            };
-
-            std::map<std::string, uint8_t> areaModes = {
-                {"Full Cell", AREA_CELL},
-                {"Radius", AREA_RADIUS}
-            };
-
-        } // config
- *
- */

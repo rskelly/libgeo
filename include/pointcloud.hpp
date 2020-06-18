@@ -629,9 +629,12 @@ public:
 
 	/**
 	 * Return the list of band names corresponding to the bands created by the computer.
+	 *
+	 * Each pair contains a simple ID and a human-readable name.
+	 *
 	 * \return The list of band names corresponding to the bands created by the computer.
 	 */
-	virtual std::vector<std::string> bandMeta() const = 0;
+	virtual std::vector<std::pair<std::string, std::string>> bandMeta() const = 0;
 
 	/**
 	 * \brief Add the list of filters to the computer.
@@ -806,13 +809,13 @@ private:
 
 	// Used by finalizer.
 	std::vector<std::unique_ptr<Computer> > m_computers;
-	std::vector<geo::grid::Grid<double>> m_rasters;
+	std::vector<geo::grid::Band<float>> m_rasters;
 	std::vector<geo::pc::Point> m_filtered;
 	std::vector<double> m_out;
 
 	void finalize(int row, double radius,
 			std::unordered_map<size_t, std::vector<geo::pc::Point> >& cells,
-			geo::grid::Grid<double>& outrast);
+			geo::grid::Band<float>& outrast);
 
 public:
 

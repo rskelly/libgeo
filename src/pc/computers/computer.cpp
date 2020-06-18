@@ -61,7 +61,7 @@ int DensityComputer::bandCount() const {
 	return 1;
 }
 
-std::vector<std::string> DensityComputer::bandMeta() const {
-	return {"none"};
+std::vector<std::pair<std::string,std::string>> DensityComputer::bandMeta() const {
+	return {{"none", "None"}};
 }
 

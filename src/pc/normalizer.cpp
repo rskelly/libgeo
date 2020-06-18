@@ -30,7 +30,7 @@ Normalizer::~Normalizer() {
 
 void Normalizer::normalize(const std::string& dtmpath, const std::string& outdir, int band, bool force) {
 
-	Grid<double> dtm(dtmpath);
+	Band<float> dtm(dtmpath, band - 1, false, true);
 	const GridProps& props = dtm.props();
 	double nodata = props.nodata();
 
@@ -70,7 +70,7 @@ void Normalizer::normalize(const std::string& dtmpath, const std::string& outdir
 
 			if(!props.hasCell(x, y)) continue;
 
-			double t = dtm.get(x, y, band);
+			double t = dtm.get(x, y);
 
 			if(t == nodata)
 				continue;
