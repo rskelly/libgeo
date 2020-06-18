@@ -31,6 +31,7 @@ typedef int mode_t;
 #include <list>
 #include <atomic>
 #include <algorithm>
+#include <queue>
 
 #include "geo.hpp"
 #include "util.hpp"
