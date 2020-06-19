@@ -1588,6 +1588,72 @@ public:
 		return extensions;
 	}
 
+
+	template <class U>
+	static void mergeBands(std::vector<Band<U>>& bandList,
+			const std::string& filename, const std::string& driver, bool deleteOriginal, Monitor* monitor = nullptr) {
+		const GridProps& props = bandList.front().props();
+		int bands = (int) bandList.size();
+		int cols = props.cols();
+		int rows = props.rows();
+		double nodata = props.nodata();
+		const std::string& projection = props.projection();
+		DataType type = props.dataType();
+		double trans[6];
+		props.trans(trans);
+		{
+			// Check similarity of bands.
+			// TODO: Move this into a separate method.
+			double trans0[6];
+			for(int i = 1; i < bands; ++i) {
+				const GridProps& props0 = bandList[i].props();
+				if(cols != props0.cols() || rows != props0.rows())
+					g_runerr("Bands must be all the same size.");
+				if(type != props0.dataType())
+					g_runerr("Bands must be all the same type.");
+				props0.trans(trans0);
+				for(int i = 0; i < 6; ++i) {
+					if(trans[i] != trans0[i])
+						g_runerr("Bands must all have the same transform.");
+				}
+			}
+		}
+
+		GDALRasterIOExtraArg arg;
+		INIT_RASTERIO_EXTRA_ARG(arg);
+		struct gdalprg prg;
+		prg.p = 0;
+		prg.m = monitor ? monitor : getDefaultMonitor();
+		arg.pfnProgress = gdalProgress;
+		arg.pProgressData = &prg;
+
+		char **opts = NULL;
+		opts = CSLSetNameValue(opts, "COMPRESS", "LZW");
+		opts = CSLSetNameValue(opts, "PREDICTOR", "2");
+		opts = CSLSetNameValue(opts, "BIGTIFF", "IF_NEEDED");
+		if(props.interleave() == Interleave::BIL) {
+			opts = CSLSetNameValue(opts, "INTERLEAVE", "BAND");
+		} else if(props.interleave() == Interleave::BIP){
+			opts = CSLSetNameValue(opts, "INTERLEAVE", "PIXEL");
+		}
+
+		GDALDriverManager* dm = GetGDALDriverManager();
+		GDALDriver* drv = dm->GetDriverByName(driver.c_str());
+		GDALDataset* ds = drv->Create(filename.c_str(), cols, rows, bands, dataType2GDT(type), opts);
+		ds->SetGeoTransform(trans);
+		ds->SetProjection(projection.c_str());
+		for(int i = 0; i < bands; ++i) {
+			g_debug("Writing band " << i);
+			GDALRasterBand* band = ds->GetRasterBand(i + 1);
+			band->SetNoDataValue(nodata);
+			band->RasterIO(GF_Write, 0, 0, cols, rows, bandList.m_data[i], cols, rows, dataType2GDT(type), 0, 0, 0);
+			if(deleteOriginal)
+				rem(bandList[i].filename());
+		}
+
+		CSLDestroy(opts);
+	}
+
 	/**
 	 * \brief Return a map containing the raster driver short name and long name.
 	 *
