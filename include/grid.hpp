@@ -1590,9 +1590,10 @@ public:
 
 
 	template <class U>
-	static void mergeBands(std::vector<Band<U>>& bandList,
+	static void mergeBands(std::vector<Band<U>*>& bandList,
 			const std::string& filename, const std::string& driver, bool deleteOriginal, Monitor* monitor = nullptr) {
-		const GridProps& props = bandList.front().props();
+		rem(filename);
+		const GridProps& props = bandList.front()->props();
 		int bands = (int) bandList.size();
 		int cols = props.cols();
 		int rows = props.rows();
@@ -1606,7 +1607,7 @@ public:
 			// TODO: Move this into a separate method.
 			double trans0[6];
 			for(int i = 1; i < bands; ++i) {
-				const GridProps& props0 = bandList[i].props();
+				const GridProps& props0 = bandList[i]->props();
 				if(cols != props0.cols() || rows != props0.rows())
 					g_runerr("Bands must be all the same size.");
 				if(type != props0.dataType())
@@ -1644,13 +1645,18 @@ public:
 		ds->SetProjection(projection.c_str());
 		for(int i = 0; i < bands; ++i) {
 			g_debug("Writing band " << i);
+			const GridProps& props = bandList[i]->props();
+			const char* metaName = props.bandMetaName().c_str();
+			const char* metaValue = props.bandMetadata().front().c_str();
 			GDALRasterBand* band = ds->GetRasterBand(i + 1);
 			band->SetNoDataValue(nodata);
-			band->RasterIO(GF_Write, 0, 0, cols, rows, bandList.m_data[i], cols, rows, dataType2GDT(type), 0, 0, 0);
+			band->SetMetadataItem(metaName, metaValue, "");
+			band->SetDescription(metaValue);
+			band->RasterIO(GF_Write, 0, 0, cols, rows, bandList[i]->m_data, cols, rows, dataType2GDT(type), 0, 0, 0);
 			if(deleteOriginal)
-				rem(bandList[i].filename());
+				rem(bandList[i]->props().filename());
 		}
-
+		GDALClose(ds);
 		CSLDestroy(opts);
 	}
 
