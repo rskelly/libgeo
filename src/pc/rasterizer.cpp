@@ -168,7 +168,8 @@ Rasterizer::Rasterizer(const std::vector<std::string> filenames) :
 	m_filter(nullptr),
 	m_thin(0),
 	m_nodata(-9999),
-	m_prefilter(false) {
+	m_prefilter(false),
+	m_merge(true) {
 
 	for(size_t i = 0; i < 4; ++i)
 		m_bounds[i] = std::nan("");
@@ -226,13 +227,21 @@ void Rasterizer::setBounds(double* bounds) {
 		m_bounds[i] = bounds[i];
 }
 
+void Rasterizer::setMerge(bool merge) {
+	m_merge = merge;
+}
+
+bool Rasterizer::merge() const {
+	return m_merge;
+}
+
 Rasterizer::~Rasterizer() {
 }
 
 
 void Rasterizer::rasterize(const std::string& filename, const std::vector<std::string>& types,
 		double resX, double resY, double easting, double northing, double radius, 
-		const std::string& projection, bool useHeader, bool voids, double maxRadius) {
+		const std::string& projection, bool useHeader) {
 
 	if(std::isnan(resX) || std::isnan(resY))
 		g_runerr("Resolution not valid");
@@ -353,9 +362,6 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 		}
 	}
 
-	// The number of cells found to be void.
-	size_t voidCount = 0;
-
 	g_trace("Running...")
 	{
 		size_t count = 0;
@@ -440,8 +446,6 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 								}
 							}
 						}
-					} else {
-						++voidCount;
 					}
 
 					filtered.clear();
@@ -449,82 +453,16 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 					cpts.clear();
 					dist.clear();
 					pts.clear();
-				} else {
-					++voidCount;
 				}
 			}
-			//tree.printStats();
 		}
 	}
 
-	if(voids && voidCount) {
-
-		GridProps maskProps(props);
-		maskProps.setBands(1);
-		maskProps.setDataType(DataType::Byte);
-		maskProps.setWritable(true);
-		Band<char> mask(maskProps);
-		mask.fill(0);
-
-		int fx0, fx1, fy0, fy1, fa;
-
-		// Make a mask based on the count layer.
-		TargetFillOperator<char, char> op2(&mask, 0, &mask, 0, 1, 2);
-
-		// Skip the first band which is always count.
-		for(int b = 1; b < props.bands(); ++b) {
-
-			TargetFillOperator<float, char> op1(outrast[b].get(), 0, &mask, 0, props.nodata(), 1);
-
-			g_debug("Filling voids in band " << b)
-			for(int r = 0; r < rows; ++r) {
-				if(r % 10 == 0)
-					g_debug("Row " << r << " of " << rows);
-				for(int c = 0; c < cols; ++c) {
-
-					// The value is good. Skip.
-					if(outrast[b]->get(c, r) != props.nodata())
-						continue;
-
-					// The mask says this is an edge-connected pixel. Skip.
-					if(mask.get(c, r) == 2)
-						continue;
-
-					// Flood to find edge-connected pixels.
-					Band<float>::floodFill(c, r, op1, false, &fx0, &fy0, &fx1, &fy1, &fa);
-
-					// If the fill touches an edge, set it to 2 and ignore it.
-					if(fx0 == 0 || fx1 == cols - 1 || fy0 == 0 || fy1 == rows - 1) {
-						Band<char>::floodFill(c, r, op2, false, &fx0, &fy0, &fx1, &fy1, &fa);
-						continue;
-					}
-
-					// Fill the pixel.
-					int rad = 0;
-					double v0, v = 0, w0, w = 0;
-					bool found = false;
-					do {
-						++rad;
-						for(int rr = r - rad; rr < r + rad + 1; ++rr) {
-							for(int cc = c - rad; cc < c + rad + 1; ++cc) {
-								if(cc < 0 || cc >= cols || rr < 0 || rr >= rows || (cc == c && rr == r))
-									continue;
-								if((v0 = outrast[b]->get(cc, rr)) != props.nodata()) {
-									w0 = 1.0 / (std::pow(props.toX(c) - props.toX(cc), 2.0) + std::pow(props.toY(r) - props.toY(rr), 2.0));	// not possible for d to be zero.
-									w += w0;
-									v += w0 * v0;
-									found = true;
-								}
-							}
-						}
-					} while(!found && rad * std::abs(resY) < maxRadius);
-
-					if(found)
-						outrast[b]->set(c, r, v / w);
-
-				}
-			}
-		}
+	if(merge()) {
+		std::vector<Band<float>*> bandList;
+		for(std::unique_ptr<Band<float>>& b : outrast)
+			bandList.push_back(b.get());
+		Band<float>::mergeBands(bandList, filename, "GTiff", true);
 	}
 
 	g_debug("Done")

@@ -806,6 +806,7 @@ private:
 	double m_nodata;
 	double m_bounds[4];					///<! If bounds are given, this contains them. BLX, BLY, TRX, TRY.
 	bool m_prefilter;					///<! If true, points are filtered before adding to tree.
+	bool m_merge;						///<! If true, bands are merged.
 
 	// Used by finalizer.
 	std::vector<std::unique_ptr<Computer> > m_computers;
@@ -843,11 +844,9 @@ public:
 	 * \param radius 	The size of the neighbourhood around each cell centre.
 	 * \param projection The well-known text representation of the projection.
 	 * \param useHeader True to trust the LAS file headers for things like bounds. Otherwise, read the points.
-	 * \param voids     If true, fill voids in the raster by expanding the radius iteratively.
-	 * \param maxRadius If voids is true, this gives the maximum radius for searching. Once exceeded the program quits.
 	 */
 	void rasterize(const std::string& filename, const std::vector<std::string>& types, double resX, double resY,
-		double easting, double northing, double radius, const std::string& projection, bool useHeader, bool voids, double maxRadius);
+		double easting, double northing, double radius, const std::string& projection, bool useHeader);
 
 	/**
 	 * Esitmate the point density (per cell) given the source files, resolution and search radius.
@@ -894,6 +893,20 @@ public:
 	 * \param bounds The projected bounds for the output raster. minx, miny, maxx, maxy.
 	 */
 	void setBounds(double* bounds);
+
+	/**
+	 * \brief If set to true, individual bands are merged into one file.
+	 *
+	 * \param merge True to merge files.
+	 */
+	void setMerge(bool merge);
+
+	/**
+	 * \brief Return true if the bands are to be merged.
+	 *
+	 * \return True if the bands are to be merged.
+	 */
+	bool merge() const;
 
 	/**
 	 * Destroy the Rasterizer.
