@@ -293,8 +293,6 @@ int main(int argc, char** argv) {
 	}
 	if(maxpxarea < 1) maxpxarea = 1;
 
-	float nd = inrast.props().nodata();
-
 	for(int row = 0; row < rows; ++row) {
 		if(row % 100 == 0)
 			std::cerr << "Filling. Row " << row << " of " << rows << "\n";
