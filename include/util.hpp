@@ -13,6 +13,8 @@
 #include <array>
 #include <cstring>
 #include <chrono>
+#include <algorithm>
+#include <random>
 
 #include <gdal_priv.h>
 
@@ -46,7 +48,7 @@ namespace util {
 /**
  * Input and output file types.
  */
-G_DLL_EXPORT enum class FileType {
+enum class FileType {
 	GTiff,
 	ENVI,
 	ROI,
@@ -62,7 +64,7 @@ G_DLL_EXPORT enum class FileType {
 /**
  * The allowable types for a raster.
  */
-G_DLL_EXPORT enum class DataType {
+enum class DataType {
 	Float64 = 7,
 	Float32 = 6,
 	UInt32 = 5,
@@ -76,7 +78,7 @@ G_DLL_EXPORT enum class DataType {
 /**
  * Interleave methods.
  */
-G_DLL_EXPORT enum class Interleave {
+enum class Interleave {
 	BIL,
 	BSQ,
 	BIP
@@ -85,7 +87,7 @@ G_DLL_EXPORT enum class Interleave {
 /**
  * Normalization methods.
  */
-G_DLL_EXPORT enum class NormMethod {
+enum class NormMethod {
 	ConvexHull,
 	ConvexHullLongestSeg,
 	Line,
@@ -145,6 +147,18 @@ G_DLL_EXPORT NormMethod normMethodFromString(const std::string& method);
 G_DLL_EXPORT std::string normMethodAsString(NormMethod method);
 
 G_DLL_EXPORT bool isnonzero(const double& v);
+
+/**
+ * \brief Shuffle the elements in the given list.
+ *
+ * \param begin The start random access iterator.
+ * \param end The end iterator.
+ */
+template <class T>
+G_DLL_EXPORT void shuffle(T begin, T end) {
+	uint64_t seed = std::chrono::system_clock::now().time_since_epoch().count();
+	std::shuffle(begin, end, std::default_random_engine(seed));
+}
 
 /**
  * Return true if it's a dir and it exists.
