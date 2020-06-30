@@ -1588,6 +1588,78 @@ public:
 		return extensions;
 	}
 
+
+	template <class U>
+	static void mergeBands(std::vector<Band<U>*>& bandList,
+			const std::string& filename, const std::string& driver, bool deleteOriginal, Monitor* monitor = nullptr) {
+		rem(filename);
+		const GridProps& props = bandList.front()->props();
+		int bands = (int) bandList.size();
+		int cols = props.cols();
+		int rows = props.rows();
+		double nodata = props.nodata();
+		const std::string& projection = props.projection();
+		DataType type = props.dataType();
+		double trans[6];
+		props.trans(trans);
+		{
+			// Check similarity of bands.
+			// TODO: Move this into a separate method.
+			double trans0[6];
+			for(int i = 1; i < bands; ++i) {
+				const GridProps& props0 = bandList[i]->props();
+				if(cols != props0.cols() || rows != props0.rows())
+					g_runerr("Bands must be all the same size.");
+				if(type != props0.dataType())
+					g_runerr("Bands must be all the same type.");
+				props0.trans(trans0);
+				for(int i = 0; i < 6; ++i) {
+					if(trans[i] != trans0[i])
+						g_runerr("Bands must all have the same transform.");
+				}
+			}
+		}
+
+		GDALRasterIOExtraArg arg;
+		INIT_RASTERIO_EXTRA_ARG(arg);
+		struct gdalprg prg;
+		prg.p = 0;
+		prg.m = monitor ? monitor : getDefaultMonitor();
+		arg.pfnProgress = gdalProgress;
+		arg.pProgressData = &prg;
+
+		char **opts = NULL;
+		opts = CSLSetNameValue(opts, "COMPRESS", "LZW");
+		opts = CSLSetNameValue(opts, "PREDICTOR", "2");
+		opts = CSLSetNameValue(opts, "BIGTIFF", "IF_NEEDED");
+		if(props.interleave() == Interleave::BIL) {
+			opts = CSLSetNameValue(opts, "INTERLEAVE", "BAND");
+		} else if(props.interleave() == Interleave::BIP){
+			opts = CSLSetNameValue(opts, "INTERLEAVE", "PIXEL");
+		}
+
+		GDALDriverManager* dm = GetGDALDriverManager();
+		GDALDriver* drv = dm->GetDriverByName(driver.c_str());
+		GDALDataset* ds = drv->Create(filename.c_str(), cols, rows, bands, dataType2GDT(type), opts);
+		ds->SetGeoTransform(trans);
+		ds->SetProjection(projection.c_str());
+		for(int i = 0; i < bands; ++i) {
+			g_debug("Writing band " << i);
+			const GridProps& props = bandList[i]->props();
+			const char* metaName = props.bandMetaName().c_str();
+			const char* metaValue = props.bandMetadata().front().c_str();
+			GDALRasterBand* band = ds->GetRasterBand(i + 1);
+			band->SetNoDataValue(nodata);
+			band->SetMetadataItem(metaName, metaValue, "");
+			band->SetDescription(metaValue);
+			band->RasterIO(GF_Write, 0, 0, cols, rows, bandList[i]->m_data, cols, rows, dataType2GDT(type), 0, 0, 0);
+			if(deleteOriginal)
+				rem(bandList[i]->props().filename());
+		}
+		GDALClose(ds);
+		CSLDestroy(opts);
+	}
+
 	/**
 	 * \brief Return a map containing the raster driver short name and long name.
 	 *
@@ -3133,6 +3205,75 @@ public:
 	 */
 	~Band() {
 		destroy();
+	}
+
+};
+
+template <class T>
+class G_DLL_EXPORT Raster {
+private:
+	std::vector<std::unique_ptr<Band<T>>> m_bands;
+	bool m_merge;					///<! If true, merge the bands into a final filename.
+	std::string m_filename;			///<! The input/output filename.
+	GridProps m_props;				///<! The properties for creation.
+
+	/**
+	 * \brief Default constructor.
+	 */
+	Raster() : m_merge(false) {}
+
+public:
+
+	/**
+	 * \brief Create the raster by opening the existing file.
+	 *
+	 * \param filename The raster filename.
+	 * \param writable True if the modified raster should be writable.
+	 * \param mapped True if the raster should be mapped into file-backed virtual memory.
+	 */
+	Raster(const std::string& filename, bool writable, bool mapped) : Raster() {
+		GDALDataset* ds = (GDALDataset*) GDALOpen(filename.c_str(), writable ? GA_Update : GA_ReadOnly);
+		int bands = ds->GetRasterCount();
+		GDALClose(ds);
+		for(int i = 0; i < bands; ++i)
+			m_bands.emplace_back(new Band<T>(filename, i, writable, mapped));
+	}
+
+	/**
+	 * \brief Creates the raster with the given properties.
+	 *
+	 * \param filename The raster filename.
+	 * \param props The creation properties. Must have the number of bands and driver specified.
+	 * \param mapped True if the raster should be mapped into file-backed virtual memory.
+	 */
+	Raster(const std::string& filename, const GridProps& props, bool mapped) : Raster() {
+		m_filename = filename;
+		m_merge = true;
+		m_props = props;
+		GridProps cprops(props);
+		cprops.setBands(1);
+		int bands = props.bands();
+		for(int i = 0; i < bands; ++i)
+			m_bands.emplace_back(new Band<T>(geo::util::tmpfile("raster"), cprops, mapped));
+	}
+
+	/**
+	 * \brief Return the list of bands.
+	 *
+	 * \return The list of bands.
+	 */
+	const std::vector<std::unique_ptr<Band<T>>>& bands() {
+		return m_bands;
+	}
+
+	~Raster() {
+		// If this is a created raster, merge it into one file.
+		if(m_merge) {
+			std::vector<Band<T>*> bands;
+			for(std::unique_ptr<Band<T>>& b : m_bands)
+				bands.push_back(b.get());
+			Band<T>::mergeBands(bands, m_filename, m_props.driver(), true);
+		}
 	}
 
 };

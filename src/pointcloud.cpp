@@ -37,7 +37,7 @@ bool geo::pc::pointSort(const geo::pc::Point& a, const geo::pc::Point& b) {
 
 PCFile::PCFile(const std::string& filename, double x, double y, double size, double buffer) :
 	m_x(x), m_y(y),
-	m_fileBounds{G_DBL_MAX_POS, G_DBL_MAX_POS, G_DBL_MIN_POS, G_DBL_MIN_POS, G_DBL_MAX_POS, G_DBL_MIN_POS},
+	m_fileBounds{geo::maxvalue<double>(), geo::maxvalue<double>(), geo::minvalue<double>(), geo::minvalue<double>(), geo::maxvalue<double>(), geo::minvalue<double>()},
 	m_bounds{x, y, x + size, y + size},
 	m_bufferedBounds{x - buffer, y - buffer, x + size + buffer, y + size + buffer},
 	m_pointCount(0),
@@ -51,7 +51,7 @@ PCFile::PCFile(const std::string& filename, double x, double y, double size, dou
 
 PCFile::PCFile(const std::vector<std::string>& filenames, double x, double y, double size, double buffer) :
 	m_x(x), m_y(y),
-	m_fileBounds{G_DBL_MAX_POS, G_DBL_MAX_POS, G_DBL_MIN_POS, G_DBL_MIN_POS, G_DBL_MAX_POS, G_DBL_MIN_POS},
+	m_fileBounds{geo::maxvalue<double>(), geo::maxvalue<double>(), geo::minvalue<double>(), geo::minvalue<double>(), geo::maxvalue<double>(), geo::minvalue<double>()},
 	m_bounds{x, y, x + size, y + size},
 	m_bufferedBounds{x - buffer, y - buffer, x + size + buffer, y + size + buffer},
 	m_pointCount(0),
@@ -155,8 +155,8 @@ bool PCFile::contains(double x, double y) const {
 
 bool PCFile::intersects(double* b) const {
 	const double* a = m_fileBounds;
-	double aa[4] {g_min(a[0], a[2]), g_min(a[1], a[3]), g_max(a[0], a[2]), g_max(a[1], a[3])};
-	double bb[4] {g_min(b[0], b[2]), g_min(b[1], b[3]), g_max(b[0], b[2]), g_max(b[1], b[3])};
+	double aa[4] {std::min(a[0], a[2]), std::min(a[1], a[3]), std::max(a[0], a[2]), std::max(a[1], a[3])};
+	double bb[4] {std::min(b[0], b[2]), std::min(b[1], b[3]), std::max(b[0], b[2]), std::max(b[1], b[3])};
 	return !(aa[2] <= bb[0] || aa[0] >= bb[2] || aa[3] <= bb[1] || aa[1] >= bb[3]);
 }
 
@@ -213,7 +213,7 @@ PCWriter::PCWriter(const std::string& filename, const liblas::Header& hdr, doubl
 	m_totalReturns(0),
 	m_bounds{x, y, x + size, y + size},
 	m_bufferedBounds{x - buffer, y - buffer, x + size + buffer, y + size + buffer},
-	m_outBounds{G_DBL_MAX_POS, G_DBL_MAX_POS, G_DBL_MIN_POS, G_DBL_MIN_POS, G_DBL_MAX_POS, G_DBL_MIN_POS},
+	m_outBounds{geo::maxvalue<double>(), geo::maxvalue<double>(), geo::minvalue<double>(), geo::minvalue<double>(), geo::maxvalue<double>(), geo::minvalue<double>()},
 	m_x(x), m_y(y),
 	m_filename(filename),
 	m_writer(nullptr), m_header(nullptr),
@@ -355,8 +355,8 @@ int even(int num) {
 }
 
 bool intersects(double* a, double* b) {
-	double aa[4] {g_min(a[0], a[2]), g_min(a[1], a[3]), g_max(a[0], a[2]), g_max(a[1], a[3])};
-	double bb[4] {g_min(b[0], b[2]), g_min(b[1], b[3]), g_max(b[0], b[2]), g_max(b[1], b[3])};
+	double aa[4] {std::min(a[0], a[2]), std::min(a[1], a[3]), std::max(a[0], a[2]), std::max(a[1], a[3])};
+	double bb[4] {std::min(b[0], b[2]), std::min(b[1], b[3]), std::max(b[0], b[2]), std::max(b[1], b[3])};
 	return !(aa[2] <= bb[0] || aa[0] >= bb[2] || aa[3] <= bb[1] || aa[1] >= bb[3]);
 }
 
@@ -373,7 +373,7 @@ void Tiler::tile(const std::string& outdir, double size, double buffer, int,
 		g_runerr("Negative buffer is not allowed. Use easting, northing and tile size to crop tiles.");
 
 	// Calculate the overall bounds of the file set.
-	double allBounds[6] = {G_DBL_MAX_POS, G_DBL_MAX_POS, G_DBL_MIN_POS, G_DBL_MIN_POS, G_DBL_MAX_POS, G_DBL_MIN_POS};
+	double allBounds[6] = {geo::maxvalue<double>(), geo::maxvalue<double>(), geo::minvalue<double>(), geo::minvalue<double>(), geo::maxvalue<double>(), geo::minvalue<double>()};
 	double fBounds[6];
 	for(PCFile& f : files) {
 		f.init();

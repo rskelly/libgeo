@@ -26,58 +26,150 @@ using namespace geo::pc;
 using namespace geo::ds;
 using namespace geo::pc::compute;
 
-const std::unordered_map<std::string, std::string> computerNames = {
-		{"min", "The minimum value"},
-		{"max", "The maximum value"},
-		{"percentile-n", "The percentile"},
-		{"decile-n", "The decile"},
-		{"quartile-n", "The quartile"},
-		{"median", "The median value"},
-		{"mean", "The mean value"},
-		{"variance", "The variance with n-1"},
-		{"std-dev", "The standard deviation with n-1"},
-		{"rugosity-acr", "The arc-chord rugosity (DuPreez, 2004)"},
-		{"idw-2", "Inverse distance weighting; coefficient 2"},
-		{"hlrg-bio", "HLRG biometrics set"}
-};
+namespace {
+	/**
+	 * List of computer names and short descriptions.
+	 */
+	const std::unordered_map<std::string, std::string> computerNames = {
+			{"min", "The minimum value"},
+			{"max", "The maximum value"},
+			{"percentile-n", "The percentile"},
+			{"decile-n", "The decile"},
+			{"quartile-n", "The quartile"},
+			{"median", "The median value"},
+			{"mean", "The mean value"},
+			{"variance", "The variance with n-1"},
+			{"std-dev", "The standard deviation with n-1"},
+			{"rugosity-acr", "The arc-chord rugosity (DuPreez, 2004)"},
+			{"idw-2", "Inverse distance weighting; coefficient 2"},
+			{"hlrg-bio", "HLRG biometrics set"}
+	};
 
-Computer* getComputer(const std::string& name) {
-	if(name.find("percentile") == 0) {
-		size_t len = std::string("percentile-").size();
-		int p  = std::stoi(name.substr(len));
-		std::cout << "Percentile: " << p << "\n";
-		return new PercentileComputer((double) p / 100.0);
-	} else if(name.find("quartile") == 0) {
-		size_t len = std::string("percentile-").size();
-		int p = std::stoi(name.substr(len));
-		std::cout << "Decile: " << p << "\n";
-		return new PercentileComputer((double) (p * 25) / 100.0);
-	} else if(name.find("decile") == 0) {
-		size_t len = std::string("decile-").size();
-		int p = std::stoi(name.substr(len));
-		std::cout << "Decile: " << p << "\n";
-		return new PercentileComputer((double) (p * 10) / 100.0);
-	} else {
-		if(name == "min") { 				return new MinComputer();
-		} else if(name == "max") { 			return new MaxComputer();
-		} else if(name == "median") { 			return new PercentileComputer(0.5);
-		} else if(name == "mean") { 			return new MeanComputer();
-		} else if(name == "variance") { 		return new VarianceComputer();
-		} else if(name == "std-dev") { 			return new StdDevComputer();
-		} else if(name == "rugosity-acr") { 		return new RugosityComputer();
-		} else if(name == "idw-2") {			return new IDWComputer();
-		} else if(name == "hlrg-bio") {			return new HLRGBiometricsComputer(20, 75);
+	Computer* getComputer(const std::string& name) {
+		// For computers with a quantity in the name, extract the
+		// quantity by finding the delimiter and splitting.
+		if(name.find("percentile", 0) == 0) {
+			size_t len = std::string("percentile-").size();
+			int p  = std::stoi(name.substr(len, std::string::npos));
+			if(p < 0 || p > 100)
+				g_runerr("Percentile must be between 0 and 100. " << p << " given.");
+			g_debug("Percentile: " << p);
+			return new PercentileComputer((double) p / 100.0);
+		} else if(name.find("quartile", 0) == 0) {
+			size_t len = std::string("quartile-").size();
+			int q = std::stoi(name.substr(len, std::string::npos));
+			if(q < 0 || q > 4)
+				g_runerr("Quartile must be between 0 and 4. " << q << " given.");
+			g_debug("Quartile: " << q);
+			return new PercentileComputer((double) (q * 25) / 100.0);
+		} else if(name.find("decile", 0) == 0) {
+			size_t len = std::string("decile-").size();
+			int d = std::stoi(name.substr(len, std::string::npos));
+			if(d < 0 || d > 10)
+				g_runerr("Decile must be between 0 and 10. " << d << " given.");
+			g_debug("Decile: " << d);
+			return new PercentileComputer((double) (d * 10) / 100.0);
+		} else {
+			if(name == "min") { 					return new MinComputer();
+			} else if(name == "max") { 				return new MaxComputer();
+			} else if(name == "median") { 			return new PercentileComputer(0.5);
+			} else if(name == "mean") { 			return new MeanComputer();
+			} else if(name == "variance") { 		return new VarianceComputer();
+			} else if(name == "std-dev") { 			return new StdDevComputer();
+			} else if(name == "rugosity-acr") { 	return new RugosityComputer();
+			} else if(name == "idw-2") {			return new IDWComputer();
+			} else if(name == "hlrg-bio") {			return new HLRGBiometricsComputer(20, 75);
+			}
 		}
+		g_runerr("Unknown computer name (" << name << ")");
 	}
-	g_runerr("Unknown computer name (" << name << ")");
-}
+
+	/**
+	 * \brief Rationalize and align the given boundary array.
+	 *
+	 * \param[inout] bounds A 4-element array of boundary coordinates: min-x, min-y, max-x, max-y.
+	 * \param resX The grid resolution in x.
+	 * \param resY The grid resolution in y.
+	 * \param[out] easting The left edge of the grid.
+	 * \param[out] northing The north edge of the grid.
+	 * \param If the given bounds object is NaN, populate that array with these actual raster bounds.
+	 */
+	void fixBounds(double* bounds, double resX, double resY, double& easting, double& northing, double* rasterBounds) {
+
+		double rx = std::abs(resX);
+		double ry = std::abs(resY);
+
+		// If the raster bounds are given, use 'em.
+		if(!std::isnan(rasterBounds[0])) {
+			g_debug("Using given raster bounds");
+			for(size_t i = 0; i < 4; ++i)
+				bounds[i] = rasterBounds[i];
+		}
+
+		double xmin = std::floor(std::min(bounds[0], bounds[2]) / rx) * rx;
+		double ymin = std::floor(std::min(bounds[1], bounds[3]) / ry) * ry;
+		double xmax = std::ceil(std::max(bounds[0], bounds[2]) / rx) * rx;
+		double ymax = std::ceil(std::max(bounds[1], bounds[3]) / ry) * ry;
+
+		if(std::isnan(easting)) {
+			xmin -= rx;
+			xmax += rx;
+			easting = resX > 0 ? xmin : xmax;
+		} else {
+			if(resX > 0) {
+				while(easting < xmin)
+					easting += rx;
+				while(easting > xmin)
+					easting -= rx;
+				xmin = easting;
+				xmax += rx;
+			} else {
+				while(easting > xmax)
+					easting -= rx;
+				while(easting < xmax)
+					easting += rx;
+				xmax = easting;
+				xmin -= rx;
+			}
+		}
+		if(std::isnan(northing)) {
+			ymin -= ry;
+			ymax += ry;
+			northing = resY > 0 ? ymin : ymax;
+		} else {
+			if(resY > 0) {
+				while(northing < ymin)
+					northing += ry;
+				while(northing > ymin)
+					northing -= ry;
+				ymin = northing;
+				ymax += ry;
+			} else {
+				while(northing > ymax)
+					northing -= ry;
+				while(northing < ymax)
+					northing += ry;
+				ymax = northing;
+				ymin -= ry;
+			}
+		}
+
+		bounds[resX > 0 ? 0 : 2] = xmin;
+		bounds[resY > 0 ? 1 : 3] = ymin;
+		bounds[resX > 0 ? 2 : 1] = xmax;
+		bounds[resY > 0 ? 3 : 1] = ymax;
+
+	}
+
+} // anon
 
 
 Rasterizer::Rasterizer(const std::vector<std::string> filenames) :
 	m_filter(nullptr),
 	m_thin(0),
 	m_nodata(-9999),
-	m_prefilter(false) {
+	m_prefilter(false),
+	m_merge(true) {
 
 	for(size_t i = 0; i < 4; ++i)
 		m_bounds[i] = std::nan("");
@@ -110,73 +202,6 @@ double Rasterizer::density(double resolution, double radius) {
 	return (sum / count) * 1.5 * cell;
 }
 
-void fixBounds(double* bounds, double resX, double resY, double& easting, double& northing, double* rasterBounds) {
-
-	double rx = std::abs(resX);
-	double ry = std::abs(resY);
-
-	// If the raster bounds are given, use 'em.
-	if(!std::isnan(rasterBounds[0])) {
-		g_debug("Using given raster bounds");
-		for(size_t i = 0; i < 4; ++i)
-			bounds[i] = rasterBounds[i];
-	}
-
-	double xmin = std::floor(std::min(bounds[0], bounds[2]) / rx) * rx;
-	double ymin = std::floor(std::min(bounds[1], bounds[3]) / ry) * ry;
-	double xmax = std::ceil(std::max(bounds[0], bounds[2]) / rx) * rx;
-	double ymax = std::ceil(std::max(bounds[1], bounds[3]) / ry) * ry;
-
-	if(std::isnan(easting)) {
-		xmin -= rx;
-		xmax += rx;
-		easting = resX > 0 ? xmin : xmax;
-	} else {
-		if(resX > 0) {
-			while(easting < xmin)
-				easting += rx;
-			while(easting > xmin)
-				easting -= rx;
-			xmin = easting;
-			xmax += rx;
-		} else {
-			while(easting > xmax)
-				easting -= rx;
-			while(easting < xmax)
-				easting += rx;
-			xmax = easting;
-			xmin -= rx;
-		}
-	}
-	if(std::isnan(northing)) {
-		ymin -= ry;
-		ymax += ry;
-		northing = resY > 0 ? ymin : ymax;
-	} else {
-		if(resY > 0) {
-			while(northing < ymin)
-				northing += ry;
-			while(northing > ymin)
-				northing -= ry;
-			ymin = northing;
-			ymax += ry;
-		} else {
-			while(northing > ymax)
-				northing -= ry;
-			while(northing < ymax)
-				northing += ry;
-			ymax = northing;
-			ymin -= ry;
-		}
-	}
-
-	bounds[resX > 0 ? 0 : 2] = xmin;
-	bounds[resY > 0 ? 1 : 3] = ymin;
-	bounds[resX > 0 ? 2 : 1] = xmax;
-	bounds[resY > 0 ? 3 : 1] = ymax;
-
-}
-
 void Rasterizer::setThin(int thin) {
 	m_thin = thin;
 }
@@ -202,13 +227,21 @@ void Rasterizer::setBounds(double* bounds) {
 		m_bounds[i] = bounds[i];
 }
 
+void Rasterizer::setMerge(bool merge) {
+	m_merge = merge;
+}
+
+bool Rasterizer::merge() const {
+	return m_merge;
+}
+
 Rasterizer::~Rasterizer() {
 }
 
 
 void Rasterizer::rasterize(const std::string& filename, const std::vector<std::string>& types,
 		double resX, double resY, double easting, double northing, double radius, 
-		const std::string& projection, bool useHeader, bool voids, double maxRadius) {
+		const std::string& projection, bool useHeader) {
 
 	if(std::isnan(resX) || std::isnan(resY))
 		g_runerr("Resolution not valid");
@@ -236,7 +269,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	// Calculate the overall boundaries of the point cloud.
 	g_trace("Checking file bounds");
 	std::vector<std::string> filenames;
-	double bounds[4] = {G_DBL_MAX_POS, G_DBL_MAX_POS, G_DBL_MIN_POS, G_DBL_MIN_POS};
+	double bounds[4] = {geo::maxvalue<double>(), geo::maxvalue<double>(), geo::minvalue<double>(), geo::minvalue<double>()};
 	{
 		double fBounds[6];
 		for(PCFile& f: m_files) {
@@ -257,6 +290,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	fixBounds(bounds, resX, resY, easting, northing, m_bounds);
 	g_trace(" bounds: " << bounds[0] << ", " << bounds[1] << "; " << bounds[2] << ", " << bounds[3])
 
+	// A file-backed tree stores the points.
 	mqtree<geo::pc::Point> tree(std::min(bounds[0], bounds[2]), std::min(bounds[1], bounds[3]),
 			std::max(bounds[0], bounds[2]), std::max(bounds[1], bounds[3]), 100);
 
@@ -265,13 +299,21 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	int rows = (int) std::ceil((bounds[3] - bounds[1]) / resY);
 	g_trace(" cols: " << cols << ", rows: " << rows)
 
+	CountComputer countComp;
+
 	// Work out the number of bands; each computer knows how many bands it will produce.
+	// Names are used for filenames, meta is used for band meta.
 	int bandCount = 1;
-	std::vector<std::string> bandMeta = {"count"};
+	std::vector<std::string> bandNames;
+	std::vector<std::string> bandMeta;
+	bandNames.push_back(countComp.bandMeta().front().first);
+	bandMeta.push_back(countComp.bandMeta().front().second);
 	for(const std::unique_ptr<Computer>& comp : m_computers) {
 		bandCount += comp->bandCount();
-		std::vector<std::string> meta = comp->bandMeta();
-		bandMeta.insert(bandMeta.end(), meta.begin(), meta.end());
+		for(const auto& it : comp->bandMeta()) {
+			bandNames.push_back(it.first);
+			bandMeta.push_back(it.second);
+		}
 	}
 	g_trace(" bands: " << bandCount)
 
@@ -283,8 +325,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	props.setDataType(DataType::Float32);
 	props.setProjection(projection);
 	props.setWritable(true);
-	props.setBands(bandCount);
-	props.setBandMetadata(bandMeta);
+	props.setBands(1);
 	props.setNoData(m_nodata);
 
 	// Add the points to the qtree. Note the scale must be chosen carefully.
@@ -300,23 +341,29 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 				if(!m_prefilter || m_filter->keep(pt)) {
 					tree.add(pt);
 					if(++pts % 10000000 == 0)
-						std::cout << pts << "pts\n";
+						g_debug(pts << "pts");
 				}
 			}
 		}
 	}
 	g_trace(" " << tree.size() << " points added to tree.");
 
-	// Prepare the final output raster.
-	Grid<float> outrast(filename, props);
-
-	// The number of cells found to be void.
-	size_t voidCount = 0;
+	std::vector<std::unique_ptr<Band<float>>> outrast;
+	{
+		std::string ext = extension(filename);
+		std::string base = basename(filename);
+		std::vector<std::string> meta(1);
+		std::string name;
+		for(int i = 0; i < bandCount; ++i) {
+			name = base + "_" + bandNames[i] + ext;
+			meta[0] = bandMeta[i];
+			props.setBandMetadata(meta);
+			outrast.emplace_back(new Band<float>(name, props, true));
+		}
+	}
 
 	g_trace("Running...")
 	{
-		// The first layer is just the point count.
-		CountComputer countComp;
 		size_t count = 0;
 		int band;
 
@@ -333,18 +380,17 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 		auto fiter = std::back_inserter(filtered);
 
 		// Fill the raster with nodata first.
-		outrast.fill(props.nodata());
+		for(int i = 0; i < bandCount; ++i)
+			outrast[i]->fill(props.nodata());
 
 		std::vector<geo::pc::Point> tmp;
 		double aresX = std::abs(resX) / 2;
 		double aresY = std::abs(resY) / 2;
 
-		std::cout << std::setprecision(2) << std::fixed;
-
-		std::cout << "Rows: " << rows << "\n";
+		g_debug("Rows: " << rows)
 		for(int r = 0; r < rows; ++r) {
 			if(r % 100 == 0)
-				std::cout << "Row " << r << " of " << rows << " ("<< ((float) r / rows * 100) << "%)\n";
+				g_debug("Row " << r << " of " << rows);
 			for(int c = 0; c < cols; ++c) {
 
 				// Prepare a query point based on the grid location.
@@ -385,7 +431,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 
 					band = 0;
 
-					outrast.set(c, r, count, band++);
+					outrast[band++]->set(c, r, count);
 
 					if(count) {
 						for(size_t i = 0; i < m_computers.size(); ++i) {
@@ -394,14 +440,12 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 							m_computers[i]->compute(spt.x(), spt.y(), cpts, filtered, radius, out);
 							for(double val : out) {
 								if(!std::isnan(val)) {
-									outrast.set(c, r, val, band++);
+									outrast[band++]->set(c, r, val);
 								} else {
-									outrast.set(c, r, m_nodata, band++);
+									outrast[band++]->set(c, r, m_nodata);
 								}
 							}
 						}
-					} else {
-						++voidCount;
 					}
 
 					filtered.clear();
@@ -409,80 +453,16 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 					cpts.clear();
 					dist.clear();
 					pts.clear();
-				} else {
-					++voidCount;
 				}
 			}
-			//tree.printStats();
 		}
 	}
 
-	if(voids && voidCount) {
-
-		GridProps maskProps(props);
-		maskProps.setBands(1);
-		maskProps.setDataType(DataType::Byte);
-		maskProps.setWritable(true);
-		Grid<char> mask(maskProps);
-		mask.fill(0);
-
-		int fx0, fx1, fy0, fy1, fa;
-
-		// Make a mask based on the count layer.
-		TargetFillOperator<float, char> op1(&outrast, 0, &mask, 0, props.nodata(), 1);
-		TargetFillOperator<char, char> op2(&mask, 0, &mask, 0, 1, 2);
-
-		// Skip the first band which is always count.
-		for(int b = 1; b < props.bands(); ++b) {
-			std::cout << "Filling voids in band " << b << "\n";
-			for(int r = 0; r < rows; ++r) {
-				if(r % 10 == 0)
-					std::cout << "Row " << r << " of " << rows << " (" << (float) r / rows * 100 << "%)\n";
-				for(int c = 0; c < cols; ++c) {
-
-					// The value is good. Skip.
-					if(outrast.get(c, r, b) != props.nodata())
-						continue;
-
-					// The mask says this is an edge-connected pixel. Skip.
-					if(mask.get(c, r, 0) == 2)
-						continue;
-
-					// Flood to find edge-connected pixels.
-					Grid<float>::floodFill(c, r, op1, false, &fx0, &fy0, &fx1, &fy1, &fa);
-
-					// If the fill touches an edge, set it to 2 and ignore it.
-					if(fx0 == 0 || fx1 == cols - 1 || fy0 == 0 || fy1 == rows - 1) {
-						Grid<char>::floodFill(c, r, op2, false, &fx0, &fy0, &fx1, &fy1, &fa);
-						continue;
-					}
-
-					// Fill the pixel.
-					int rad = 0;
-					double v0, v = 0, w0, w = 0;
-					bool found = false;
-					do {
-						++rad;
-						for(int rr = r - rad; rr < r + rad + 1; ++rr) {
-							for(int cc = c - rad; cc < c + rad + 1; ++cc) {
-								if(cc < 0 || cc >= cols || rr < 0 || rr >= rows || (cc == c && rr == r))
-									continue;
-								if((v0 = outrast.get(cc, rr, b)) != props.nodata()) {
-									w0 = 1.0 / (std::pow(props.toX(c) - props.toX(cc), 2.0) + std::pow(props.toY(r) - props.toY(rr), 2.0));	// not possible for d to be zero.
-									w += w0;
-									v += w0 * v0;
-									found = true;
-								}
-							}
-						}
-					} while(!found && rad * std::abs(resY) < maxRadius);
-
-					if(found)
-						outrast.set(c, r, v / w, b);
-
-				}
-			}
-		}
+	if(merge()) {
+		std::vector<Band<float>*> bandList;
+		for(std::unique_ptr<Band<float>>& b : outrast)
+			bandList.push_back(b.get());
+		Band<float>::mergeBands(bandList, filename, "GTiff", true);
 	}
 
 	g_debug("Done")

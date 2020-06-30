@@ -29,8 +29,8 @@ int MeanComputer::bandCount() const {
 	return 1;
 }
 
-std::vector<std::string> MeanComputer::bandMeta() const {
-	return {"Mean."};
+std::vector<std::pair<std::string, std::string>> MeanComputer::bandMeta() const {
+	return {{"mean", "Mean"}};
 }
 
 VarianceComputer::VarianceComputer(double bias) :
@@ -61,8 +61,8 @@ int VarianceComputer::bandCount() const {
 	return 1;
 }
 
-std::vector<std::string> VarianceComputer::bandMeta() const {
-	return {"Variance."};
+std::vector<std::pair<std::string, std::string>> VarianceComputer::bandMeta() const {
+	return {{"variance", "Variance"}};
 }
 
 StdDevComputer::StdDevComputer(double bias) :
@@ -91,8 +91,8 @@ int StdDevComputer::bandCount() const {
 	return 1;
 }
 
-std::vector<std::string> StdDevComputer::bandMeta() const {
-	return {"Standard Deviation."};
+std::vector<std::pair<std::string, std::string>> StdDevComputer::bandMeta() const {
+	return {{"stddev", "Standard Deviation"}};
 }
 
 int MaxComputer::compute(double, double, const std::vector<geo::pc::Point>&, const std::vector<geo::pc::Point>& filtered, double, std::vector<double>& out) {
@@ -113,8 +113,8 @@ int MaxComputer::bandCount() const {
 	return 1;
 }
 
-std::vector<std::string> MaxComputer::bandMeta() const {
-	return {"Maximum."};
+std::vector<std::pair<std::string, std::string>> MaxComputer::bandMeta() const {
+	return {{"max", "Maximum"}};
 }
 
 int MinComputer::compute(double, double, const std::vector<geo::pc::Point>&, const std::vector<geo::pc::Point>& filtered, double, std::vector<double>& out) {
@@ -135,8 +135,8 @@ int MinComputer::bandCount() const {
 	return 1;
 }
 
-std::vector<std::string> MinComputer::bandMeta() const {
-	return {"Minimum."};
+std::vector<std::pair<std::string, std::string>> MinComputer::bandMeta() const {
+	return {{"min", "Minimum"}};
 }
 
 int CountComputer::compute(double, double, const std::vector<geo::pc::Point>&, const std::vector<geo::pc::Point>& filtered, double, std::vector<double>& out) {
@@ -148,8 +148,8 @@ int CountComputer::bandCount() const {
 	return 1;
 }
 
-std::vector<std::string> CountComputer::bandMeta() const {
-	return {"Count."};
+std::vector<std::pair<std::string, std::string>> CountComputer::bandMeta() const {
+	return {{"count", "Count"}};
 }
 
 SkewComputer::SkewComputer(double bias) {
@@ -184,8 +184,8 @@ int SkewComputer::bandCount() const {
 	return 1;
 }
 
-std::vector<std::string> SkewComputer::bandMeta() const {
-	return {"Skew."};
+std::vector<std::pair<std::string, std::string>> SkewComputer::bandMeta() const {
+	return {{"skew", "Skewness"}};
 }
 
 KurtosisComputer::KurtosisComputer(double bias) {
@@ -220,8 +220,8 @@ int KurtosisComputer::bandCount() const {
 	return 1;
 }
 
-std::vector<std::string> KurtosisComputer::bandMeta() const {
-	return {"Kurtosis."};
+std::vector<std::pair<std::string, std::string>> KurtosisComputer::bandMeta() const {
+	return {{"kurtosis", "Kurtosis"}};
 }
 
 int CoVComputer::compute(double x, double y, const std::vector<geo::pc::Point>& pts, const std::vector<geo::pc::Point>& filtered, double radius, std::vector<double>& out) {
@@ -249,6 +249,6 @@ int CoVComputer::bandCount() const {
 	return 1;
 }
 
-std::vector<std::string> CoVComputer::bandMeta() const {
-	return {"Coefficient of Variance."};
+std::vector<std::pair<std::string, std::string>> CoVComputer::bandMeta() const {
+	return {{"cov", "Coefficient of Variance"}};
 }

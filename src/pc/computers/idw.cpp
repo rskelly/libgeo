@@ -41,7 +41,7 @@ int IDWComputer::bandCount() const {
 	return 1;
 }
 
-std::vector<std::string> IDWComputer::bandMeta() const {
-	return {"idw - exponent: " + std::to_string(exponent)};
+std::vector<std::pair<std::string, std::string>> IDWComputer::bandMeta() const {
+	return {{"idx_" + std::to_string(exponent), "idw - exponent: " + std::to_string(exponent)}};
 }
 

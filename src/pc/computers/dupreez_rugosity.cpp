@@ -125,7 +125,7 @@ int RugosityComputer::bandCount() const {
 	return 1;
 }
 
-std::vector<std::string> RugosityComputer::bandMeta() const {
-	return {"dupreez_rugosity"};
+std::vector<std::pair<std::string, std::string>> RugosityComputer::bandMeta() const {
+	return {{"dupreez_rugosity", "ACR Rugosity (DuPreez 2014)"}};
 }
 
