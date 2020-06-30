@@ -106,7 +106,7 @@ namespace grid {
 		std::mutex mmtx;												///<! Mutex for geometry merging.
 		std::condition_variable mcv;									///<! Condition variable for geometry merging.
 
-		std::string idField;
+		std::string idField;											///<! The ID field.
 		std::vector<PolygonValue> fieldValues;							///<! A list of field values that will be saved with every poly in the set.
 		OGRLayer* layer;
 		std::mutex lmtx;												///<! Protects layer for writing.
@@ -2871,8 +2871,20 @@ public:
 
 	}
 
-
-	void polygonizeToTable(const std::string& conn, const std::string& layerName, const std::string& idField,
+	/**
+	 * \brief Vectorizes the raster to a database table.
+	 *
+	 * \param conn The database connection string. Ideally, "PG:dbname=<dbname> user=<user> password=<password> ..." etc.
+	 * \param layerName The layer or table name.
+	 * \param idField The name of the auto-incrementing ID field.
+	 * \param fieldValues The values of fields to set for every row.
+	 * \param removeHoles Preserve only the boundary of each polygon.
+	 * \param removeDangles Remove dangling parts of each polygon.
+	 * \param d3 True to produce a 3D (2.5D) geometry.
+	 * \param monitor A monitor instance. If null, default monitor is used.
+	 */
+	void polygonizeToTable(const std::string& conn, const std::string& layerName,
+			const std::string& idField,
 			const std::vector<PolygonValue>& fieldValues,
 			bool removeHoles = false, bool removeDangles = false, bool d3 = false,
 			Monitor* monitor = nullptr) {
