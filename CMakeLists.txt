@@ -17,6 +17,11 @@ set (CMAKE_INSTALL_RPATH "/usr/local/lib")
 set (CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
 if(${WIN32})
+	message (STATUS "Building for Windows")
+	set (CMAKE_CXX_FLAGS "/Zc:alignedNew /Zc:__cplusplus /std:c++17")	
+	set (CMAKE_CXX_FLAGS_DEBUG "/Od /Zi /GS- /EHsc /guard:cf-")	
+	add_definitions (-DBOOST_ALL_NO_LIB)
+	set (BOOST_ROOT "C:\\dev\\boost_1_67_0")
 	set (DEV_DIR "C:\\dev")
 	set (GIT_DIR "${DEV_DIR}\\git")
 	set (GIS_DIR "${DEV_DIR}\\gisinternals")
@@ -31,47 +36,40 @@ if(${WIN32})
 	set (SQLITE_LIBRARY sqlite3_i)
 	set (SPATIALITE_LIBRARY spatialite_i)
 	set (GDAL_LIBRARY gdal_i)
-	set (CGAL_DIR "C:\\dev\\CGAL-4.13")
-	set (CMAKE_CXX_FLAGS "/Zc:alignedNew /Zc:__cplusplus /std:c++17")	
-	set (CMAKE_CXX_FLAGS_DEBUG "/Od /O0 /Zi /GS- /guard:cf-")	
+	set (LIBLAS_LIBRARY liblas)
+	set (LIBLAS_INCLUDE_DIRS "C:\\dev\\OSGeo4W64\\include")
+	set (LIBLAS_LIBDIR "C:\\dev\\OSGeo4W64\\lib")
+	set (CGAL_INCLUDE_DIRS "C:\\dev\\CGAL-5.0.2\\include")
+	set (GMP_LIBDIR "C:\\dev\\CGAL-5.0.2\\auxiliary\\gmp\\lib")
+	set (GMP_LIBRARY libgmp-10)
+	find_package (Boost 1.67)
 else()
+	message (STATUS "Building for Linux")
 	set (CMAKE_CXX_COMPILER_LAUNCHER ccache)
 	set (CMAKE_CXX_FLAGS "-Wall -Wextra -Wno-unknown-pragmas -fopenmp -D_GLIBCXX_PARALLEL -std=c++17 -lstdc++fs")
 	set (CMAKE_CXX_FLAGS_DEBUG "-g -O0")
 	set (CMAKE_CXX_FLAGS_RELEASE "-O3")
 	set (FS_LIB stdc++fs) # For filesystem features in c++17.
 	find_package (Eigen3 REQUIRED)
+	find_package (CGAL REQUIRED)
+	find_package (PDAL REQUIRED)
+	find_package (OpenSSL REQUIRED)
+	find_package (GDAL 2 REQUIRED)
+	find_library (LIBLAS_LIBRARY las)
 endif()
 
 set (THREADS_PREFER_PTHREAD_FLAG ON)
 
 find_package (Threads REQUIRED)
-find_package (GDAL 2 REQUIRED)
-
-if (${WITH_CGAL})
-	find_package (CGAL REQUIRED)
-endif()
-
-if (${WITH_PDAL})
-	find_package (PDAL REQUIRED)
-endif()
-
-if (${WITH_OPENSSL})
-	find_package (OpenSSL REQUIRED)
-endif()
 
 find_library (JSONCPP_LIBRARY jsoncpp)
 #find_library (CRYPTO_LIBRARY crypto libeay32 PATHS ${GIS_LIBRARYDIR})
 find_library (GEOS_LIBRARY geos_c PATHS ${GEOS_LIBRARYDIR})
 find_library (PROJ_LIBRARY proj)
 
-if (${WITH_LIBLAS})
-	find_library (LIBLAS_LIBRARY las)
-endif()
-
 # Configure directories###################################################################################
 
-include_directories(BEFORE SYSTEM 
+include_directories(
 	include
 	ann/include 
 	${OPENSSL_INCLUDE_DIR}  
@@ -80,6 +78,9 @@ include_directories(BEFORE SYSTEM
 	${EIGEN3_INCLUDE_DIR} 
 	${JSON_INCLUDEDIR}
 	${GDAL_INCLUDE_DIR}
+	${LIBLAS_INCLUDE_DIRS}
+	${CGAL_INCLUDE_DIRS}
+	${Boost_INCLUDE_DIRS}
 )
 	 
 link_directories(./build/lib ./build/bin 
@@ -87,11 +88,15 @@ link_directories(./build/lib ./build/bin
 	${GIS_LIBRARYDIR} 
 	${PDAL_LIBRARY_DIRS}
 	${GEOS_INCLUDEDIR}
+	${LIBLAS_LIBDIR}
+	${GMP_LIBDIR}
+	${Boost_LIBRARY_DIRS}
 )
 
 # Build support libraries ################################################################################
 
 if (${WITH_FITPACK})
+	message (STATUS "Building FitPack...")
 	enable_language (Fortran)
 	file (GLOB FSRC src/fitpack/*.f)
 else ()
@@ -122,6 +127,7 @@ set_target_properties (geogrid PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_link_libraries (geogrid geoutil geodb Threads::Threads ${GEOS_LIBRARY} ${GDAL_LIBRARY})
 
 if(${WITH_ANN})
+	message (STATUS "Building ANN...")
 	set (geoannsrc src/geo.cpp ann/src/ANN.cpp ann/src/brute.cpp 
 		ann/src/kd_tree.cpp ann/src/kd_util.cpp 
 		ann/src/kd_split.cpp ann/src/kd_dump.cpp ann/src/kd_search.cpp ann/src/kd_pr_search.cpp 
@@ -137,17 +143,23 @@ if(${WITH_ANN})
 endif()
 
 if (${WITH_PC})
+	message (STATUS "Building PC...")
 	file(GLOB PC_COMPUTERS src/pc/computers/*.cpp)
-	add_library (geopc SHARED src/geo.cpp src/pointcloud.cpp src/pc/normalizer.cpp src/pc/rasterizer.cpp src/pc/filter.cpp ${PC_COMPUTERS})
-	target_compile_features(geopc PUBLIC cxx_std_17)
-	target_link_libraries (geopc geoutil geogrid ${ANN_LIB} ${LIBLAS_LIBRARY} CGAL CGAL_Core gmp)
+	set (geopcsrc src/geo.cpp src/pointcloud.cpp src/pc/normalizer.cpp src/pc/rasterizer.cpp src/pc/filter.cpp ${PC_COMPUTERS})
+	add_library (geopcobj OBJECT ${geopcsrc})
+	target_compile_features(geopcobj PUBLIC cxx_std_17)
+	set_target_properties (geopcobj PROPERTIES POSITION_INDEPENDENT_CODE ON)
+	target_compile_definitions (geopcobj PRIVATE DLL_EXPORTS=1)
+	add_library (geopc SHARED $<TARGET_OBJECTS:geopcobj>)
+	target_link_libraries (geopc geoutil geogrid ${ANN_LIB} ${LIBLAS_LIBRARY} ${GMP_LIBRARY} ${Boost_LIBRARIES})
 	set (PC_LIB geopc)
 endif()
 
 # Applications ##################################################################################################
 
 if(${BUILD_APPS})
-
+	message (STATUS "Building Apps...")
+	
 	# add_executable (pc2tile src/apps/pc2tile.cpp)
 	# target_link_libraries (pc2tile geoutil geopc ${LIBLAS_LIBRARY} ${GEOS_LIBRARY})
 
@@ -160,8 +172,8 @@ if(${BUILD_APPS})
 	# add_executable (geoinfo src/apps/geoinfo.cpp)
 	# target_link_libraries (geoinfo geoutil ${GDAL_LIBRARY} ${LIBLAS_LIBRARY} ${JSONCPP_LIBRARY})
 
-	add_executable (voidfill src/apps/voidfill.cpp)
-	target_link_libraries (voidfill geoutil geogrid ${GDAL_LIBRARY})
+	# add_executable (voidfill src/apps/voidfill.cpp)
+	# target_link_libraries (voidfill geoutil geogrid ${GDAL_LIBRARY})
 
 	# add_executable (datumshift src/apps/datumshift.cpp)
 	# target_link_libraries (datumshift geoutil geogrid ${GDAL_LIBRARY} ${PROJ_LIBRARY})
@@ -184,7 +196,7 @@ if(${BUILD_APPS})
 	# add_executable (rbf src/tests/rbf.cpp)
 	# target_link_libraries (rbf)
 
-	install(TARGETS voidfill ${ANN_LIB} ${PC_LIB} geogrid geoutil geodb fitpack_mod RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
+	install(TARGETS ${ANN_LIB} ${PC_LIB} geogrid geoutil geodb fitpack_mod RUNTIME DESTINATION bin LIBRARY DESTINATION lib) 
 	
 else()
 
