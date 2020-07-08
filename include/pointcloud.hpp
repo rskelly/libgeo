@@ -8,8 +8,6 @@
  *  Author: rob
  */
 
-#include <ds/mqtree.hpp>
-#include <grid.hpp>
 #include <fstream>
 #include <vector>
 #include <unordered_map>
@@ -24,10 +22,8 @@
 #include <liblas/liblas.hpp>
 
 #include "util.hpp"
-
-#define NODATA -9999.0
-#define D_MAX std::numeric_limits<double>::max()
-#define D_MIN std::numeric_limits<double>::lowest()
+#include "ds/mqtree.hpp"
+#include "grid.hpp"
 
 using namespace geo::util;
 using namespace geo::ds;
@@ -660,8 +656,10 @@ public:
 
 /**
  * A configurable filter for point clouds.
+ *
+ * Contains a list of PointFilter objects.
  */
-class PCPointFilter {
+class G_DLL_EXPORT PCPointFilter {
 private:
 	std::vector<PointFilter*> m_filters;
 	std::unordered_map<std::string, std::vector<PointFilter*>> m_computerFilters;
@@ -808,12 +806,6 @@ private:
 	bool m_prefilter;					///<! If true, points are filtered before adding to tree.
 	bool m_merge;						///<! If true, bands are merged.
 
-	// Used by finalizer.
-	std::vector<std::unique_ptr<Computer> > m_computers;
-	std::vector<geo::grid::Band<float>> m_rasters;
-	std::vector<geo::pc::Point> m_filtered;
-	std::vector<double> m_out;
-
 	void finalize(int row, double radius,
 			std::unordered_map<size_t, std::vector<geo::pc::Point> >& cells,
 			geo::grid::Band<float>& outrast);
@@ -824,12 +816,12 @@ public:
 	 * Construct a Rasterizer using the given point cloud file names.
 	 * \param filenames A vector containing file names.
 	 */
-	Rasterizer(const std::vector<std::string> filenames);
+	G_DLL_EXPORT Rasterizer(const std::vector<std::string> filenames);
 
 	/**
 	 * Returns a mapping of computer names and brief descriptions.
 	 */
-	static const std::unordered_map<std::string, std::string>& availableComputers();
+	G_DLL_EXPORT static const std::unordered_map<std::string, std::string>& availableComputers();
 
 	/**
 	 * Rasterize the point cloud using the given output filename, statistic type, resolution
@@ -845,7 +837,7 @@ public:
 	 * \param projection The well-known text representation of the projection.
 	 * \param useHeader True to trust the LAS file headers for things like bounds. Otherwise, read the points.
 	 */
-	void rasterize(const std::string& filename, const std::vector<std::string>& types, double resX, double resY,
+	G_DLL_EXPORT void rasterize(const std::string& filename, const std::vector<std::string>& types, double resX, double resY,
 		double easting, double northing, double radius, const std::string& projection, bool useHeader);
 
 	/**
@@ -854,7 +846,7 @@ public:
 	 * \param The search radius. Set to zero to use the cell bounds.
 	 * \return The estimated point density per cell.
 	 */
-	double density(double resolution, double radius);
+	G_DLL_EXPORT double density(double resolution, double radius);
 
 	/**
 	 * If given and larger than zero, any cell with more than this number
@@ -863,55 +855,65 @@ public:
 	 *
 	 * \param thin The number of points in each cell.
 	 */
-	void setThin(int thin);
+	G_DLL_EXPORT void setThin(int thin);
 
-	void setPrefilter(bool prefilter);
+	G_DLL_EXPORT void setPrefilter(bool prefilter);
 
 	/**
 	 * Set the nodata value. Default is -9999.
 	 *
 	 * \param nodata The nodata value.
 	 */
-	void setNoData(double nodata);
+	G_DLL_EXPORT void setNoData(double nodata);
 
 	/**
 	 * Set a point filter to use for filtering points. Removes the old filter.
 	 * \param filter A PointFilter.
 	 */
-	void setFilter(PCPointFilter* filter);
+	G_DLL_EXPORT void setFilter(PCPointFilter* filter);
 
 	/**
 	 * Return a pointer to the PointFilter.
 	 *
 	 * \return A pointer to the PointFilter.
 	 */
-	PCPointFilter* filter() const;
+	G_DLL_EXPORT PCPointFilter* filter() const;
 
 	/**
 	 * \brief Assign the projected bounds for the output raster. minx, miny, maxx, maxy.
 	 *
 	 * \param bounds The projected bounds for the output raster. minx, miny, maxx, maxy.
 	 */
-	void setBounds(double* bounds);
+	G_DLL_EXPORT void setBounds(double* bounds);
 
 	/**
 	 * \brief If set to true, individual bands are merged into one file.
 	 *
 	 * \param merge True to merge files.
 	 */
-	void setMerge(bool merge);
+	G_DLL_EXPORT void setMerge(bool merge);
 
 	/**
 	 * \brief Return true if the bands are to be merged.
 	 *
 	 * \return True if the bands are to be merged.
 	 */
-	bool merge() const;
+	G_DLL_EXPORT bool merge() const;
 
 	/**
 	 * Destroy the Rasterizer.
 	 */
-	~Rasterizer();
+	G_DLL_EXPORT ~Rasterizer();
+
+private:
+
+	// Used by finalizer.
+	// TODO: These memebers moved down here and functions 
+	// set to export due to problems with deleted members on Win.
+	std::vector<std::unique_ptr<Computer> > m_computers;
+	std::vector<geo::grid::Band<float>> m_rasters;
+	std::vector<geo::pc::Point> m_filtered;
+	std::vector<double> m_out;
 
 };
 
