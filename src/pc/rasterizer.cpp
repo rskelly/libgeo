@@ -422,7 +422,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 								count = 0;
 							} else {
 								// Randomize, then take the first n points.
-								std::random_shuffle(filtered.begin(), filtered.end());
+								geo::util::shuffle(filtered.begin(), filtered.end());
 								filtered.resize(m_thin);
 								count = m_thin;
 							}
