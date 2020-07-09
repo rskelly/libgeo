@@ -161,6 +161,32 @@ G_DLL_EXPORT void shuffle(T begin, T end) {
 }
 
 /**
+ * Checks the list of input files.
+ *
+ * Return true if:
+ *
+ * 1) the list length is >0;
+ * 2) each of the file paths is valid and points to a file that exists.
+ */
+G_DLL_EXPORT bool checkValidInputFiles(const std::vector<std::string>& files);
+
+/**
+ * Checks if the given path is safe for writing output.
+ *
+ * Return true if:
+ *
+ * 1) the given path is not a directory (isdir returns false);
+ * 2) the given path does not exist; or
+ * 3) the given path is a file and force is true.
+ */
+G_DLL_EXPORT bool safeToWrite(const std::string& path, bool force);
+
+/**
+ * Return true if it's a dir or a file.
+ */
+G_DLL_EXPORT bool exists(const std::string& path);
+
+/**
  * Return true if it's a dir and it exists.
  */
 G_DLL_EXPORT bool isdir(const std::string& path);
@@ -451,7 +477,9 @@ public:
 		Bounds(minx, miny, maxx, maxy, maxvalue<T>(), minvalue<T>()) {}
 
 	Bounds(T minx, T miny, T maxx, T maxy, T minz, T maxz) :
-		m_minx(minx), m_miny(miny), m_maxx(maxx), m_maxy(maxy), m_minz(minz), m_maxz(maxz) {}
+		m_minx(minx), m_miny(miny),
+		m_maxx(maxx), m_maxy(maxy),
+		m_minz(minz), m_maxz(maxz) {}
 
 	void set(T minx, T miny, T maxx, T maxy, T minz = 0, T maxz = 0) {
 		m_minx = geo::min(minx, maxx);
@@ -499,8 +527,6 @@ public:
 		return Bounds(geo::max(minx(), other.minx()), geo::max(miny(), other.miny()),
 			geo::min(maxx(), other.maxx()), geo::min(maxy(), other.maxy()));
 	}
-
-
 
 	void cube() {
 		T max = geo::max(width(), height());

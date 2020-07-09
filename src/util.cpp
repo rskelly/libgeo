@@ -150,20 +150,50 @@ bool geo::util::isnonzero(const double& v) {
 	return v != 0;
 }
 
+bool geo::util::checkValidInputFiles(const std::vector<std::string>& files) {
+	if(files.empty()) {
+		g_warn("Input file list is empty.");
+		return false;
+	}
+	int invalid = 0;
+	for(const std::string& f : files) {
+		if(f.empty()) {
+			g_warn("File name is empty.");
+			++invalid;
+		}
+		if(!isfile(f)) {
+			g_warn(f << " is invalid or doesn't exist.");
+			++invalid;
+		}
+	}
+	return invalid == 0;
+}
+
+bool geo::util::safeToWrite(const std::string& path, bool force) {
+	if(path.empty() || isdir(path))
+		return false;
+	if(isfile(path))
+		return force;
+	return true;
+}
+
+bool geo::util::exists(const std::string& path) {
+	return isdir(path) || isfile(path);
+}
+
 bool geo::util::isdir(const std::string& path) {
-	return fs::is_directory(path);
+	return !path.empty() && fs::is_directory(path);
 }
 
 bool geo::util::isfile(const std::string& path) {
-	return fs::is_regular_file(path);
+	return !path.empty() && fs::is_regular_file(path);
 }
 
 bool geo::util::rem(const std::string& dir) {
 	try {
 		fs::path p(dir);
 		fs::remove_all(p);
-	}
-	catch (const std::exception& ex) {
+	} catch (const std::exception& ex) {
 		g_warn(ex.what());
 		return false;
 	}
