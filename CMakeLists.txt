@@ -46,7 +46,7 @@ if(${WIN32})
 else()
 	message (STATUS "Building for Linux")
 	set (CMAKE_CXX_COMPILER_LAUNCHER ccache)
-	set (CMAKE_CXX_FLAGS "-Wall -Wextra -Wno-unknown-pragmas -fopenmp -D_GLIBCXX_PARALLEL -std=c++17 -lstdc++fs")
+	set (CMAKE_CXX_FLAGS "-Wall -Wextra -Wno-unknown-pragmas -fopenmp -D_GLIBCXX_PARALLEL")
 	set (CMAKE_CXX_FLAGS_DEBUG "-g -O0")
 	set (CMAKE_CXX_FLAGS_RELEASE "-O3")
 	set (FS_LIB stdc++fs) # For filesystem features in c++17.
