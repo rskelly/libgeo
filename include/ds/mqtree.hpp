@@ -381,7 +381,7 @@ public:
 	double m_midx;								///<! Lateral midpoint of bounds.
 	double m_midy;								///<! Vertical midpoint of bounds.
 	int m_depth;								///<! Depth of this node. Root is zero.
-	char m_idx;									///<! The index of this node relative to the parent (0-3).
+	int m_idx;									///<! The index of this node relative to the parent (0-3).
 	bool m_split;								///<! True if the node has been split.
 	std::string m_path;							///<! The path to this node's temp file.
 	size_t m_key;								///<! A numerical key for locating the node in the cache.
@@ -402,7 +402,7 @@ public:
 	 * \param parent The parent node; nullptr if root.
 	 * \param cache The pointer to the LRU cache.
 	 */
-	mqnode(char idx, double minx, double miny, double maxx, double maxy, int depth,
+	mqnode(int idx, double minx, double miny, double maxx, double maxy, int depth,
 			mqnode<T>* parent, mqtree<T>* tree) :
 		m_tree(tree), m_parent(parent), m_depth(depth), m_idx(idx), m_split(false),
 		m_key(tree->nextKey()), m_size(0), m_iter(0) {
@@ -481,16 +481,16 @@ public:
 	/**
 	 * \brief Return the index (i.e. quadrant) of the given item.
 	 */
-	char idx(const T& item) {
-		return ((char) (item.x() >= m_midx) << 1) | (char) (item.y() >= m_midy);
+	int idx(const T& item) {
+		return ((int) (item.x() >= m_midx) << 1) | (int) (item.y() >= m_midy);
 	}
 
 	/**
 	 * \brief Return the node from the given index (quadrant). Create if required.
 	 */
-	mqnode<T>* node(char i) {
-		char ix = i >> 1;
-		char iy = i & 1;
+	mqnode<T>* node(int i) {
+		int ix = i >> 1;
+		int iy = i & 1;
 		mqnode* n;
 		if(!(n = m_nodes[i])) {
 			n = m_nodes[i] = new mqnode(i,
@@ -715,7 +715,7 @@ public:
 	}
 
 	~mqnode() {
-		for(char i = 0; i < 4; ++i) {
+		for(int i = 0; i < 4; ++i) {
 			if(m_nodes[i])
 				delete m_nodes[i];
 		}
