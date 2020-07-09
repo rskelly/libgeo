@@ -91,6 +91,7 @@ link_directories(./build/lib ./build/bin
 	${LIBLAS_LIBDIR}
 	${GMP_LIBDIR}
 	${Boost_LIBRARY_DIRS}
+	${CGAL_DIR}
 )
 
 # Build support libraries ################################################################################
@@ -151,7 +152,8 @@ if (${WITH_PC})
 	set_target_properties (geopcobj PROPERTIES POSITION_INDEPENDENT_CODE ON)
 	target_compile_definitions (geopcobj PRIVATE DLL_EXPORTS=1)
 	add_library (geopc SHARED $<TARGET_OBJECTS:geopcobj>)
-	target_link_libraries (geopc geoutil geogrid ${ANN_LIB} ${LIBLAS_LIBRARY} ${GMP_LIBRARY} ${Boost_LIBRARIES})
+	target_link_libraries (geopc geoutil geogrid CGAL CGAL_Core ${ANN_LIB} ${LIBLAS_LIBRARY} 
+		${GMP_LIBRARY} ${Boost_LIBRARIES})
 	set (PC_LIB geopc)
 endif()
 
