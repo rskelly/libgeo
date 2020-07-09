@@ -115,9 +115,11 @@ namespace grid {
 			gctx(nullptr),
 			mergeRunning(false), writeRunning(false),
 			monitor(nullptr),
-			cols(0), rows(0), resX(0), resY(0),
+			cols(0), rows(0),
+			resX(0), resY(0),
+			startX(0), startY(0),
+			xeps(0), yeps(0),
 			dimensions(2),
-			startX(0), startY(0), xeps(0), yeps(0),
 			removeHoles(false), removeDangles(false),
 			layer(nullptr) {
 		}
@@ -260,7 +262,7 @@ namespace detail {
 					&& (numGeoms = GEOSGetNumGeometries_r(pc->gctx, geom)) > 1) {
 				size_t idx = 0;
 				double a, area = 0;
-				for(size_t i = 0; i < numGeoms; ++i) {
+				for(int i = 0; i < numGeoms; ++i) {
 					const GEOSGeometry* p = GEOSGetGeometryN_r(pc->gctx, geom, i);
 					GEOSArea_r(pc->gctx, p, &a);
 					if(a > area) {
@@ -1652,7 +1654,8 @@ public:
 			band->SetNoDataValue(nodata);
 			band->SetMetadataItem(metaName, metaValue, "");
 			band->SetDescription(metaValue);
-			band->RasterIO(GF_Write, 0, 0, cols, rows, bandList[i]->m_data, cols, rows, dataType2GDT(type), 0, 0, 0);
+			if(CE_None != band->RasterIO(GF_Write, 0, 0, cols, rows, bandList[i]->m_data, cols, rows, dataType2GDT(type), 0, 0, 0))
+				g_warn("Error writing to band.");
 			if(deleteOriginal)
 				rem(bandList[i]->props().filename());
 		}
@@ -1883,9 +1886,9 @@ public:
 		} else {
 			rb = 0;
 		}
-		if(c + w > cols)
+		if((size_t) c + w > cols) // Casting to prevent overflow.
 			w = cols - c;
-		if(r + h > rows)
+		if((size_t) r + h > rows)
 			h = rows - r;
 
 		// Fill the buffer with nodata for empty rows/ends.

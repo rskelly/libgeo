@@ -10,10 +10,8 @@
 #ifdef _WIN32
 #include <Windows.h>
 #include <io.h>
-constexpr char pathsep = '\\';
 #else
 #include <sys/time.h>
-constexpr char pathsep = '/';
 #endif
 
 #include <fcntl.h>
@@ -41,6 +39,8 @@ using namespace geo::util;
 namespace fs = std::filesystem;
 
 namespace {
+
+	const char pathsep = std::filesystem::path::preferred_separator;
 
 	const std::string defaultChars = "abcdefghijklmnaoqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890";
 

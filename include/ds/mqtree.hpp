@@ -143,10 +143,10 @@ public:
 			m_path = path;
 			m_buf.init(bufSize());
 			if((handle = open(path.c_str(), O_RDWR, 0777)) > 0) {
-				if(read(handle, m_buf.data, m_buf.size) > sizeof(T)) {
+				if(read(handle, m_buf.data, m_buf.size) > (int) sizeof(T)) {
 					std::memcpy(&size, m_buf.data, sizeof(size_t));
 					m_cache.resize(size);
-					std::memcpy(m_cache.data(), static_cast<char*>(m_buf.data) + sizeof(size_t), size * sizeof(T));
+					std::memcpy((void*) m_cache.data(), static_cast<char*>(m_buf.data) + sizeof(size_t), size * sizeof(T));
 					// Offset by sizeof(size_t) because the size is the first element in the file;
 					// cast to char* because the offset is in bytes.
 				}
@@ -545,7 +545,7 @@ public:
 	 * \brief Clear the tree and remove its nodes.
 	 */
 	void clear() {
-		for(char i = 0; i < 4; ++i) {
+		for(int i = 0; i < 4; ++i) {
 			if(m_nodes[i])
 				m_nodes[i]->clear();
 		}
@@ -560,7 +560,7 @@ public:
 		size_t count = 0;
 		if(contains(pt, radius)) {
 			if(m_split) {
-				for(char i = 0; i < 4; ++i) {
+				for(int i = 0; i < 4; ++i) {
 					if(m_nodes[i])
 						count += m_nodes[i]->search(pt, radius, piter);
 				}
