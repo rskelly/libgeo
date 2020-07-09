@@ -56,6 +56,7 @@ else()
 	find_package (OpenSSL REQUIRED)
 	find_package (GDAL 2 REQUIRED)
 	find_library (LIBLAS_LIBRARY las)
+	set (CGAL_LIBS "CGAL CGAL_Core")
 endif()
 
 set (THREADS_PREFER_PTHREAD_FLAG ON)
@@ -152,7 +153,7 @@ if (${WITH_PC})
 	set_target_properties (geopcobj PROPERTIES POSITION_INDEPENDENT_CODE ON)
 	target_compile_definitions (geopcobj PRIVATE DLL_EXPORTS=1)
 	add_library (geopc SHARED $<TARGET_OBJECTS:geopcobj>)
-	target_link_libraries (geopc geoutil geogrid CGAL CGAL_Core ${ANN_LIB} ${LIBLAS_LIBRARY} 
+	target_link_libraries (geopc geoutil geogrid ${CGAL_LIBS} ${ANN_LIB} ${LIBLAS_LIBRARY} 
 		${GMP_LIBRARY} ${Boost_LIBRARIES})
 	set (PC_LIB geopc)
 endif()
