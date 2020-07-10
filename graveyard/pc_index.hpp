@@ -162,8 +162,8 @@ public:
 
 		m_resX = resX;
 		m_resY = resY;
-		m_bounds[0] = m_bounds[1] = G_DBL_MAX_POS;
-		m_bounds[2] = m_bounds[3] = G_DBL_MAX_NEG;
+		m_bounds[0] = m_bounds[1] = geo::maxvalue<double>();
+		m_bounds[2] = m_bounds[3] = geo::minvalue<double>();
 
 		for(const std::string& filename : m_files) {
 			std::ifstream str(filename, std::ios::binary|std::ios::in);
