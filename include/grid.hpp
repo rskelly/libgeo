@@ -1869,8 +1869,7 @@ public:
 		int h = height + rb * 2;
 		const int tw = w;			// Tile width for writing.
 
-		static std::vector<T> buf;
-		buf.resize(w);
+		std::vector<T> buf(w);
 
 		if(c < 0) {
 			w += c;
@@ -1897,7 +1896,7 @@ public:
 		int endr = geo::min((size_t) r + h, rows);
 		for(int rr = 0; r < endr; ++rr, ++r) {
 			std::memcpy(buf.data() + cb, m_data + (size_t) r * (size_t) cols + (size_t) c, w * sizeof(T)); // Casting to prevent overflow on large rasters.
-			std::memcpy(tile + (rr + rb) * tw, buf.data() + cb, w * sizeof(T));
+			std::memcpy(tile + (rr + rb) * tw, buf.data(), w * sizeof(T));
 		}
 	}
 
