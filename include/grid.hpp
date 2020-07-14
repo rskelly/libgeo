@@ -1656,8 +1656,10 @@ public:
 			band->SetDescription(metaValue);
 			if(CE_None != band->RasterIO(GF_Write, 0, 0, cols, rows, bandList[i]->m_data, cols, rows, dataType2GDT(type), 0, 0, 0))
 				g_warn("Error writing to band.");
-			if(deleteOriginal)
+			if (deleteOriginal) {
+				bandList[i]->destroy();
 				rem(bandList[i]->props().filename());
+			}
 		}
 		GDALClose(ds);
 		CSLDestroy(opts);
