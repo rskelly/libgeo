@@ -204,12 +204,15 @@ bool geo::util::rem(const std::string& dir) {
 std::vector<std::string> geo::util::glob(const std::string& path) {
 	std::vector<std::string> files;
 #ifdef _WIN32
-	LPWIN32_FIND_DATAA data;
-	HANDLE fh = FindFirstFileA((LPCSTR) path.c_str(), data);
+	std::string p = parent(path);
+	WIN32_FIND_DATA data;
+	HANDLE fh = FindFirstFile(path.c_str(), &data);
 	if(fh != INVALID_HANDLE_VALUE) {
-		files.push_back(data.cFileName);
-		while(FindNextFileA(fh, data))
-			files.push_back(data.cFileName);
+		files.push_back(join(p, data.cFileName));
+		while (FindNextFileA(fh, &data)) {
+			if(fh != INVALID_HANDLE_VALUE)
+				files.push_back(join(p, data.cFileName));
+		}
 		FindClose(fh);
 	}
 #else
