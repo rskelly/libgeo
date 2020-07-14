@@ -197,6 +197,14 @@ G_DLL_EXPORT bool isdir(const std::string& path);
 G_DLL_EXPORT bool isfile(const std::string& path);
 
 /**
+ * \brief A simplified globbing function for windows (also works on Linux if file name is quoted).
+ *
+ * \param path The path to the file, including one or more * characters.
+ * \return A list of matching files.
+ */
+G_DLL_EXPORT std::vector<std::string> glob(const std::string& path);
+
+/**
  * Remove the directory or file.
  */
 G_DLL_EXPORT bool rem(const std::string& dir);

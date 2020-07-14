@@ -56,7 +56,7 @@ else()
 	find_package (OpenSSL REQUIRED)
 	find_package (GDAL 2 REQUIRED)
 	find_library (LIBLAS_LIBRARY las)
-	set (CGAL_LIBS "CGAL CGAL_Core")
+	set (CGAL_LIBS "CGAL")
 endif()
 
 set (THREADS_PREFER_PTHREAD_FLAG ON)

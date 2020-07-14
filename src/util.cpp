@@ -12,6 +12,7 @@
 #include <io.h>
 #else
 #include <sys/time.h>
+#include <glob.h>
 #endif
 
 #include <fcntl.h>
@@ -198,6 +199,41 @@ bool geo::util::rem(const std::string& dir) {
 		return false;
 	}
 	return true;
+}
+
+std::vector<std::string> geo::util::glob(const std::string& path) {
+	std::vector<std::string> files;
+#ifdef _WIN32
+	LPWIN32_FIND_DATAA data;
+	HANDLE fh = FindFirstFileA((LPCSTR) path.c_str(), data);
+	if(fh != INVALID_HANDLE_VALUE) {
+		files.push_back(data.cFileName);
+		while(FindNextFileA(fh, data))
+			files.push_back(data.cFileName);
+		FindClose(fh);
+	}
+#else
+	//https://stackoverflow.com/questions/8401777/simple-glob-in-c-on-unix-system
+    // glob struct resides on the stack
+    glob_t glob_result;
+    memset(&glob_result, 0, sizeof(glob_result));
+
+    // do the glob operation
+    int return_value = glob(path.c_str(), GLOB_TILDE, NULL, &glob_result);
+    if(return_value != 0) {
+        globfree(&glob_result);
+        g_runerr("glob() failed with return_value " << return_value);
+    }
+
+    // collect all the filenames into a std::list<std::string>
+    for(size_t i = 0; i < glob_result.gl_pathc; ++i)
+        files.push_back(glob_result.gl_pathv[i]);
+
+    // cleanup
+    globfree(&glob_result);
+#endif
+
+    return files;
 }
 
 std::string geo::util::parent(const std::string& path) {
