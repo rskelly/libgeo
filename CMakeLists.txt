@@ -175,12 +175,9 @@ if(${BUILD_APPS})
 	# add_executable (geoinfo src/apps/geoinfo.cpp)
 	# target_link_libraries (geoinfo geoutil ${GDAL_LIBRARY} ${LIBLAS_LIBRARY} ${JSONCPP_LIBRARY})
 
-<<<<<<< HEAD
-=======
 	# add_executable (voidfill src/apps/voidfill.cpp)
 	# target_link_libraries (voidfill geoutil geogrid ${GDAL_LIBRARY})
 
->>>>>>> branch 'master' of https://github.com/rskelly/libgeo
 	# add_executable (datumshift src/apps/datumshift.cpp)
 	# target_link_libraries (datumshift geoutil geogrid ${GDAL_LIBRARY} ${PROJ_LIBRARY})
 
