@@ -16,7 +16,6 @@
 
 #include <errno.h>
 #include <math.h>
-#include <sys/mman.h>
 #include <string.h>
 
 #include <liblas/liblas.hpp>

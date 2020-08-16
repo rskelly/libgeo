@@ -243,7 +243,7 @@ public:
 			count = res;
 
 		// Populate output iterators.
-		for(size_t i = 0; i < count; ++i) {
+		for(size_t i = 0; i < (size_t) count; ++i) {
 			if(idx[i] != ANN_NULL_IDX) {
 				*titer = m_items[idx[i]];
 				*diter = dist[i];

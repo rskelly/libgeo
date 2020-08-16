@@ -13,6 +13,8 @@
 #include <array>
 #include <cstring>
 #include <chrono>
+#include <algorithm>
+#include <random>
 
 #include <gdal_priv.h>
 
@@ -46,7 +48,7 @@ namespace util {
 /**
  * Input and output file types.
  */
-G_DLL_EXPORT enum class FileType {
+enum class FileType {
 	GTiff,
 	ENVI,
 	ROI,
@@ -62,7 +64,7 @@ G_DLL_EXPORT enum class FileType {
 /**
  * The allowable types for a raster.
  */
-G_DLL_EXPORT enum class DataType {
+enum class DataType {
 	Float64 = 7,
 	Float32 = 6,
 	UInt32 = 5,
@@ -76,7 +78,7 @@ G_DLL_EXPORT enum class DataType {
 /**
  * Interleave methods.
  */
-G_DLL_EXPORT enum class Interleave {
+enum class Interleave {
 	BIL,
 	BSQ,
 	BIP
@@ -85,7 +87,7 @@ G_DLL_EXPORT enum class Interleave {
 /**
  * Normalization methods.
  */
-G_DLL_EXPORT enum class NormMethod {
+enum class NormMethod {
 	ConvexHull,
 	ConvexHullLongestSeg,
 	Line,
@@ -147,6 +149,44 @@ G_DLL_EXPORT std::string normMethodAsString(NormMethod method);
 G_DLL_EXPORT bool isnonzero(const double& v);
 
 /**
+ * \brief Shuffle the elements in the given list.
+ *
+ * \param begin The start random access iterator.
+ * \param end The end iterator.
+ */
+template <class T>
+G_DLL_EXPORT void shuffle(T begin, T end) {
+	uint64_t seed = std::chrono::system_clock::now().time_since_epoch().count();
+	std::shuffle(begin, end, std::default_random_engine(seed));
+}
+
+/**
+ * Checks the list of input files.
+ *
+ * Return true if:
+ *
+ * 1) the list length is >0;
+ * 2) each of the file paths is valid and points to a file that exists.
+ */
+G_DLL_EXPORT bool checkValidInputFiles(const std::vector<std::string>& files);
+
+/**
+ * Checks if the given path is safe for writing output.
+ *
+ * Return true if:
+ *
+ * 1) the given path is not a directory (isdir returns false);
+ * 2) the given path does not exist; or
+ * 3) the given path is a file and force is true.
+ */
+G_DLL_EXPORT bool safeToWrite(const std::string& path, bool force);
+
+/**
+ * Return true if it's a dir or a file.
+ */
+G_DLL_EXPORT bool exists(const std::string& path);
+
+/**
  * Return true if it's a dir and it exists.
  */
 G_DLL_EXPORT bool isdir(const std::string& path);
@@ -155,6 +195,14 @@ G_DLL_EXPORT bool isdir(const std::string& path);
  * Return true if it's a file and it exists.
  */
 G_DLL_EXPORT bool isfile(const std::string& path);
+
+/**
+ * \brief A simplified globbing function for windows (also works on Linux if file name is quoted).
+ *
+ * \param path The path to the file, including one or more * characters.
+ * \return A list of matching files.
+ */
+G_DLL_EXPORT std::vector<std::string> glob(const std::string& path);
 
 /**
  * Remove the directory or file.
@@ -437,7 +485,9 @@ public:
 		Bounds(minx, miny, maxx, maxy, maxvalue<T>(), minvalue<T>()) {}
 
 	Bounds(T minx, T miny, T maxx, T maxy, T minz, T maxz) :
-		m_minx(minx), m_miny(miny), m_maxx(maxx), m_maxy(maxy), m_minz(minz), m_maxz(maxz) {}
+		m_minx(minx), m_miny(miny),
+		m_maxx(maxx), m_maxy(maxy),
+		m_minz(minz), m_maxz(maxz) {}
 
 	void set(T minx, T miny, T maxx, T maxy, T minz = 0, T maxz = 0) {
 		m_minx = geo::min(minx, maxx);
@@ -485,8 +535,6 @@ public:
 		return Bounds(geo::max(minx(), other.minx()), geo::max(miny(), other.miny()),
 			geo::min(maxx(), other.maxx()), geo::min(maxy(), other.maxy()));
 	}
-
-
 
 	void cube() {
 		T max = geo::max(width(), height());

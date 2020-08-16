@@ -10,10 +10,9 @@
 #ifdef _WIN32
 #include <Windows.h>
 #include <io.h>
-constexpr char pathsep = '\\';
 #else
 #include <sys/time.h>
-constexpr char pathsep = '/';
+#include <glob.h>
 #endif
 
 #include <fcntl.h>
@@ -27,6 +26,7 @@ constexpr char pathsep = '/';
 #include <regex>
 #include <fstream>
 #include <random>
+#include <filesystem>
 
 #include <gdal_priv.h>
 #include <ogr_spatialref.h>
@@ -37,15 +37,11 @@ constexpr char pathsep = '/';
 
 using namespace geo::util;
 
-#if __cplusplus == 201704L || _GNUC_ < 8
-#include <experimental/filesystem>
-namespace fs = std::experimental::filesystem;
-#else 
-#include <filesystem>
 namespace fs = std::filesystem;
-#endif
 
 namespace {
+
+	const char pathsep = std::filesystem::path::preferred_separator;
 
 	const std::string defaultChars = "abcdefghijklmnaoqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890";
 
@@ -155,24 +151,92 @@ bool geo::util::isnonzero(const double& v) {
 	return v != 0;
 }
 
+bool geo::util::checkValidInputFiles(const std::vector<std::string>& files) {
+	if(files.empty()) {
+		g_warn("Input file list is empty.");
+		return false;
+	}
+	int invalid = 0;
+	for(const std::string& f : files) {
+		if(f.empty()) {
+			g_warn("File name is empty.");
+			++invalid;
+		}
+		if(!isfile(f)) {
+			g_warn(f << " is invalid or doesn't exist.");
+			++invalid;
+		}
+	}
+	return invalid == 0;
+}
+
+bool geo::util::safeToWrite(const std::string& path, bool force) {
+	if(path.empty() || isdir(path))
+		return false;
+	if(isfile(path))
+		return force;
+	return true;
+}
+
+bool geo::util::exists(const std::string& path) {
+	return isdir(path) || isfile(path);
+}
+
 bool geo::util::isdir(const std::string& path) {
-	return fs::is_directory(path);
+	return !path.empty() && fs::is_directory(path);
 }
 
 bool geo::util::isfile(const std::string& path) {
-	return fs::is_regular_file(path);
+	return !path.empty() && fs::is_regular_file(path);
 }
 
 bool geo::util::rem(const std::string& dir) {
 	try {
 		fs::path p(dir);
 		fs::remove_all(p);
-	}
-	catch (const std::exception& ex) {
+	} catch (const std::exception& ex) {
 		g_warn(ex.what());
 		return false;
 	}
 	return true;
+}
+
+std::vector<std::string> geo::util::glob(const std::string& path) {
+	std::vector<std::string> files;
+#ifdef _WIN32
+	std::string p = parent(path);
+	WIN32_FIND_DATA data;
+	HANDLE fh = FindFirstFile(path.c_str(), &data);
+	if(fh != INVALID_HANDLE_VALUE) {
+		files.push_back(join(p, data.cFileName));
+		while (FindNextFileA(fh, &data)) {
+			if(fh != INVALID_HANDLE_VALUE)
+				files.push_back(join(p, data.cFileName));
+		}
+		FindClose(fh);
+	}
+#else
+	//https://stackoverflow.com/questions/8401777/simple-glob-in-c-on-unix-system
+    // glob struct resides on the stack
+    glob_t glob_result;
+    memset(&glob_result, 0, sizeof(glob_result));
+
+    // do the glob operation
+    int return_value = glob(path.c_str(), GLOB_TILDE, NULL, &glob_result);
+    if(return_value != 0) {
+        globfree(&glob_result);
+        g_runerr("glob() failed with return_value " << return_value);
+    }
+
+    // collect all the filenames into a std::list<std::string>
+    for(size_t i = 0; i < glob_result.gl_pathc; ++i)
+        files.push_back(glob_result.gl_pathv[i]);
+
+    // cleanup
+    globfree(&glob_result);
+#endif
+
+    return files;
 }
 
 std::string geo::util::parent(const std::string& path) {
