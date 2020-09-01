@@ -1854,25 +1854,33 @@ public:
 	 * \param ro The row buffer.
 	 */
 	void getTile(T* tile, int col, int row, int width, int height, int cb = 0, int rb = 0) {
-		int _cols = props().cols();	// Use size_t to avoid overflows on large rasters.
-		int _rows = props().rows();
+		size_t cols = props().cols();	// Use size_t to avoid overflows on large rasters.
+		size_t rows = props().rows();
 		T nodata = props().nodata();
-		if(col + width < 0 || row + height < 0 || col >= _cols || row >= _rows) {
+		if(col + width < 0 || row + height < 0 || col >= (int) cols || row >= (int) rows) {
 			g_warn("Col/row out of bands.");
 			return;
 		}
-		size_t cols = _cols;
-		size_t rows = _rows;
-		if(cb < 0) cb = -cb;		// Set buffers positive.
+		// Set buffers positive.
+		if(cb < 0) cb = -cb;
 		if(rb < 0) rb = -rb;
-		int c = col - cb;			// Start col/row is input minus the buffer.
+
+		// Start col/row is desired col/row minus the buffer.
+		int c = col - cb;
 		int r = row - rb;
-		int w = width + cb * 2;		// Preliminary tile width with buffers.
+
+		// Preliminary tile width with buffers.
+		int w = width + cb * 2;
 		int h = height + rb * 2;
-		const int tw = w;			// Tile width for writing.
 
-		std::vector<T> buf(w);
+		// Tile width for writing (w may be modified).
+		const int tw = w;
 
+		// A buffer for reading.
+		std::vector<T> buf(tw);
+
+		// If the source col/row is less than zero, decrease the width/height,
+		// adjust the buffer and set source col/row to zero.
 		if(c < 0) {
 			w += c;
 			cb -= cb + c;
@@ -1887,6 +1895,9 @@ public:
 		} else {
 			rb = 0;
 		}
+
+		// If the width/height + col/row is larger than the number of
+		// cols or rows in the raster, limit the width/height.
 		if((size_t) c + w > cols) // Casting to prevent overflow.
 			w = cols - c;
 		if((size_t) r + h > rows)
@@ -1895,10 +1906,10 @@ public:
 		// Fill the buffer with nodata for empty rows/ends.
 		std::fill(buf.begin(), buf.end(), nodata);
 
-		int endr = geo::min((size_t) r + h, rows);
-		for(int rr = 0; r < endr; ++rr, ++r) {
-			std::memcpy(buf.data() + cb, m_data + (size_t) r * (size_t) cols + (size_t) c, w * sizeof(T)); // Casting to prevent overflow on large rasters.
-			std::memcpy(tile + (rr + rb) * tw, buf.data(), w * sizeof(T));
+		size_t endr = geo::min((size_t) r + h, rows);
+		for(size_t rr = 0; r < endr; ++rr, ++r) {
+			std::memcpy(buf.data() + cb, m_data + ((size_t) r * cols + c), w * sizeof(T));
+			std::memcpy(tile + (rr + rb) * tw, buf.data(), tw * sizeof(T));
 		}
 	}
 
@@ -1990,7 +2001,7 @@ public:
 		size_t cols = props().cols();
 		size_t rows = props().rows();
 		std::vector<T> buf(cols);
-		std::fill(buf.begin(), buf.end(), (T) value);
+		std::fill(buf.begin(), buf.end(), (T) 0);
 		for(size_t idx = 0; idx < rows * cols; idx += cols)
 			std::memcpy(m_data + idx, buf.data(), (size_t) cols * (size_t) sizeof(T));
 		m_dirty = true;
@@ -2038,7 +2049,7 @@ public:
 		if(col < 0 || row < 0 || col >= m_props.cols() || row >= m_props.rows())
 			g_argerr("Col or row out of bounds.");
 		size_t idx = (size_t) row * (size_t) m_props.cols() + (size_t) col;
-		m_data[idx] =(T) value;
+		m_data[idx] = static_cast<T>(value);
 		m_dirty = true;
 	}
 
@@ -3071,6 +3082,8 @@ public:
 		// It's faster to work on a band-interleaved raster.
 		if(props().interleave() == Interleave::BIP)
 			remap(Interleave::BIL);
+
+		flush();
 
 		pc->monitor = pc->monitor != nullptr ? pc->monitor : getDefaultMonitor();
 
