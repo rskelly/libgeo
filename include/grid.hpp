@@ -1906,7 +1906,7 @@ public:
 		// Fill the buffer with nodata for empty rows/ends.
 		std::fill(buf.begin(), buf.end(), nodata);
 
-		size_t endr = geo::min((size_t) r + h, rows);
+		int endr = geo::min((size_t) r + h, rows);
 		for(size_t rr = 0; r < endr; ++rr, ++r) {
 			std::memcpy(buf.data() + cb, m_data + ((size_t) r * cols + c), w * sizeof(T));
 			std::memcpy(tile + (rr + rb) * tw, buf.data(), tw * sizeof(T));
@@ -2001,7 +2001,7 @@ public:
 		size_t cols = props().cols();
 		size_t rows = props().rows();
 		std::vector<T> buf(cols);
-		std::fill(buf.begin(), buf.end(), (T) 0);
+		std::fill(buf.begin(), buf.end(), (T) value);
 		for(size_t idx = 0; idx < rows * cols; idx += cols)
 			std::memcpy(m_data + idx, buf.data(), (size_t) cols * (size_t) sizeof(T));
 		m_dirty = true;
