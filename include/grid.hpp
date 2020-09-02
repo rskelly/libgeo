@@ -2414,7 +2414,8 @@ public:
 		if(!monitor)
 			monitor = getDefaultMonitor();
 
-		const GridProps& gp = props();
+		const GridProps& ogp = props();
+		const GridProps& sgp = smoothed.props();
 
 		monitor->status(0.0f, "Smoothing...");
 
@@ -2434,10 +2435,13 @@ public:
 		if(monitor->canceled())
 			return;
 
-		T k, v, nodata = gp.nodata();
+		T k, v;
+		T snodata = sgp.nodata();
+		T onodata = ogp.nodata();
+
 		std::vector<T> buf(size * size);
-		int gc = gp.cols();
-		int gr = gp.rows();
+		int gc = ogp.cols();
+		int gr = ogp.rows();
 		// TODO: This is much faster when done in 2 passes.
 		int statusStep = std::max(1, gr / 25);
 		for(int r = 0; r < gr; ++r) {
@@ -2448,11 +2452,11 @@ public:
 			for(int c = 0; c < gc; ++c) {
 				T n, s = 0;
 				T norm = 0;
-				std::fill(buf.begin(), buf.end(), nodata);
+				std::fill(buf.begin(), buf.end(), onodata);
 				getTile(buf.data(), c - size / 2, r - size / 2, size, size);
 				for(int rr = 0; rr < size; ++rr) {
 					for(int cc = 0; cc < size; ++cc) {
-						if((v = buf[rr * size + cc]) != nodata) {
+						if((v = buf[rr * size + cc]) != onodata) {
 							s += v * (n = weights[rr * size + cc]);
 							norm += n;
 						}
@@ -2461,7 +2465,7 @@ public:
 				if(norm > 0) {
 					smoothed.set(c, r, s / norm);
 				} else {
-					smoothed.set(c, r, nodata);
+					smoothed.set(c, r, snodata);
 				}
 			}
 		}
