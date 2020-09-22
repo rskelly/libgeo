@@ -2120,7 +2120,8 @@ public:
 	 * \param dstCol The destination column to write to.
 	 * \param dstRow The destination row to write to.
 	 */
-	void writeTo(Band<T>& grd,
+	template <class U>
+	void writeTo(Band<U>& grd,
 			int cols = 0, int rows = 0,
 			int srcCol = 0, int srcRow = 0,
 			int dstCol = 0, int dstRow = 0) {
@@ -2134,7 +2135,7 @@ public:
 
 		for(int r = srcRow; r < srcRow + rows; ++r) {
 			for(int c = srcCol; c < srcCol + cols; ++c)
-				grd.set(c - srcCol + dstCol, r - srcRow + dstRow, get(c, r));
+				grd.set(c - srcCol + dstCol, r - srcRow + dstRow, (U) get(c, r));
 		}
 
 	}
@@ -3307,9 +3308,7 @@ template <class T, class U>
 class G_DLL_EXPORT TargetFillOperator : public FillOperator<T, U> {
 private:
 	Band<T>* m_src;		///<! The source grid.
-	int m_srcBand;		///<! The source band.
 	Band<U>* m_dst;		///<! The destination grid.
-	int m_dstBand;		///<! The destination band.
 	T m_target;			///<! The target value.
 	U m_fill;			///<! The fill value.
 public:
@@ -3318,30 +3317,29 @@ public:
 	 * \brief Construct a TargetFillOperator to fill a different raster.
 	 *
 	 * \param src The source raster.
-	 * \param dst The destination raster.
 	 * \param target The target value.
 	 * \param fill The fill value.
 	 * \param band The band to fill.
 	 */
-	TargetFillOperator(Band<T>* src, int srcBand, Band<U>* dst, int dstBand, T target, U fill) :
-		m_src(src), m_srcBand(srcBand),
-		m_dst(dst), m_dstBand(dstBand),
+	TargetFillOperator(Band<T>* src, Band<U>* dst, T target = 0, U fill = 0) :
+		m_src(src), m_dst(dst),
 		m_target(target), m_fill(fill) {
 	}
 
-	/**
-	 * \brief Construct a TargetFillOperator. To fill the same raster.
-	 *
-	 * \param grd The source and destination raster.
-	 * \param srcBand The source band.
-	 * \param dstBand The destination band.
-	 * \param target The target value.
-	 * \param fill The fill value.
-	 */
-	TargetFillOperator(Band<T>* grd, int srcBand, int dstBand, T target, U fill) :
-		m_src(grd), m_srcBand(srcBand),
-		m_dst(grd), m_dstBand(dstBand),
-		m_target(target), m_fill(fill) {
+	void setTarget(T target) {
+		m_target = target;
+	}
+
+	T target() const {
+		return m_target;
+	}
+
+	void setFill(U fill) {
+		m_fill = fill;
+	}
+
+	U fill() const {
+		return m_fill;
 	}
 
 	/**
