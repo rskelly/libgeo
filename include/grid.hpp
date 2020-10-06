@@ -2329,7 +2329,7 @@ public:
 
 			size_t idx = (size_t) row * cols + col;
 
-			if (!visited[idx] && op.shouldFill(col, row)) {
+			if (!visited.at(idx) && op.shouldFill(col, row)) {
 
 				minc = geo::min(col, minc);
 				maxc = geo::max(col, maxc);
@@ -2337,55 +2337,55 @@ public:
 				maxr = geo::max(row, maxr);
 				++area;
 				op.fill(col, row);
-				visited[idx] = true;
+				visited.at(idx) = true;
 
 				if (row > 0)
-					q.push(Cell(col, row - 1));
+					q.emplace(col, row - 1);
 				if (row < rows - 1)
-					q.push(Cell(col, row + 1));
+					q.emplace(col, row + 1);
 
 				int c;
 				for (c = col - 1; c >= 0; --c) {
 					idx = (size_t) row * cols + c;
-					if (!visited[idx] && op.shouldFill(c, row)) {
+					if (!visited.at(idx) && op.shouldFill(c, row)) {
 						minc = geo::min(c, minc);
 						++area;
 						op.fill(c, row);
-						visited[idx] = true;
+						visited.at(idx) = true;
 						if (row > 0)
-							q.push(Cell(c, row - 1));
+							q.emplace(c, row - 1);
 						if (row < rows - 1)
-							q.push(Cell(c, row + 1));
+							q.emplace(c, row + 1);
 					} else {
 						break;
 					}
 				}
 				if(d8) {
 					if (row > 0)
-						q.push(Cell(c, row - 1));
+						q.emplace(c, row - 1);
 					if (row < rows - 1)
-						q.push(Cell(c, row + 1));
+						q.emplace(c, row + 1);
 				}
 				for (c = col + 1; c < cols; ++c) {
 					idx = (size_t) row * cols + c;
-					if (!visited[idx] && op.shouldFill(c, row)) {
+					if (!visited.at(idx) && op.shouldFill(c, row)) {
 						maxc = geo::max(c, maxc);
 						++area;
 						op.fill(c, row);
-						visited[idx] = true;
+						visited.at(idx) = true;
 						if (row > 0)
-							q.push(Cell(c, row - 1));
+							q.emplace(c, row - 1);
 						if (row < rows - 1)
-							q.push(Cell(c, row + 1));
+							q.emplace(c, row + 1);
 					} else {
 						break;
 					}
 				}
 				if(d8) {
 					if (row > 0)
-						q.push(Cell(c, row - 1));
+						q.emplace(c, row - 1);
 					if (row < rows - 1)
-						q.push(Cell(c, row + 1));
+						q.emplace(c, row + 1);
 				}
 			}
 		}
@@ -3368,8 +3368,10 @@ public:
 	 * \return True if the given cell should be filled.
 	 */
 	bool shouldFill(int col, int row) const {
-		if(m_src->props().hasCell(col, row))
-			return m_src->get(col, row) == m_target;
+		if(m_src->props().hasCell(col, row)) {
+			T v = m_src->get(col, row);
+			return v == m_target;
+		}
 		return false;
 	}
 
