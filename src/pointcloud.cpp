@@ -18,8 +18,6 @@
 #include <math.h>
 #include <string.h>
 
-#include <liblas/liblas.hpp>
-
 #include "util.hpp"
 #include "grid.hpp"
 #include "pointcloud.hpp"
@@ -42,8 +40,7 @@ PCFile::PCFile(const std::string& filename, double x, double y, double size, dou
 	m_pointCount(0),
 	m_inited(false),
 	m_index(0),
-	m_instr(nullptr),
-	m_reader(nullptr) {
+	m_source(nullptr) {
 
 	m_filenames.push_back(filename);
 }
@@ -56,8 +53,7 @@ PCFile::PCFile(const std::vector<std::string>& filenames, double x, double y, do
 	m_pointCount(0),
 	m_inited(false),
 	m_index(0),
-	m_instr(nullptr),
-	m_reader(nullptr),
+	m_source(nullptr),
 	m_filenames(filenames) {
 }
 
@@ -109,32 +105,31 @@ void PCFile::init(bool useHeader) {
 	if(m_inited)
 		return;
 	m_pointCount = 0;
+
 	liblas::ReaderFactory f;
 	for(const std::string& filename : m_filenames) {
 		g_debug("Initializing: " << filename);
-		std::ifstream str(filename, std::ios::in | std::ios::binary);
-		liblas::Reader reader = f.CreateWithStream(str);
+		PDALSource src(filename);
 		if(useHeader) {
-			const liblas::Header& hdr = reader.GetHeader();
-			double minx = hdr.GetMinX();
-			double miny = hdr.GetMinY();
-			double minz = hdr.GetMinZ();
-			double maxx = hdr.GetMaxX();
-			double maxy = hdr.GetMaxY();
-			double maxz = hdr.GetMaxZ();
+			double minx = src.hdr.minX();
+			double miny = src.hdr.minY();
+			double minz = src.hdr.minZ();
+			double maxx = src.hdr.maxX();
+			double maxy = src.hdr.maxY();
+			double maxz = src.hdr.maxZ();
 			if(minx < m_fileBounds[0]) m_fileBounds[0] = minx;
 			if(miny < m_fileBounds[1]) m_fileBounds[1] = miny;
 			if(maxx > m_fileBounds[2]) m_fileBounds[2] = maxx;
 			if(maxy > m_fileBounds[3]) m_fileBounds[3] = maxy;
 			if(minz < m_fileBounds[4]) m_fileBounds[4] = minz;
 			if(maxz > m_fileBounds[5]) m_fileBounds[5] = maxz;
-			m_pointCount += hdr.GetPointRecordsCount();
+			m_pointCount += src.hdr.pointCount();
 		} else {
-			while(reader.ReadNextPoint()) {
-				const liblas::Point& pt = reader.GetPoint();
-				double x = pt.GetX();
-				double y = pt.GetY();
-				double z = pt.GetZ();
+			using namespace pdal::Dimension;
+			for (pdal::PointId idx = 0; idx < src.view->size(); ++idx) {
+				double x = src.view->getFieldAs<double>(Id::X, idx);
+				double y = src.view->getFieldAs<double>(Id::Y, idx);
+				double z = src.view->getFieldAs<double>(Id::Z, idx);
 				if(x < m_fileBounds[0]) m_fileBounds[0] = x;
 				if(y < m_fileBounds[1]) m_fileBounds[1] = y;
 				if(x > m_fileBounds[2]) m_fileBounds[2] = x;
@@ -160,8 +155,7 @@ bool PCFile::intersects(double* b) const {
 }
 
 bool PCFile::next(geo::pc::Point& pt) {
-	if((isReaderOpen() && m_reader->ReadNextPoint()) || openReader()) {
-		pt.setPoint(m_reader->GetPoint());
+	if((isReaderOpen() && m_source->nextPoint(pt)) || openReader()) {
 		return true;
 	}
 	return false;
@@ -170,28 +164,22 @@ bool PCFile::next(geo::pc::Point& pt) {
 bool PCFile::openReader() {
 	closeReader();
 	if(m_index < m_filenames.size()) {
-		m_instr = new std::ifstream(m_filenames[m_index], std::ios::binary | std::ios::in);
-		liblas::ReaderFactory rf;
-		m_reader = new liblas::Reader(rf.CreateWithStream(*m_instr));
+		m_source = new PDALSource(m_filenames[m_index]);
 		++m_index;
-		return m_reader->ReadNextPoint();
+		return true;
 	}
 	return false;
 }
 
 void PCFile::closeReader() {
-	if(m_reader) {
-		delete m_reader;
-		m_reader = nullptr;
-	}
-	if(m_instr) {
-		delete m_instr;
-		m_instr = nullptr;
+	if(m_source) {
+		delete m_source;
+		m_source = nullptr;
 	}
 }
 
 bool PCFile::isReaderOpen() const {
-	return m_reader != nullptr;
+	return m_source != nullptr;
 }
 
 bool PCFile::containsBuffered(double x, double y) const {
@@ -625,6 +613,10 @@ int geo::pc::Point::classId() const {
 	return m_cls;
 }
 
+void geo::pc::Point::classId(int cls) {
+	m_cls = cls;
+}
+
 double geo::pc::Point::operator[](int idx) const {
 	if(idx % 2 == 0) {
 		return m_x;
@@ -665,12 +657,24 @@ double geo::pc::Point::intensity() const {
 	return m_intensity;
 }
 
+void geo::pc::Point::intensity(double intensity) {
+	m_intensity = intensity;
+}
+
 double geo::pc::Point::scanAngle() const {
 	return m_angle;
 }
 
+void geo::pc::Point::scanAngle(double angle) {
+	m_angle = angle;
+}
+
 bool geo::pc::Point::isEdge() const {
 	return m_edge == 1;
+}
+
+void geo::pc::Point::isEdge(bool isEdge) {
+	m_edge = isEdge;
 }
 
 bool geo::pc::Point::isLast() const {
@@ -685,8 +689,16 @@ int geo::pc::Point::returnNum() const {
 	return m_returnNum;
 }
 
+void geo::pc::Point::returnNum(int returnNum) {
+	m_returnNum = returnNum;
+}
+
 int geo::pc::Point::numReturns() const {
 	return m_numReturns;
+}
+
+void geo::pc::Point::numReturns(int numReturns) {
+	m_numReturns = numReturns;
 }
 
 bool geo::pc::Point::operator<(const Point& other) const {

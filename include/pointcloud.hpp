@@ -19,6 +19,12 @@
 #include <cmath>
 #include <cstdint>
 
+#include <pdal/PointTable.hpp>
+#include <pdal/PointView.hpp>
+#include <pdal/io/LasReader.hpp>
+#include <pdal/io/LasHeader.hpp>
+#include <pdal/Options.hpp>
+
 #include <liblas/liblas.hpp>
 
 #include "util.hpp"
@@ -31,7 +37,217 @@ using namespace geo::ds;
 namespace geo {
 namespace pc {
 
-class Point;
+/**
+ * Represents a 3D point that can be used in a tree structure.
+ * can be instantiated with raw coordinates or with a
+ * liblas::Point instance.
+ */
+class Point {
+private:
+	double m_x; 			///< The x-coordinate.
+	double m_y; 			///< The y-coordinate.
+	double m_z; 			///< The z-coordinate.
+	short m_intensity;
+	char m_angle;
+	char m_cls;
+	char m_edge;
+	char m_numReturns;
+	char m_returnNum;
+
+public:
+
+	/**
+	 * Construct a Point using a liblas::Point. Will read the 3D
+	 * coordinates and save a pointer to a copy of the object.
+	 * The copy is deleted on destruction.
+	 * \param pt A liblas::Point object.
+	 */
+	Point(const liblas::Point& pt);
+
+	/**
+	 * Construct a point using the three raw coordinates.
+	 * \param x The x-coordinate.
+	 * \param y The y-coordinate.
+	 * \param z The z-coordinate.
+	 */
+	Point(double x, double y, double z);
+
+	/**
+	 * Construct a point using the three raw coordinates.
+	 * \param x The x-coordinate.
+	 * \param y The y-coordinate.
+	 * \param z The z-coordinate.
+	 */
+	Point(double x, double y, double z, double intensity, double angle,
+			int cls, int returnNum, int numReturns, bool isEdge);
+
+	Point(const geo::pc::Point& pt);
+
+	/**
+	 * Construct an empty point.
+	 */
+	Point();
+
+	/**
+	 * Populate this point with values from a liblas point.
+	 */
+	void setPoint(const liblas::Point& pt);
+
+	/**
+	 * Returns true if the point is a last return.
+	 * \return True if the point is a last return.
+	 */
+	bool isLast() const;
+
+	/**
+	 * Returns true if the point is a first return.
+	 * \return True if the point is a first return.
+	 */
+	bool isFirst() const;
+
+
+	/**
+	 * Returns the class ID of this point. If no liblas::Point
+	 * or other was provided, this returns zero.
+	 */
+	int classId() const;
+
+	void classId(int);
+
+	/**
+	 * Returns the 2D coordinate for the given index.
+	 * The modulus of the index is taken; if index % 2 == 0,
+	 * then x is returned, otherwise y.
+	 * \param idx The index.
+	 */
+	double operator[](int idx) const;
+
+	/**
+	 * Return the x-coordinate.
+	 * \return The x-coordinate.
+	 */
+	double x() const;
+
+	/**
+	 * Return the y-coordinate.
+	 * \return The y-coordinate.
+	 */
+	double y() const;
+
+	/**
+	 * Return the z-coordinate.
+	 * \return The z-coordinate.
+	 */
+	double z() const;
+
+	void x(double x);
+	void y(double y);
+	void z(double z);
+
+	/**
+	 * Return the intensity.
+	 * \return The intensity.
+	 */
+	double intensity() const;
+
+	void intensity(double);
+
+	/**
+	 * Return the scan angle.
+	 * \return The scane angle.
+	 */
+	double scanAngle() const;
+
+	void scanAngle(double);
+
+	/**
+	 * Return the return number.
+	 * \return The return number.
+	 */
+	int returnNum() const;
+
+	void returnNum(int);
+
+	int numReturns() const;
+
+	void numReturns(int);
+
+	/**
+	 * Return true if the point is marked as a flight line edge.
+	 * \return True if the point is marked as a flight line edge.
+	 */
+	bool isEdge() const;
+
+	void isEdge(bool);
+
+	/**
+	 * This is the getter for values used in competition.
+	 * The source of the value may be changed.
+	 */
+	double value() const;
+
+	/**
+	 * Intended to be used for z-ordering (space-filling) to facilitate
+	 * the construction of quad trees.
+	 */
+	bool operator<(const Point& other) const;
+
+	/**
+	 * Destroy the point.
+	 */
+	~Point();
+
+};
+
+class PDALSource {
+private:
+	unsigned long int idx;
+	size_t size;
+
+public:
+	pdal::PointTable table;
+	pdal::LasReader reader;
+	pdal::PointViewSet viewset;
+	pdal::PointViewPtr view;
+	pdal::Dimension::IdList dims;
+	pdal::LasHeader hdr;
+
+	PDALSource(const std::string& filename) :
+		idx(0) {
+		pdal::Options opts;
+		opts.add(pdal::Option("filename", filename));
+		reader.setOptions(opts);
+		reader.prepare(table);
+		viewset = reader.execute(table);
+		view = *viewset.begin();
+		dims = view->dims();
+		hdr = reader.header();
+		size = hdr.pointCount();
+	}
+
+	void reset() {
+		idx = 0;
+	}
+
+	bool nextPoint(Point& pt) {
+		using namespace pdal::Dimension;
+		if(idx < size) {
+			pt.x(view->getFieldAs<double>(Id::X, idx));
+			pt.y(view->getFieldAs<double>(Id::Y, idx));
+			pt.z(view->getFieldAs<double>(Id::Z, idx));
+			pt.intensity(view->getFieldAs<double>(Id::Intensity, idx));
+			pt.scanAngle(view->getFieldAs<double>(Id::ScanAngleRank, idx));
+			pt.classId(view->getFieldAs<int>(Id::Classification, idx));
+			pt.returnNum(view->getFieldAs<int>(Id::ReturnNumber, idx));
+			pt.numReturns(view->getFieldAs<int>(Id::NumberOfReturns, idx));
+			pt.isEdge(view->getFieldAs<bool>(Id::EdgeOfFlightLine, idx));
+			++idx;
+			return true;
+		}
+		return false;
+	}
+
+};
 
 /**
  * A class representing a source point cloud file. Maintains
@@ -50,8 +266,7 @@ private:
 	bool m_inited;                          ///< True if the PCFile has already been initialized.
 
 	size_t m_index;
-	std::ifstream* m_instr;
-	liblas::Reader* m_reader;
+	PDALSource* m_source;
 
 	std::vector<std::string> m_filenames;	///< The list of filenames of constituent files.
 
@@ -402,156 +617,6 @@ public:
 	 * Destroy the Tiler.
 	 */
 	~Tiler();
-
-};
-
-/**
- * Represents a 3D point that can be used in a tree structure.
- * can be instantiated with raw coordinates or with a
- * liblas::Point instance.
- */
-class Point {
-private:
-	double m_x; 			///< The x-coordinate.
-	double m_y; 			///< The y-coordinate.
-	double m_z; 			///< The z-coordinate.
-	short m_intensity;
-	char m_angle;
-	char m_cls;
-	char m_edge;
-	char m_numReturns;
-	char m_returnNum;
-
-public:
-
-	/**
-	 * Construct a Point using a liblas::Point. Will read the 3D
-	 * coordinates and save a pointer to a copy of the object.
-	 * The copy is deleted on destruction.
-	 * \param pt A liblas::Point object.
-	 */
-	Point(const liblas::Point& pt);
-
-	/**
-	 * Construct a point using the three raw coordinates.
-	 * \param x The x-coordinate.
-	 * \param y The y-coordinate.
-	 * \param z The z-coordinate.
-	 */
-	Point(double x, double y, double z);
-
-	/**
-	 * Construct a point using the three raw coordinates.
-	 * \param x The x-coordinate.
-	 * \param y The y-coordinate.
-	 * \param z The z-coordinate.
-	 */
-	Point(double x, double y, double z, double intensity, double angle,
-			int cls, int returnNum, int numReturns, bool isEdge);
-
-	Point(const geo::pc::Point& pt);
-
-	/**
-	 * Construct an empty point.
-	 */
-	Point();
-
-	/**
-	 * Populate this point with values from a liblas point.
-	 */
-	void setPoint(const liblas::Point& pt);
-
-	/**
-	 * Returns true if the point is a last return.
-	 * \return True if the point is a last return.
-	 */
-	bool isLast() const;
-
-	/**
-	 * Returns true if the point is a first return.
-	 * \return True if the point is a first return.
-	 */
-	bool isFirst() const;
-
-
-	/**
-	 * Returns the class ID of this point. If no liblas::Point
-	 * or other was provided, this returns zero.
-	 */
-	int classId() const;
-
-	/**
-	 * Returns the 2D coordinate for the given index.
-	 * The modulus of the index is taken; if index % 2 == 0,
-	 * then x is returned, otherwise y.
-	 * \param idx The index.
-	 */
-	double operator[](int idx) const;
-
-	/**
-	 * Return the x-coordinate.
-	 * \return The x-coordinate.
-	 */
-	double x() const;
-
-	/**
-	 * Return the y-coordinate.
-	 * \return The y-coordinate.
-	 */
-	double y() const;
-
-	/**
-	 * Return the z-coordinate.
-	 * \return The z-coordinate.
-	 */
-	double z() const;
-
-	void x(double x);
-	void y(double y);
-	void z(double z);
-
-	/**
-	 * Return the intensity.
-	 * \return The intensity.
-	 */
-	double intensity() const;
-
-	/**
-	 * Return the scan angle.
-	 * \return The scane angle.
-	 */
-	double scanAngle() const;
-
-	/**
-	 * Return the return number.
-	 * \return The return number.
-	 */
-	int returnNum() const;
-
-	int numReturns() const;
-
-	/**
-	 * Return true if the point is marked as a flight line edge.
-	 * \return True if the point is marked as a flight line edge.
-	 */
-	bool isEdge() const;
-
-	/**
-	 * This is the getter for values used in competition.
-	 * The source of the value may be changed.
-	 */
-	double value() const;
-
-	/**
-	 * Intended to be used for z-ordering (space-filling) to facilitate
-	 * the construction of quad trees.
-	 */
-	bool operator<(const Point& other) const;
-
-	/**
-	 * Destroy the point.
-	 */
-	~Point();
 
 };
 

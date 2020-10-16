@@ -62,6 +62,7 @@ endif()
 set (THREADS_PREFER_PTHREAD_FLAG ON)
 
 find_package (Threads REQUIRED)
+find_package (PDAL REQUIRED) 
 
 find_library (JSONCPP_LIBRARY jsoncpp)
 #find_library (CRYPTO_LIBRARY crypto libeay32 PATHS ${GIS_LIBRARYDIR})
@@ -81,6 +82,7 @@ include_directories(
 	${GDAL_INCLUDE_DIR}
 	${LIBLAS_INCLUDE_DIRS}
 	${CGAL_INCLUDE_DIRS}
+	${PDAL_INCLUDE_DIRS}
 	${Boost_INCLUDE_DIRS}
 )
 	 
@@ -90,6 +92,7 @@ link_directories(./build/lib ./build/bin
 	${PDAL_LIBRARY_DIRS}
 	${GEOS_INCLUDEDIR}
 	${LIBLAS_LIBDIR}
+	${PDAL_LIBRARY_DIRS}
 	${GMP_LIBDIR}
 	${Boost_LIBRARY_DIRS}
 	${CGAL_DIR}
@@ -153,7 +156,7 @@ if (${WITH_PC})
 	set_target_properties (geopcobj PROPERTIES POSITION_INDEPENDENT_CODE ON)
 	target_compile_definitions (geopcobj PRIVATE DLL_EXPORTS=1)
 	add_library (geopc SHARED $<TARGET_OBJECTS:geopcobj>)
-	target_link_libraries (geopc geoutil geogrid ${CGAL_LIBS} ${ANN_LIB} ${LIBLAS_LIBRARY} 
+	target_link_libraries (geopc geoutil geogrid ${CGAL_LIBS} ${ANN_LIB} ${LIBLAS_LIBRARY} ${PDAL_LIBRARIES} 
 		${GMP_LIBRARY} ${Boost_LIBRARIES})
 	set (PC_LIB geopc)
 endif()
