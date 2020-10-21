@@ -272,8 +272,6 @@ private:
 
 	bool openReader();
 
-	void closeReader();
-
 	bool isReaderOpen() const;
 
 public:
@@ -295,6 +293,11 @@ public:
 	PCFile(const std::vector<std::string>& filenames, double x = 0, double y = 0, double size = 0, double buffer = 0);
 
 	void resize(double x, double y, double size, double buffer);
+
+	/**
+	 * Close the reader. (Saves memory.)
+	 */
+	void closeReader();
 
 	/**
 	 * Get the minimum x-coordinate.
