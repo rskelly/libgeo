@@ -155,7 +155,7 @@ bool PCFile::intersects(double* b) const {
 }
 
 bool PCFile::next(geo::pc::Point& pt) {
-	if((isReaderOpen() && m_source->nextPoint(pt)) || openReader()) {
+	if((isReaderOpen() || openReader()) && m_source->nextPoint(pt)) {
 		return true;
 	}
 	return false;
