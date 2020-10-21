@@ -169,7 +169,8 @@ Rasterizer::Rasterizer(const std::vector<std::string> filenames) :
 	m_thin(0),
 	m_nodata(-9999),
 	m_prefilter(false),
-	m_merge(true) {
+	m_merge(true),
+	m_lruSize(1000) {
 
 	for(size_t i = 0; i < 4; ++i)
 		m_bounds[i] = std::nan("");
@@ -231,6 +232,10 @@ void Rasterizer::setMerge(bool merge) {
 	m_merge = merge;
 }
 
+void Rasterizer::setLRUSize(int lruSize) {
+	m_lruSize = lruSize;
+}
+
 bool Rasterizer::merge() const {
 	return m_merge;
 }
@@ -269,6 +274,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 	// Calculate the overall boundaries of the point cloud.
 	g_trace("Checking file bounds");
 	std::vector<std::string> filenames;
+	size_t count = 0;
 	double bounds[4] = {geo::maxvalue<double>(), geo::maxvalue<double>(), geo::minvalue<double>(), geo::minvalue<double>()};
 	{
 		double fBounds[6];
@@ -277,12 +283,15 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 				filenames.push_back(fn);
 			f.init(useHeader);
 			f.fileBounds(fBounds);
+			count += f.pointCount();
 			if(fBounds[0] < bounds[0]) bounds[0] = fBounds[0];
 			if(fBounds[1] < bounds[1]) bounds[1] = fBounds[1];
 			if(fBounds[2] > bounds[2]) bounds[2] = fBounds[2];
 			if(fBounds[3] > bounds[3]) bounds[3] = fBounds[3];
 		}
 	}
+
+	g_trace(count << " points total.");
 
 	// "Fix" the bounds so they align with the resolution, and are oriented correctly.
 	// Constrain to the given bounds if set.
@@ -292,7 +301,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 
 	// A file-backed tree stores the points.
 	mqtree<geo::pc::Point> tree(std::min(bounds[0], bounds[2]), std::min(bounds[1], bounds[3]),
-			std::max(bounds[0], bounds[2]), std::max(bounds[1], bounds[3]), 100);
+			std::max(bounds[0], bounds[2]), std::max(bounds[1], bounds[3]), 100, m_lruSize);
 
 	// Compute the grid dimensions.
 	int cols = (int) std::ceil((bounds[2] - bounds[0]) / resX);

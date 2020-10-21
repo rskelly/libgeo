@@ -870,6 +870,7 @@ private:
 	double m_bounds[4];					///<! If bounds are given, this contains them. BLX, BLY, TRX, TRY.
 	bool m_prefilter;					///<! If true, points are filtered before adding to tree.
 	bool m_merge;						///<! If true, bands are merged.
+	int m_lruSize;
 
 	void finalize(int row, double radius,
 			std::unordered_map<size_t, std::vector<geo::pc::Point> >& cells,
@@ -957,6 +958,13 @@ public:
 	 * \param merge True to merge files.
 	 */
 	G_DLL_EXPORT void setMerge(bool merge);
+
+	/**
+	 * \brief Set the LRU cache node size.
+	 *
+	 * \param lruSize The node size.
+	 */
+	G_DLL_EXPORT void setLRUSize(int lruSize);
 
 	/**
 	 * \brief Return true if the bands are to be merged.
