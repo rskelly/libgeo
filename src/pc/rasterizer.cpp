@@ -353,6 +353,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 						g_debug(pts << "pts");
 				}
 			}
+			f.closeReader();
 		}
 	}
 	g_trace(" " << tree.size() << " points added to tree.");
