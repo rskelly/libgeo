@@ -203,6 +203,7 @@ class PDALSource {
 private:
 	unsigned long int idx;
 	size_t size;
+	bool loaded;
 
 public:
 	pdal::PointTable table;
@@ -213,16 +214,23 @@ public:
 	pdal::LasHeader hdr;
 
 	PDALSource(const std::string& filename) :
-		idx(0) {
+		idx(0),
+		loaded(false) {
 		pdal::Options opts;
 		opts.add(pdal::Option("filename", filename));
 		reader.setOptions(opts);
 		reader.prepare(table);
-		viewset = reader.execute(table);
-		view = *viewset.begin();
-		dims = view->dims();
 		hdr = reader.header();
 		size = hdr.pointCount();
+	}
+
+	void load() {
+		if(!loaded) {
+			viewset = reader.execute(table);
+			view = *viewset.begin();
+			dims = view->dims();
+			loaded = true;
+		}
 	}
 
 	void reset() {
@@ -230,6 +238,8 @@ public:
 	}
 
 	bool nextPoint(Point& pt) {
+		if(!loaded)
+			load();
 		using namespace pdal::Dimension;
 		if(idx < size) {
 			pt.x(view->getFieldAs<double>(Id::X, idx));
