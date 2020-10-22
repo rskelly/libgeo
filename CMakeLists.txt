@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.12)
 
+option (WITH_CGAL "Include CGAL. Valgrind will puke with CGAL (rounding) so turn it off to use it." ON)
+
 project (libgeo)
 
 enable_language(C)
@@ -46,23 +48,27 @@ if(${WIN32})
 else()
 	message (STATUS "Building for Linux")
 	set (CMAKE_CXX_COMPILER_LAUNCHER ccache)
-	set (CMAKE_CXX_FLAGS "-Wall -Wextra -Wno-unknown-pragmas -fopenmp -D_GLIBCXX_PARALLEL")
-	set (CMAKE_CXX_FLAGS_DEBUG "-g -O0")
-	set (CMAKE_CXX_FLAGS_RELEASE "-O3")
+	set (CMAKE_CXX_FLAGS "-Wall -Wextra -Wno-unknown-pragmas -fopenmp -frounding-math -D_GLIBCXX_PARALLEL" CACHE STRING "compile flags" FORCE)
+	set (CMAKE_CXX_FLAGS_DEBUG "-g -O0" CACHE STRING "compile flags" FORCE)
+	set (CMAKE_CXX_FLAGS_RELEASE "-O3" CACHE STRING "compile flags" FORCE)
 	set (FS_LIB stdc++fs) # For filesystem features in c++17.
 	find_package (Eigen3 REQUIRED)
-	find_package (CGAL REQUIRED)
 	find_package (PDAL REQUIRED)
 	find_package (OpenSSL REQUIRED)
 	find_package (GDAL 2 REQUIRED)
 	find_library (LIBLAS_LIBRARY las)
-	set (CGAL_LIBS "CGAL")
+	if (WITH_CGAL)
+		message ("CGAL enabled.")
+		find_package (CGAL REQUIRED)
+		set (CGAL_LIBS "CGAL")
+	else()
+		message ("CGAL disabled.")
+	endif (WITH_CGAL)
 endif()
 
 set (THREADS_PREFER_PTHREAD_FLAG ON)
 
 find_package (Threads REQUIRED)
-find_package (PDAL REQUIRED) 
 
 find_library (JSONCPP_LIBRARY jsoncpp)
 #find_library (CRYPTO_LIBRARY crypto libeay32 PATHS ${GIS_LIBRARYDIR})
@@ -131,7 +137,7 @@ add_library (geogrid SHARED $<TARGET_OBJECTS:geogridobj>)
 set_target_properties (geogrid PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_link_libraries (geogrid geoutil geodb Threads::Threads ${GEOS_LIBRARY} ${GDAL_LIBRARY})
 
-if(${WITH_ANN})
+if (WITH_ANN)
 	message (STATUS "Building ANN...")
 	set (geoannsrc src/geo.cpp ann/src/ANN.cpp ann/src/brute.cpp 
 		ann/src/kd_tree.cpp ann/src/kd_util.cpp 
@@ -145,13 +151,14 @@ if(${WITH_ANN})
 	add_library (geoann SHARED $<TARGET_OBJECTS:geoannobj>)
 	target_link_libraries (geoann geoutil)
 	set (ANN_LIB geoann)
-endif()
+endif (WITH_ANN)
 
-if (${WITH_PC})
+if (WITH_PC)
 	message (STATUS "Building PC...")
 	file(GLOB PC_COMPUTERS src/pc/computers/*.cpp)
 	set (geopcsrc src/geo.cpp src/pointcloud.cpp src/pc/normalizer.cpp src/pc/rasterizer.cpp src/pc/filter.cpp ${PC_COMPUTERS})
 	add_library (geopcobj OBJECT ${geopcsrc})
+	target_compile_definitions (geopcobj PUBLIC DISABLE_CGAL)
 	target_compile_features(geopcobj PUBLIC cxx_std_17)
 	set_target_properties (geopcobj PROPERTIES POSITION_INDEPENDENT_CODE ON)
 	target_compile_definitions (geopcobj PRIVATE DLL_EXPORTS=1)
@@ -159,7 +166,7 @@ if (${WITH_PC})
 	target_link_libraries (geopc geoutil geogrid ${CGAL_LIBS} ${ANN_LIB} ${LIBLAS_LIBRARY} ${PDAL_LIBRARIES} 
 		${GMP_LIBRARY} ${Boost_LIBRARIES})
 	set (PC_LIB geopc)
-endif()
+endif (WITH_PC)
 
 # Applications ##################################################################################################
 

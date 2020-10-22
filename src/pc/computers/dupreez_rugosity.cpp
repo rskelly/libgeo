@@ -5,7 +5,15 @@
  *      Author: rob
  */
 
+
 #include <vector>
+
+#include "pointcloud.hpp"
+#include "pc_computer.hpp"
+
+using namespace geo::pc::compute;
+
+#ifndef DISABLE_CGAL // This is set in cmake to avoid problems with valgrind.
 
 #include <CGAL/Plane_3.h>
 #include <CGAL/linear_least_squares_fitting_3.h>
@@ -15,11 +23,6 @@
 #include <CGAL/convex_hull_2.h>
 #include <CGAL/linear_least_squares_fitting_3.h>
 #include <CGAL/Polygon_2_algorithms.h>
-
-#include "pointcloud.hpp"
-#include "pc_computer.hpp"
-
-using namespace geo::pc::compute;
 
 typedef CGAL::Exact_predicates_inexact_constructions_kernel K;
 typedef CGAL::Projection_traits_xy_3<K> Gt;
@@ -120,6 +123,17 @@ int RugosityComputer::compute(double, double, const std::vector<geo::pc::Point>&
 	}
 	return 1;
 }
+
+#else
+
+
+int RugosityComputer::compute(double, double, const std::vector<geo::pc::Point>&, const std::vector<geo::pc::Point>&, double, std::vector<double>&) {
+	g_runerr("The RugosityComputer is unimplemented because CGAL is disabled.");
+	return 1;
+}
+
+
+#endif
 
 int RugosityComputer::bandCount() const {
 	return 1;
