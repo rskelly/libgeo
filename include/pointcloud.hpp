@@ -233,6 +233,13 @@ public:
 		}
 	}
 
+	void unload() {
+		if(loaded) {
+			view = nullptr;
+			viewset.clear();
+			loaded = false;
+		}
+	}
 	void reset() {
 		idx = 0;
 	}
@@ -254,6 +261,7 @@ public:
 			++idx;
 			return true;
 		}
+		unload();
 		return false;
 	}
 
