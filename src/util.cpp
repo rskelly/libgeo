@@ -361,6 +361,8 @@ std::string geo::util::tmpfile(const std::string& prefix, const std::string& dir
 }
 
 bool geo::util::makedir(const std::string& path) {
+	if(isdir(path))
+		return true;
 	bool res = fs::create_directories(path);
 	if (res)
 		fs::permissions(path, fs::perms::owner_all | fs::perms::group_all);
