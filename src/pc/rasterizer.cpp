@@ -301,7 +301,7 @@ void Rasterizer::rasterize(const std::string& filename, const std::vector<std::s
 
 	// A file-backed tree stores the points.
 	mqtree<geo::pc::Point> tree(std::min(bounds[0], bounds[2]), std::min(bounds[1], bounds[3]),
-			std::max(bounds[0], bounds[2]), std::max(bounds[1], bounds[3]), 100, m_lruSize);
+			std::max(bounds[0], bounds[2]), std::max(bounds[1], bounds[3]), m_lruSize);
 
 	// Compute the grid dimensions.
 	int cols = (int) std::ceil((bounds[2] - bounds[0]) / resX);

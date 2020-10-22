@@ -40,39 +40,6 @@ typedef int mode_t;
 
 using namespace geo::util;
 
-namespace {
-
-	/**
-	 * \brief Manages a buffer of allocated data, resizing if necessary.
-	 */
-	template <class T>
-	class Buffer {
-	public:
-		T* data;
-		size_t size;
-		Buffer(size_t s = 0) :
-			data(nullptr), size(0) {
-			if(s)
-				init(s);
-		}
-
-		void init(size_t s) {
-			if(s > size) {
-				if(size)
-					free(data);
-				size = s;
-				data = (T*) calloc(size, sizeof(T));
-			}
-		}
-		~Buffer() {
-			if(size)
-				free(data);
-		}
-	};
-
-} // anon
-
-
 namespace geo {
 namespace ds {
 
@@ -86,7 +53,6 @@ private:
 	size_t m_key;				///<! This node's key in the lookup table.
 	std::string m_path;			///<! The path to the storage file.
 	std::vector<T> m_cache;		///<! The list of elements stored in the leaf.
-	Buffer<char> m_buf;			///<! A buffer for reading and writing to the file.
 
 public:
 
@@ -141,12 +107,12 @@ public:
 			int handle;
 			size_t size;
 			m_path = path;
-			m_buf.init(bufSize());
+			std::vector<char> buf(bufSize());
 			if((handle = open(path.c_str(), O_RDWR, 0777)) > 0) {
-				if(read(handle, m_buf.data, m_buf.size) > (int) sizeof(T)) {
-					std::memcpy(&size, m_buf.data, sizeof(size_t));
+				if(read(handle, buf.data(), buf.size()) > (int) sizeof(T)) {
+					std::memcpy(&size, buf.data(), sizeof(size_t));
 					m_cache.resize(size);
-					std::memcpy((void*) m_cache.data(), static_cast<char*>(m_buf.data) + sizeof(size_t), size * sizeof(T));
+					std::memcpy((void*) m_cache.data(), buf.data() + sizeof(size_t), size * sizeof(T));
 					// Offset by sizeof(size_t) because the size is the first element in the file;
 					// cast to char* because the offset is in bytes.
 				}
@@ -161,13 +127,13 @@ public:
 		if(!m_cache.empty()) {
 			int handle;
 			size_t size = m_cache.size();
-			m_buf.init(bufSize());
+			std::vector<char> buf(bufSize());
 			if(makedir(m_path)) {
 				if((handle = open(m_path.c_str(), O_RDWR|O_CREAT|O_TRUNC, 0777)) > 0) {
-					std::memcpy(m_buf.data, &size, sizeof(size_t));
-					std::memcpy(static_cast<char*>(m_buf.data) + sizeof(size_t), m_cache.data(), size * sizeof(T));
+					std::memcpy(buf.data(), &size, sizeof(size_t));
+					std::memcpy(buf.data() + sizeof(size_t), m_cache.data(), size * sizeof(T));
 					// Cast to char* because the offset is in bytes.
-					if(!write(handle, m_buf.data, m_buf.size))
+					if(!write(handle, buf.data(), buf.size()))
 						g_runerr("Failed to write cache.");
 					close(handle);
 				} else {
@@ -762,21 +728,19 @@ public:
 	/**
 	 * Construct an mqtree.
 	 *
-	 * \param scale The scale factor for decreasing the precision of the data.
-	 * \param limit The memory threshold (bytes) that triggers the use of file-backed storage.
 	 * \param minx The minimum x coordinate.
 	 * \param miny The minimum y coordinate.
 	 * \param minx The maximum x coordinate.
 	 * \param miny The maximum y coordinate.
+	 * \param cacheSize The number of bytes stored in each LRU node.
 	 * \param maxDepth The maximum depth of the tree. Zero is no limit.
-	 * \param mode Determines whether file-backed storage is used, or memory.
 	 */
-	mqtree<T>(double minx, double miny, double maxx, double maxy, int maxDepth = 100, int cacheSize = 1000) :
+	mqtree<T>(double minx, double miny, double maxx, double maxy, int cacheSize, int maxDepth = 100) :
 		mqtree<T>() {
-		init(minx, miny, maxx, maxy, maxDepth , cacheSize);
+		init(minx, miny, maxx, maxy, cacheSize, maxDepth);
 	}
 
-	void init(double minx, double miny, double maxx, double maxy, int maxDepth = 100, int cacheSize = 1000) {
+	void init(double minx, double miny, double maxx, double maxy, int cacheSize, int maxDepth = 100) {
 		m_maxDepth = maxDepth;
 		m_lru.size(cacheSize);
 
