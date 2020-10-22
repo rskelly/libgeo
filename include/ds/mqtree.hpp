@@ -128,7 +128,7 @@ public:
 			int handle;
 			size_t size = m_cache.size();
 			std::vector<char> buf(bufSize());
-			if(makedir(m_path)) {
+			if(makedir(parent(m_path))) {
 				if((handle = open(m_path.c_str(), O_RDWR|O_CREAT|O_TRUNC, 0777)) > 0) {
 					std::memcpy(buf.data(), &size, sizeof(size_t));
 					std::memcpy(buf.data() + sizeof(size_t), m_cache.data(), size * sizeof(T));
@@ -410,7 +410,7 @@ public:
 			// Add the subdirs and filename.
 			for(int id : ids)
 				ss << "/" << id;
-			ss << "/dat";
+			ss << ".dat";
 
 			m_path = ss.str();
 		}
