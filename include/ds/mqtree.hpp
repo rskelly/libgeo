@@ -235,7 +235,6 @@ public:
 			m_nodes.erase(key);
 			remove(path);
 			delete n;
-			m_size -= cache.size();
 		}
 		return cache;
 	}
@@ -366,7 +365,7 @@ public:
 	 * \param maxSize The maximum number of items allowed in a node before splitting.
 	 * \param maxDepth The maximum depth of the tree.
 	 * \param parent The parent node; nullptr if root.
-	 * \param cache The pointer to the LRU cache.
+	 * \param tree A pointer to the tree.
 	 */
 	mqnode(int idx, double minx, double miny, double maxx, double maxy, int depth,
 			mqnode<T>* parent, mqtree<T>* tree) :
@@ -732,7 +731,7 @@ public:
 	 * \param miny The minimum y coordinate.
 	 * \param minx The maximum x coordinate.
 	 * \param miny The maximum y coordinate.
-	 * \param cacheSize The number of bytes stored in each LRU node.
+	 * \param cacheSize The LRU nodes stored in memory. Smaller for less memory/more disk use.
 	 * \param maxDepth The maximum depth of the tree. Zero is no limit.
 	 */
 	mqtree<T>(double minx, double miny, double maxx, double maxy, int cacheSize, int maxDepth = 100) :
