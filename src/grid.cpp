@@ -11,7 +11,14 @@
 
 #include "grid.hpp"
 
-using namespace geo::grid;
+bool gdalInited = false;
+
+void geo::grid::init() {
+	if(!gdalInited) {
+		GDALAllRegister();
+		gdalInited = true;
+	}
+}
 
 Interleave geo::grid::interleaveFromString(const std::string& str) {
 	std::string lower;

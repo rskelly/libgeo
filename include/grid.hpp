@@ -52,6 +52,11 @@ using namespace geo::util;
 namespace geo {
 namespace grid {
 
+	/**
+	 * \brief Initialize the raster capabilities. Should only happen once.
+	 */
+	void init();
+
 	class PolygonValue {
 	public:
 		std::string name;
@@ -1297,7 +1302,9 @@ public:
 		m_size(0),
 		m_data(nullptr),
 		m_dirty(false),
-		m_band(0) {}
+		m_band(0) {
+		geo::grid::init();
+	}
 
 	/**
 	 * \brief Create an anonymous grid of the given size with the given properties.
@@ -1369,8 +1376,6 @@ public:
 		} else if(m_props.interleave() == Interleave::BIP){
 			opts = CSLSetNameValue(opts, "INTERLEAVE", "PIXEL");
 		}
-
-		GDALAllRegister();
 
 		// Figure out and load the driver.
 
@@ -1458,8 +1463,6 @@ public:
 
 		if(!monitor)
 			monitor = getDefaultMonitor();
-
-		GDALAllRegister();
 
 		// Attempt to open the dataset.
 
@@ -1567,7 +1570,6 @@ public:
 	 * \return A map containing the raster driver short name and extension.
 	 */
 	static std::map<std::string, std::set<std::string> > extensions() {
-		GDALAllRegister();
 		std::map<std::string, std::set<std::string> > extensions;
 		GDALDriverManager* mgr = GetGDALDriverManager();
 		for(int i = 0; i < mgr->GetDriverCount(); ++i) {
@@ -1684,7 +1686,6 @@ public:
 	 * \return A map containing the raster driver short name and long name.
 	 */
 	static std::map<std::string, std::string> drivers(const std::vector<std::string>& filter) {
-		GDALAllRegister();
 		std::map<std::string, std::string> drivers;
 		GDALDriverManager *mgr = GetGDALDriverManager();
 		for(int i = 0; i < mgr->GetDriverCount(); ++i) {
