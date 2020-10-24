@@ -28,8 +28,8 @@
 #include <random>
 #include <filesystem>
 
-#include <gdal_priv.h>
-#include <ogr_spatialref.h>
+#include <gdal/gdal_priv.h>
+#include <gdal/ogr_spatialref.h>
 
 #include "fitpack.hpp"
 #include "util.hpp"

@@ -36,11 +36,11 @@
 
 #include <geos_c.h>
 
-#include <gdal_priv.h>
-#include <ogr_spatialref.h>
-#include <ogr_geometry.h>
-#include <ogr_feature.h>
-#include <ogrsf_frmts.h>
+#include <gdal/gdal_priv.h>
+#include <gdal/ogr_spatialref.h>
+#include <gdal/ogr_geometry.h>
+#include <gdal/ogr_feature.h>
+#include <gdal/ogrsf_frmts.h>
 
 #include "util.hpp"
 

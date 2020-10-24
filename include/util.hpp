@@ -16,7 +16,7 @@
 #include <algorithm>
 #include <random>
 
-#include <gdal_priv.h>
+#include <gdal/gdal_priv.h>
 
 namespace {
 
