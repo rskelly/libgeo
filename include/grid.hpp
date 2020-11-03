@@ -1596,6 +1596,7 @@ public:
 	 * \brief Return the number of bands in the file.
 	 */
 	static int bands(const std::string& filename) {
+		GDALAllRegister();
 		GDALDataset* ds = (GDALDataset *) GDALOpen(filename.c_str(), GA_ReadOnly);
 		if (ds == NULL)
 			g_runerr("Failed to open raster.");
