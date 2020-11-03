@@ -1592,6 +1592,17 @@ public:
 		return extensions;
 	}
 
+	/**
+	 * \brief Return the number of bands in the file.
+	 */
+	static int bands(const std::string& filename) {
+		GDALDataset* ds = (GDALDataset *) GDALOpen(filename.c_str(), GA_ReadOnly);
+		if (ds == NULL)
+			g_runerr("Failed to open raster.");
+		int bands = ds->GetRasterCount();
+		GDALClose(ds);
+		return bands;
+	}
 
 	template <class U>
 	static void mergeBands(std::vector<Band<U>*>& bandList,
