@@ -170,12 +170,14 @@ int HLRGBiometricsComputer::compute(double x, double y, const std::vector<geo::p
 	// the ground density, even though the cover seemed to be completely uniform due to a
 	// postprocessing error.
 
-	double thresh = geo::minvalue<double>();
+	double thresh = std::nan("");
 	for(const PointFilter* filter : filters()) {
 		const PointZRangeFilter* f;
 		if((f = dynamic_cast<const PointZRangeFilter*>(filter)) != nullptr)
 			thresh = f->minZ;
 	}
+	if(std::isnan(thresh))
+		g_runerr("A threshold must be given for HRLG biometrics, even if it's zero. Use -f:hlrg-bio:minz=<z>");
 
 	std::vector<geo::pc::Point> _allpts(filtered);
 	int count = _allpts.size();
