@@ -14,15 +14,15 @@
 
 using namespace geo::grid;
 
-double memAvg(std::vector<double>& buf, int size, double nd) {
-	double sum = 0, div = 0;
-	double rad = (double) size / 2.0;
+float memAvg(std::vector<float>& buf, int size, float nd) {
+	float sum = 0, div = 0;
+	float rad = (float) size / 2.0;
 	for(int r = 0; r < size; ++r) {
 		for(int c = 0; c < size; ++c) {
-			double v = buf[r * size + c];
-			double d = std::sqrt(std::pow(r - size / 2.0, 2.0) + std::pow(c - size / 2.0, 2.0));
+			float v = buf[r * size + c];
+			float d = std::sqrt(std::pow(r - size / 2.0, 2.0) + std::pow(c - size / 2.0, 2.0));
 			if(d <= rad && v != nd) {
-				double w = 1.0 - d / rad;
+				float w = 1.0 - d / rad;
 				sum += v * w;
 				div += w;
 			}
@@ -31,9 +31,9 @@ double memAvg(std::vector<double>& buf, int size, double nd) {
 	return div > 0 ? sum / div : nd;
 }
 
-double memMed(std::vector<double>& buf, double nd) {
-	std::vector<double> lst;
-	for(double d : buf) {
+float memMed(std::vector<float>& buf, float nd) {
+	std::vector<float> lst;
+	for(float d : buf) {
 		if(d != nd)
 			lst.push_back(d);
 	}
@@ -50,27 +50,27 @@ double memMed(std::vector<double>& buf, double nd) {
 	}
 }
 
-void doInterp(Grid<float>& tmem, Grid<float>& amem, Grid<float>& difmem, int size) {
+void doInterp(Band<float>& tmem, Band<float>& amem, Band<float>& difmem, int size) {
 
 	const GridProps& tprops = tmem.props();
 	const GridProps& aprops = amem.props();
 
-	double nd = tprops.nodata();
+	float nd = tprops.nodata();
 	if(size % 2 == 0) ++size;
 
-	std::vector<double> buf(size * size);
+	std::vector<float> buf(size * size);
 
-	difmem.fill(nd, 1);
+	difmem.fill(nd);
 
-	double tavg, aavg, tv;
+	float tavg, aavg, tv;
 	for(int trow = 0; trow < tprops.rows(); ++trow) {
 		for(int tcol = 0; tcol < tprops.cols(); ++tcol) {
 
-			if((tv = tmem.get(tcol, trow, 1)) == nd)
+			if((tv = tmem.get(tcol, trow)) == nd)
 				continue;
 
-			double x = tprops.toX(tcol);
-			double y = tprops.toY(trow);
+			float x = tprops.toX(tcol);
+			float y = tprops.toY(trow);
 
 			int acol = aprops.toCol(x);
 			int arow = aprops.toRow(y);
@@ -80,7 +80,7 @@ void doInterp(Grid<float>& tmem, Grid<float>& amem, Grid<float>& difmem, int siz
 					int cc = acol - size / 2 + c;
 					int rr = arow - size / 2 + r;
 					if(aprops.hasCell(cc, rr)) {
-						buf[r * size + c] = amem.get(cc, rr, 1);
+						buf[r * size + c] = amem.get(cc, rr);
 					} else {
 						buf[r * size + c] = nd;
 					}
@@ -89,7 +89,7 @@ void doInterp(Grid<float>& tmem, Grid<float>& amem, Grid<float>& difmem, int siz
 			aavg = memAvg(buf, size, nd);
 
 			if(aavg == nd) {
-				difmem.set(tcol, trow, tv, 1);
+				difmem.set(tcol, trow, tv);
 				continue;
 			}
 
@@ -98,7 +98,7 @@ void doInterp(Grid<float>& tmem, Grid<float>& amem, Grid<float>& difmem, int siz
 					int cc = tcol - size / 2 + c;
 					int rr = trow - size / 2 + r;
 					if(tprops.hasCell(cc, rr)) {
-						buf[r * size + c] = tmem.get(cc, rr, 1);
+						buf[r * size + c] = tmem.get(cc, rr);
 					} else {
 						buf[r * size + c] = nd;
 					}
@@ -106,18 +106,18 @@ void doInterp(Grid<float>& tmem, Grid<float>& amem, Grid<float>& difmem, int siz
 			}
 			tavg = memAvg(buf, size, nd);
 
-			difmem.set(tcol, trow, tv + (aavg - tavg), 1);
+			difmem.set(tcol, trow, tv + (aavg - tavg));
 		}
 	}
 
 	for(int trow = 0; trow < tprops.rows(); ++trow) {
 		for(int tcol = 0; tcol < tprops.cols(); ++tcol)
-			tmem.set(tcol, trow, difmem.get(tcol, trow, 1), 1);
+			tmem.set(tcol, trow, difmem.get(tcol, trow));
 	}
 }
 
-double meanDif(std::vector<double>& tvec, double tn, std::vector<double>& avec, double an, int size) {
-	double av, tv, sum = 0;
+float meanDif(std::vector<float>& tvec, float tn, std::vector<float>& avec, float an, int size) {
+	float av, tv, sum = 0;
 	int count = 0;
 	for(int i = 0; i < size * size; ++i) {
 		tv = tvec[i];
@@ -134,28 +134,28 @@ double meanDif(std::vector<double>& tvec, double tn, std::vector<double>& avec, 
 	return count > 0 ? sum / count : 0;
 }
 
-void doInterp2(Grid<double>& tmem, Grid<double>& amem, Grid<double>& dmem, int size) {
+void doInterp2(Band<float>& tmem, Band<float>& amem, Band<float>& dmem, int size) {
 
 	const GridProps& tprops = tmem.props();
 	const GridProps& aprops = amem.props();
 
-	double tn = tprops.nodata();
-	double an = aprops.nodata();
+	float tn = tprops.nodata();
+	float an = aprops.nodata();
 
 	if(size % 2 != 0) ++size;
 	int side = 2 * size + 1;
 
-	dmem.fill(tn, 1);
+	dmem.fill(tn);
 
-	std::vector<double> avec(side * side);
-	std::vector<double> tvec(side * side);
+	std::vector<float> avec(side * side);
+	std::vector<float> tvec(side * side);
 
 	int tcols = tprops.cols();
 	int trows = tprops.rows();
-	double invalid = std::nan("");
+	float invalid = std::nan("");
 
 	int minp = -1;
-	double tv;
+	float tv;
 	for(int tcol = 0; tcol < tcols; ++tcol) {
 
 		int p = (int) (((float) tcol / tcols) * 100.0);
@@ -172,11 +172,11 @@ void doInterp2(Grid<double>& tmem, Grid<double>& amem, Grid<double>& dmem, int s
 
 		for(int trow = 0; trow < trows; ++trow) {
 
-			if((tv = tmem.get(tcol, trow, 1)) != tn) {
+			if((tv = tmem.get(tcol, trow)) != tn) {
 
 				if((trow - lastRow) != 1) {
-					tmem.writeToVector(tvec, tcol - size, trow - size, side, side, 1, invalid);
-					amem.writeToVector(avec, tcol - size, trow - size, side, side, 1, invalid);
+					tmem.writeToVector(tvec, tcol - size, trow - size, side, side, invalid);
+					amem.writeToVector(avec, tcol - size, trow - size, side, side, invalid);
 				} else {
 					int cols = side;
 					int rc = tcol - size, rr = trow + size; // Only interested in the new bottom row. All others stay the same.
@@ -193,17 +193,17 @@ void doInterp2(Grid<double>& tmem, Grid<double>& amem, Grid<double>& dmem, int s
 						}
 						if(rc + cols > tcols)
 							cols = tcols - rc;
-						std::memcpy(avec.data() + vr * side + vc, ((double*) amem.grid()) + rr * tcols + rc, cols * sizeof(double));
-						std::memcpy(tvec.data() + vr * side + vc, ((double*) tmem.grid()) + rr * tcols + rc, cols * sizeof(double));
+						std::memcpy(avec.data() + vr * side + vc, amem.grid() + rr * tcols + rc, cols * sizeof(float));
+						std::memcpy(tvec.data() + vr * side + vc, tmem.grid() + rr * tcols + rc, cols * sizeof(float));
 					}
 				}
 				lastRow = trow;
 
-				double dif = meanDif(tvec, tn, avec, an, side);
+				float dif = meanDif(tvec, tn, avec, an, side);
 
-				dmem.set(tcol, trow, tv + dif, 1);
+				dmem.set(tcol, trow, tv + dif);
 			} else {
-				dmem.set(tcol, trow, tn, 1);
+				dmem.set(tcol, trow, tn);
 			}
 		}
 	}
@@ -262,58 +262,59 @@ int main(int argc, char** argv) {
 
 	Bounds bounds;
 	GridProps tprops;
-	Grid<float> tmem;
+	Band<float> tmem;
 	{
-		Grid<float> trast(target);
+		Band<float> trast(target, tband - 1, false, true);
 		tprops = trast.props();
 		tprops.setWritable(true);
 		tprops.setBands(1);
 		tmem.init(tprops, mapped);
-		trast.writeTo(tmem, tprops.cols(), tprops.rows(), 0, 0, 0, 0, tband, 1);
+		trast.writeTo(tmem);
 	}
 
 	GridProps mprops;
-	Grid<float> mmem;
+	Band<float> mmem;
 	if(!mask.empty()) {
-		Grid<float> mrast(mask);
+		Band<float> mrast(mask, mband - 1, false, true);
 		mprops = mrast.props();
+		mprops.setBands(1);
 		mmem.init(mprops, mapped);
-		mrast.writeTo(mmem, mprops.cols(), mprops.rows(), 0, 0, 0, 0, mband, 1);
+		mrast.writeTo(mmem);
 	}
 
 	GridProps aprops(tprops);
-	Grid<float> amem;
+	Band<float> amem;
 	{
 		amem.init(tprops, mapped);
-		amem.fill(tprops.nodata(), 1);
+		amem.fill(tprops.nodata());
 
 		for(size_t i = 0; i < anchors.size(); ++i) {
-			Grid<float> cmem;
+			Band<float> cmem;
 			GridProps cprops;
 			{
-				Grid<float> crast(anchors[i]);
+				Band<float> crast(anchors[i], abands[i] - 1, false, true);
 				cprops = crast.props();
 				cprops.setBands(1);
 				cprops.setWritable(true);
 				cmem.init(cprops, mapped);
-				crast.writeTo(cmem, cprops.cols(), cprops.rows(), 0, 0, 0, 0, abands[i], 1);
+				crast.writeTo(cmem);
 			}
 
-			double cv, cn = cprops.nodata();
-			//double tn = tprops.nodata();
+			float cv, cn = cprops.nodata();
+			//float tn = tprops.nodata();
 			bool hasMask = !mask.empty();
 			for(int crow = 0; crow < cprops.rows(); ++crow) {
 				for(int ccol = 0; ccol < cprops.cols(); ++ccol) {
-					double x = cprops.toX(ccol);
-					double y = cprops.toY(crow);
+					float x = cprops.toX(ccol);
+					float y = cprops.toY(crow);
 					int mcol = mprops.toCol(x);
 					int mrow = mprops.toRow(y);
 					int tcol = tprops.toCol(x);
 					int trow = tprops.toRow(y);
 					if(tprops.hasCell(tcol, trow)) {
-							if((cv = cmem.get(ccol, crow, 1)) != cn
-									&& (!hasMask || mmem.get<int>(mcol, mrow, 1) == 1)) {
-							amem.set(tcol, trow, cv, 1);
+							if((cv = cmem.get(ccol, crow)) != cn
+									&& (!hasMask || mmem.get<int>(mcol, mrow) == 1)) {
+							amem.set(tcol, trow, cv);
 						}
 					}
 				}
@@ -322,7 +323,7 @@ int main(int argc, char** argv) {
 	}
 
 	{
-		Grid<float> dmem(tprops, mapped);
+		Band<float> dmem(tprops, mapped);
 		for(const int& d : sizes) {
 
 			doInterp2(tmem, amem, dmem, d);
@@ -331,13 +332,13 @@ int main(int argc, char** argv) {
 				std::stringstream tmp;
 				tmp << "/tmp/match_" <<  d << ".tif";
 				std::cerr << tmp.str() << "\n";
-				Grid<float> rtmp(tmp.str(), tprops);
+				Band<float> rtmp(tmp.str(), tprops);
 				tmem.writeTo(rtmp);
 			}
 		}
 	}
 
-	Grid<float> adjrast(adjusted, tprops);
+	Band<float> adjrast(adjusted, tprops);
 	tmem.writeTo(adjrast);
 
 }

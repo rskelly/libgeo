@@ -197,8 +197,8 @@ if(${BUILD_APPS})
 	# add_executable (groundassign src/apps/groundassign.cpp)
 	# target_link_libraries (groundassign ${LIBLAS_LIBRARY})
 
-	# add_executable (rastermatch src/apps/rastermatch.cpp)
-	# target_link_libraries (rastermatch geoutil ${ANN_LIB} geogrid ${GEOS_LIBRARY} ${GDAL_LIBRARY})
+	add_executable (rastermatch src/apps/rastermatch.cpp)
+	target_link_libraries (rastermatch geoutil ${ANN_LIB} geogrid ${GEOS_LIBRARY} ${GDAL_LIBRARY})
 
 	# add_executable (raster_test src/raster.cpp)
 	# target_link_libraries (raster_test geoutil ${ANN_LIB} geogrid ${GEOS_LIBRARY} ${GDAL_LIBRARY})
