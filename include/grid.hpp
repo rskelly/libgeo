@@ -1668,7 +1668,7 @@ public:
 			band->SetNoDataValue(nodata);
 			band->SetMetadataItem(metaName, metaValue, "");
 			band->SetDescription(metaValue);
-			if(CE_None != band->RasterIO(GF_Write, 0, 0, cols, rows, bandList[i]->m_data, cols, rows, dataType2GDT(type), 0, 0, 0))
+			if(CE_None != band->RasterIO(GF_Write, 0, 0, cols, rows, bandList[i]->m_data, cols, rows, dataType2GDT(type), 0, 0, &arg))
 				g_warn("Error writing to band.");
 			if (deleteOriginal) {
 				bandList[i]->destroy();

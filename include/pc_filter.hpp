@@ -43,7 +43,7 @@ namespace filter {
 	public:
 		double minAngle;
 		double maxAngle;
-		PointScanAngleFilter(double minAngle = -DBL_MAX, double maxAngle = DBL_MAX) :
+		PointScanAngleFilter(double minAngle = -geo::maxvalue<double>(), double maxAngle = geo::maxvalue<double>()) :
 			minAngle(minAngle), maxAngle(maxAngle) {
 		}
 		bool keep(const geo::pc::Point& pt) const {
@@ -75,7 +75,7 @@ namespace filter {
 	public:
 		double minZ;
 		double maxZ;
-		PointZRangeFilter(double minZ = -DBL_MAX, double maxZ = DBL_MAX) :
+		PointZRangeFilter(double minZ = -geo::maxvalue<double>(), double maxZ = geo::maxvalue<double>()) :
 			minZ(minZ), maxZ(maxZ) {
 		}
 		bool keep(const geo::pc::Point& pt) const {
@@ -91,7 +91,7 @@ namespace filter {
 	public:
 		double minIntensity;
 		double maxIntensity;
-		PointIntensityFilter(double minIntensity = -DBL_MAX, double maxIntensity = DBL_MAX) :
+		PointIntensityFilter(double minIntensity = -geo::maxvalue<double>(), double maxIntensity = geo::maxvalue<double>()) :
 			minIntensity(minIntensity), maxIntensity(maxIntensity) {
 		}
 		bool keep(const geo::pc::Point& pt) const {
