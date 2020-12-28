@@ -323,6 +323,21 @@ int geo::util::pid() {
 #endif
 }
 
+std::string geo::util::procname(int pid) {
+	// Source: http://stackoverflow.com/questions/15545341/process-name-from-its-pid-in-linux
+	std::string ret;
+	char procfile[256];
+	char name[1024];
+	sprintf(procfile, "/proc/%d/cmdline", pid);
+	int f = open(procfile, O_RDONLY);
+	int r;
+	if (f > 0 && (r = read(f, name, 1024)) > 0) {
+		ret = std::string(name, r);
+	}
+	close(f);
+	return ret;
+}
+
 std::string geo::util::tmpdir(const std::string& prefix, const std::string& dir) {
 	// Assemble the target directory, check and attempt to create if needed.
 	std::string tdir = join(gettmpdir(), dir);
