@@ -1180,6 +1180,7 @@ private:
 			destroy();
 		m_mapped = false;
 		m_size = (size_t) props().cols() * (size_t) props().rows() * (size_t) sizeof(T);
+		g_debug("Reserving " << m_size << " unmapped bytes.");
 		m_data = (T*) malloc(m_size);
 		if(!m_data) {
 			g_warn("Failed to allocate " << m_size << " bytes for grid.");
