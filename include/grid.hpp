@@ -1551,6 +1551,18 @@ public:
 	}
 
 	/**
+	 * Find all NaN pixels and convert them to nodata.
+	 */
+	void fixNaNs() {
+		double nd = props().nodata();
+		size_t size = (size_t) props().cols() * (size_t) props().rows();
+		for(size_t i = 0; i < size; ++i) {
+			if(std::isnan((double) m_data[i]))
+				m_data[i] = (T) nd;
+		}
+	}
+
+	/**
 	 * \brief Write the metadata values band-wise.
 	 *
 	 * \param name The name of the field to set.
@@ -1607,8 +1619,8 @@ public:
 	}
 
 	template <class U>
-	static void mergeBands(std::vector<Band<U>*>& bandList,
-			const std::string& filename, const std::string& driver, bool deleteOriginal, Monitor* monitor = nullptr) {
+	static void mergeBands(std::vector<Band<U>*>& bandList, const std::string& filename,
+			const std::string& driver, bool deleteOriginal, Monitor* monitor = nullptr) {
 		rem(filename);
 		const GridProps& props = bandList.front()->props();
 		int bands = (int) bandList.size();
@@ -1657,6 +1669,8 @@ public:
 
 		GDALDriverManager* dm = GetGDALDriverManager();
 		GDALDriver* drv = dm->GetDriverByName(driver.c_str());
+		if(!drv)
+			g_runerr("Driver not found: " << driver);
 		GDALDataset* ds = drv->Create(filename.c_str(), cols, rows, bands, dataType2GDT(type), opts);
 		ds->SetGeoTransform(trans);
 		ds->SetProjection(projection.c_str());
@@ -1676,6 +1690,56 @@ public:
 				rem(bandList[i]->props().filename());
 			}
 		}
+		GDALClose(ds);
+		CSLDestroy(opts);
+	}
+
+	void save(const std::string& filename, const std::string& driver = "GTiff", Monitor* monitor = nullptr) {
+		rem(filename);
+		int cols = props().cols();
+		int rows = props().rows();
+		double nodata = props().nodata();
+		const std::string& projection = props().projection();
+		DataType type = props().dataType();
+		double trans[6];
+		props().trans(trans);
+
+		GDALRasterIOExtraArg arg;
+		INIT_RASTERIO_EXTRA_ARG(arg);
+		struct gdalprg prg;
+		prg.p = 0;
+		prg.m = monitor ? monitor : getDefaultMonitor();
+		arg.pfnProgress = gdalProgress;
+		arg.pProgressData = &prg;
+
+		char **opts = NULL;
+		opts = CSLSetNameValue(opts, "COMPRESS", "LZW");
+		opts = CSLSetNameValue(opts, "PREDICTOR", "2");
+		opts = CSLSetNameValue(opts, "BIGTIFF", "IF_NEEDED");
+		if(props().interleave() == Interleave::BIL) {
+			opts = CSLSetNameValue(opts, "INTERLEAVE", "BAND");
+		} else if(props().interleave() == Interleave::BIP){
+			opts = CSLSetNameValue(opts, "INTERLEAVE", "PIXEL");
+		}
+
+		GDALDriverManager* dm = GetGDALDriverManager();
+		GDALDriver* drv = dm->GetDriverByName(driver.c_str());
+		if(!drv)
+			g_runerr("Driver not found: " << driver);
+		GDALDataset* ds = drv->Create(filename.c_str(), cols, rows, 1, dataType2GDT(type), opts);
+		ds->SetGeoTransform(trans);
+		ds->SetProjection(projection.c_str());
+
+		g_debug("Writing band...");
+		const char* metaName = props().bandMetaName().c_str();
+		const char* metaValue = props().bandMetadata().front().c_str();
+		GDALRasterBand* band = ds->GetRasterBand(1);
+		band->SetNoDataValue(nodata);
+		band->SetMetadataItem(metaName, metaValue, "");
+		band->SetDescription(metaValue);
+		if(CE_None != band->RasterIO(GF_Write, 0, 0, cols, rows, m_data, cols, rows, dataType2GDT(type), 0, 0, &arg))
+			g_warn("Error writing to band.");
+
 		GDALClose(ds);
 		CSLDestroy(opts);
 	}
