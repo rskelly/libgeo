@@ -1,6 +1,14 @@
 cmake_minimum_required(VERSION 3.12)
 
 option (WITH_CGAL "Include CGAL. Valgrind will puke with CGAL (rounding) so turn it off to use it." ON)
+option (ARM64 "Compile for 64 bit ARM" OFF)
+
+if (ARM64) 
+	set (CMAKE_SYSTEM_NAME Linux)
+	set (CMAKE_SYSTEM_PROCESSOR arm)
+	set (CMAKE_C_COMPILER aarch64-linux-gnu-gcc-8)
+	set (CMAKE_CXX_COMPILER aarch64-linux-gnu-g++-8)
+endif (ARM64)
 
 project (libgeo)
 
