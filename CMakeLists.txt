@@ -8,6 +8,15 @@ if (ARM64)
 	set (CMAKE_SYSTEM_PROCESSOR arm)
 	set (CMAKE_C_COMPILER aarch64-linux-gnu-gcc-8)
 	set (CMAKE_CXX_COMPILER aarch64-linux-gnu-g++-8)
+
+	set (CGAL_test_cpp_version_RUN_RES 
+	     "PLEASE_FILL_OUT-FAILED_TO_RUN"
+	     CACHE STRING "Result from TRY_RUN" FORCE)
+
+	set (CGAL_test_cpp_version_RUN_RES__TRYRUN_OUTPUT 
+     		"PLEASE_FILL_OUT-NOTFOUND"
+     		CACHE STRING "Output from TRY_RUN" FORCE)
+
 endif (ARM64)
 
 project (libgeo)
