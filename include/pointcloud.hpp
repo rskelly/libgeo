@@ -22,10 +22,10 @@
 #include <pdal/PointTable.hpp>
 #include <pdal/PointView.hpp>
 #include <pdal/io/LasReader.hpp>
+#include <pdal/io/LasWriter.hpp>
 #include <pdal/io/LasHeader.hpp>
 #include <pdal/Options.hpp>
-
-#include <liblas/liblas.hpp>
+#include <pdal/PointRef.hpp>
 
 #include "util.hpp"
 #include "ds/mqtree.hpp"
@@ -57,12 +57,11 @@ private:
 public:
 
 	/**
-	 * Construct a Point using a liblas::Point. Will read the 3D
-	 * coordinates and save a pointer to a copy of the object.
-	 * The copy is deleted on destruction.
-	 * \param pt A liblas::Point object.
+	 * Construct a Point using a pdal::PointRef. Will read the 3D
+	 * coordinates.
+	 * \param pt A pdal::PointRef object.
 	 */
-	Point(const liblas::Point& pt);
+	Point(const pdal::PointRef& pt);
 
 	/**
 	 * Construct a point using the three raw coordinates.
@@ -89,9 +88,11 @@ public:
 	Point();
 
 	/**
-	 * Populate this point with values from a liblas point.
+	 * Populate this point with values from a pdal point.
 	 */
-	void setPoint(const liblas::Point& pt);
+	void setPoint(const pdal::PointRef& pt);
+
+	void getPoint(pdal::PointRef& pt) const;
 
 	/**
 	 * Returns true if the point is a last return.
@@ -213,9 +214,18 @@ public:
 	pdal::Dimension::IdList dims;
 	pdal::LasHeader hdr;
 
-	PDALSource(const std::string& filename) :
+	PDALSource(const std::string& filename = "") :
 		idx(0),
 		loaded(false) {
+		if(!filename.empty())
+			load(filename);
+	}
+
+	pdal::PointTable& pointTable() {
+		return table;
+	}
+
+	void load(const std::string& filename) {
 		pdal::Options opts;
 		opts.add(pdal::Option("filename", filename));
 		reader.setOptions(opts);
@@ -266,6 +276,8 @@ public:
 	}
 
 };
+
+class PCWriter;
 
 /**
  * A class representing a source point cloud file. Maintains
@@ -407,29 +419,33 @@ public:
  */
 class PCWriter {
 private:
-	int m_fileIdx;							///< The current file index.
-	int m_returns;							///< The number of returns (points) in the current file.
-	int m_retNum[5];						///< The number of points for each return in the current file.
-	long m_totalReturns;					///< The total count of returns across all files.
-	double m_bounds[4];						///< The bounding box of the point cloud (may differ from the tile's bounds).
-	double m_bufferedBounds[4];				///< The bounding box of the point cloud (may differ from the tile's bounds).
-	double m_outBounds[6];					///< The bounding box of the point cloud (may differ from the tile's bounds).
-	double m_x;								///< The minimum x-coordinate of the tile.
-	double m_y;								///< The minimum y-coordinate of the tile.
+	//int m_fileIdx;							///< The current file index.
+	//int m_returns;							///< The number of returns (points) in the current file.
+	//int m_retNum[5];						///< The number of points for each return in the current file.
+	//long m_totalReturns;					///< The total count of returns across all files.
+	//double m_bounds[4];						///< The bounding box of the point cloud (may differ from the tile's bounds).
+	//double m_bufferedBounds[4];				///< The bounding box of the point cloud (may differ from the tile's bounds).
+	//double m_outBounds[6];					///< The bounding box of the point cloud (may differ from the tile's bounds).
+	//double m_x;								///< The minimum x-coordinate of the tile.
+	//double m_y;								///< The minimum y-coordinate of the tile.
 	std::string m_filename;					///< The output filename template.
 	std::vector<std::string> m_filenames;	///< The list of output filenames.
-	liblas::Writer* m_writer;				///< The current {liblas::Writer} instance.
-	liblas::Header* m_header;				///< The liblas {liblas::Header} instance.
-	std::ofstream m_str;					///< The current output stream.
-	bool m_dod;								///< Set to true if constituent files should be deleted on destruction.
-	double m_buffer;						///< The size of the buffer on all sides.
-	double m_size;
+	pdal::Stage* m_writer;					///< The current {liblas::Writer} instance.
+	pdal::LasHeader* m_header;				///< The liblas {liblas::Header} instance.
+	pdal::PointTable m_table;
+	pdal::PointViewPtr m_view;
+	//std::ofstream m_str;					///< The current output stream.
+	//bool m_dod;								///< Set to true if constituent files should be deleted on destruction.
+	//double m_buffer;						///< The size of the buffer on all sides.
+	//double m_size;
+	size_t m_idx;
+	std::string m_tpl;	///<! Template file.
 
 	/**
 	 * Creates and returns the next filename in the series for this tile.
 	 * \return The new filename.
 	 */
-	std::string nextFile();
+	//std::string nextFile();
 
 public:
 	/**
@@ -440,9 +456,17 @@ public:
 	 * \param x 		The minimum x-coordinate of the tile.
 	 * \param y 		The minimum y-coordinate of the tile.
 	 */
-	PCWriter(const std::string& filename, const liblas::Header& hdr, double x, double y, double size, double buffer);
+	PCWriter(const std::string& filename, const pdal::LasHeader& hdr, double x, double y, double size, double buffer);
 
-	PCWriter(PCWriter&& other);
+	/**
+	 * Construct an instance of a PCWriter using the given output filename, {liblas::Header} and corner
+	 * coordinate.
+	 * \param filename 	The output filename template. This is the file path without an index part or extension.
+	 * \param tpl 		A las/laz file to use as a template.
+	 */
+	PCWriter(const std::string& filename, const std::string& tpl);
+
+	//PCWriter(PCWriter&& other);
 
 	/**
 	 * Get the minimum x-coordinate.
@@ -492,7 +516,7 @@ public:
 	/**
 	 * Returns a reference to the filenames list.
 	 */
-	const std::vector<std::string>& filenames() const;
+	//const std::vector<std::string>& filenames() const;
 
 	/**
 	 * Open a new output stream with a new file. If an output
@@ -517,7 +541,7 @@ public:
 	 * The point will be added to the currently-open file.
 	 * \param pt A point.
 	 */
-	void addPoint(const liblas::Point& pt);
+	void addPoint(const geo::pc::Point& pt);
 
 	/**
 	 * Returns true if the given coordinate is within the bounds of this tile's
@@ -600,44 +624,6 @@ public:
 	 * \param y The y-coordinate.
 	 */
 	bool containsBuffered(double x, double y);
-
-};
-
-/**
- * Performs the tiling of a set of point cloud files.
- */
-class Tiler {
-public:
-	std::vector<PCFile> files;	///< The list of PCFile instances.
-
-	/**
-	 * Construct a tiler with the given list of initial filenames.
-	 * \param filenames A list of filenames of point cloud files to process.
-	 */
-	Tiler(const std::vector<std::string> filenames);
-
-	/**
-	 * Tile the list of point cloud files; write the output to the given output directory.
-	 * \param outdir			The output directory.
-	 * \param size 				The length of one side of the tile.
-	 * \param buffer 			The size of the buffer around each tile. Default 0.
-	 * \param srid 				The spatial reference ID. Default 0.
-	 * \param easting   		The minimum x-coordinate of the tile grid. If NaN is given, will round
-	 *							the minimum cordinate of the data extent down to a multiple of the tile size.
-	 *							Default NaN.
-	 * \param northing  		The minimum y-coordinate of the tile grid. If nan is given, will round
-	 *							the minimum cordinate of the data extent down to a multiple of the tile size.
-	 *							Default NaN.
-	 * \param maxFileHandles 	The maximum number of output files that can be open at once. This determines
-	 *                          the number of intermediate tiles that will be produced. Default 64.
-	 */
-	void tile(const std::string& outdir, double size, double buffer = 0, int srid = 0, 
-		double easting = std::nan(""), double northing = std::nan(""), int maxFileHandles = 64);
-
-	/**
-	 * Destroy the Tiler.
-	 */
-	~Tiler();
 
 };
 

@@ -34,8 +34,6 @@ void Normalizer::normalize(const std::string& dtmpath, const std::string& outdir
 	const GridProps& props = dtm.props();
 	double nodata = props.nodata();
 
-	liblas::ReaderFactory fact;
-
 	for(const std::string& filename : m_filenames) {
 
 		std::string outfile = join(outdir, basename(filename) + ".las");
@@ -44,29 +42,25 @@ void Normalizer::normalize(const std::string& dtmpath, const std::string& outdir
 			continue;
 		}
 
-		std::ifstream str(filename);
-		liblas::Reader rdr = fact.CreateWithStream(str);
+		geo::pc::PCFile rdr(filename);
 
-		std::ofstream ostr(outfile, std::ios::binary | std::ios::trunc | std::ios::out);
-		liblas::Header hdr(rdr.GetHeader());
-		liblas::Writer wtr(ostr, hdr);
+		geo::pc::PCWriter wtr(outfile, filename);
 
-		double minZ = DBL_MAX;
-		double maxZ = DBL_MIN;
-		double minX = DBL_MAX;
-		double maxX = DBL_MIN;
-		double minY = DBL_MAX;
-		double maxY = DBL_MIN;
+		double minZ = geo::maxvalue<double>();
+		double maxZ = -geo::maxvalue<double>();
+		double minX = geo::maxvalue<double>();
+		double maxX = -geo::maxvalue<double>();
+		double minY = geo::maxvalue<double>();
+		double maxY = -geo::maxvalue<double>();
 
-		while(rdr.ReadNextPoint()) {
-
-			const liblas::Point& pt = rdr.GetPoint();
+		geo::pc::Point pt;
+		while(rdr.next(pt)) {
 
 			if(m_filter && !m_filter->keep(pt))
 				continue;
 
-			double x = pt.GetX();
-			double y = pt.GetY();
+			double x = pt.x();
+			double y = pt.y();
 
 			if(!props.hasCell(x, y)) continue;
 
@@ -75,7 +69,7 @@ void Normalizer::normalize(const std::string& dtmpath, const std::string& outdir
 			if(t == nodata)
 				continue;
 
-			double z = pt.GetZ();
+			double z = pt.x();
 			double z0 = z - t;
 
 			if(z0 < 0) z0 = 0;
@@ -87,14 +81,9 @@ void Normalizer::normalize(const std::string& dtmpath, const std::string& outdir
 			if(y < minY) minY = y;
 			if(y > maxY) maxY = y;
 
-			liblas::Point npt(pt);
-			npt.SetZ(z0);
-			wtr.WritePoint(npt);
+			pt.z(z0);
+			wtr.addPoint(pt);
 		}
-
-		hdr.SetMin(minX, minY, minZ);
-		hdr.SetMax(maxX, maxY, maxZ);
-		wtr.SetHeader(hdr);
 
 	}
 

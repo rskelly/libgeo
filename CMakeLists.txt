@@ -1,6 +1,23 @@
 cmake_minimum_required(VERSION 3.12)
 
 option (WITH_CGAL "Include CGAL. Valgrind will puke with CGAL (rounding) so turn it off to use it." ON)
+option (ARM64 "Compile for 64 bit ARM" OFF)
+
+if (ARM64) 
+	set (CMAKE_SYSTEM_NAME Linux)
+	set (CMAKE_SYSTEM_PROCESSOR arm)
+	set (CMAKE_C_COMPILER aarch64-linux-gnu-gcc-8)
+	set (CMAKE_CXX_COMPILER aarch64-linux-gnu-g++-8)
+
+	set (CGAL_test_cpp_version_RUN_RES 
+	     "PLEASE_FILL_OUT-FAILED_TO_RUN"
+	     CACHE STRING "Result from TRY_RUN" FORCE)
+
+	set (CGAL_test_cpp_version_RUN_RES__TRYRUN_OUTPUT 
+     		"PLEASE_FILL_OUT-NOTFOUND"
+     		CACHE STRING "Output from TRY_RUN" FORCE)
+
+endif (ARM64)
 
 project (libgeo)
 
@@ -38,9 +55,6 @@ if(${WIN32})
 	set (SQLITE_LIBRARY sqlite3_i)
 	set (SPATIALITE_LIBRARY spatialite_i)
 	set (GDAL_LIBRARY gdal_i)
-	set (LIBLAS_LIBRARY liblas)
-	set (LIBLAS_INCLUDE_DIRS "${GIS_DIR}\\include")
-	set (LIBLAS_LIBDIR "${GIS_DIR}\\lib")
 	set (CGAL_INCLUDE_DIRS "C:\\dev\\CGAL-5.0.2\\include")
 	set (GMP_LIBDIR "C:\\dev\\CGAL-5.0.2\\auxiliary\\gmp\\lib")
 	set (GMP_LIBRARY libgmp-10)
@@ -56,9 +70,7 @@ else()
 	find_package (PDAL REQUIRED)
 	find_package (OpenSSL REQUIRED)
 	find_package (GDAL 2 REQUIRED)
-	find_library (LIBLAS_LIBRARY las)
 	if (WITH_CGAL)
-		message ("CGAL enabled.")
 		find_package (CGAL REQUIRED)
 		set (CGAL_LIBS "CGAL")
 	else()
@@ -86,7 +98,6 @@ include_directories(
 	${EIGEN3_INCLUDE_DIR} 
 	${JSON_INCLUDEDIR}
 	${GDAL_INCLUDE_DIR}
-	${LIBLAS_INCLUDE_DIRS}
 	${CGAL_INCLUDE_DIRS}
 	${PDAL_INCLUDE_DIRS}
 	${Boost_INCLUDE_DIRS}
@@ -97,7 +108,6 @@ link_directories(./build/lib ./build/bin
 	${GIS_LIBRARYDIR} 
 	${PDAL_LIBRARY_DIRS}
 	${GEOS_INCLUDEDIR}
-	${LIBLAS_LIBDIR}
 	${PDAL_LIBRARY_DIRS}
 	${GMP_LIBDIR}
 	${Boost_LIBRARY_DIRS}
@@ -163,8 +173,8 @@ if (WITH_PC)
 	set_target_properties (geopcobj PROPERTIES POSITION_INDEPENDENT_CODE ON)
 	target_compile_definitions (geopcobj PRIVATE DLL_EXPORTS=1)
 	add_library (geopc SHARED $<TARGET_OBJECTS:geopcobj>)
-	target_link_libraries (geopc geoutil geogrid ${CGAL_LIBS} ${ANN_LIB} ${LIBLAS_LIBRARY} ${PDAL_LIBRARIES} 
-		${GMP_LIBRARY} ${Boost_LIBRARIES})
+	target_link_libraries (geopc geoutil geogrid ${CGAL_LIBS} ${ANN_LIB} ${PDAL_LIBRARIES} 
+		${GMP_LIBRARY} ${Boost_LIBRARIES} ${GDAL_LIBRARIES})
 	set (PC_LIB geopc)
 endif (WITH_PC)
 
@@ -173,17 +183,14 @@ endif (WITH_PC)
 if(${BUILD_APPS})
 	message (STATUS "Building Apps...")
 	
-	# add_executable (pc2tile src/apps/pc2tile.cpp)
-	# target_link_libraries (pc2tile geoutil geopc ${LIBLAS_LIBRARY} ${GEOS_LIBRARY})
-
 	# add_executable (pcperturb src/apps/pcperturb.cpp)
-	# target_link_libraries (pcperturb geoutil geopc ${LIBLAS_LIBRARY})
+	# target_link_libraries (pcperturb geoutil geopc ${PDAL_LIBRARIES})
 
 	# add_executable (pcregister src/apps/pcregister.cpp src/pc/trajectory.cpp)
-	# target_link_libraries (pcregister geoutil geopc ${LIBLAS_LIBRARY} ${PCL_LIBRARIES})
+	# target_link_libraries (pcregister geoutil geopc ${PDAL_LIBRARIES} ${PCL_LIBRARIES})
 
 	# add_executable (geoinfo src/apps/geoinfo.cpp)
-	# target_link_libraries (geoinfo geoutil ${GDAL_LIBRARY} ${LIBLAS_LIBRARY} ${JSONCPP_LIBRARY})
+	# target_link_libraries (geoinfo geoutil ${GDAL_LIBRARY} ${PDAL_LIBRARIES} ${JSONCPP_LIBRARY})
 
 	# add_executable (voidfill src/apps/voidfill.cpp)
 	# target_link_libraries (voidfill geoutil geogrid ${GDAL_LIBRARY})
@@ -192,10 +199,10 @@ if(${BUILD_APPS})
 	# target_link_libraries (datumshift geoutil geogrid ${GDAL_LIBRARY} ${PROJ_LIBRARY})
 
 	# add_executable (extmergesort src/apps/externalmergesort.cpp)
-	# target_link_libraries (extmergesort geoutil geopc ${LIBLAS_LIBRARY})
+	# target_link_libraries (extmergesort geoutil geopc ${PDAL_LIBRARIES})
 
 	# add_executable (groundassign src/apps/groundassign.cpp)
-	# target_link_libraries (groundassign ${LIBLAS_LIBRARY})
+	# target_link_libraries (groundassign ${PDAL_LIBRARIES})
 
 	add_executable (rastermatch src/apps/rastermatch.cpp)
 	target_link_libraries (rastermatch geoutil ${ANN_LIB} geogrid ${GEOS_LIBRARY} ${GDAL_LIBRARY})

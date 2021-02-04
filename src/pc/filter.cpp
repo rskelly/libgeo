@@ -87,10 +87,10 @@ PointFilter* PCPointFilter::getFilter(const std::string& v, char** argv, int& id
 		return new PointZRangeFilter(atof(parts[0].c_str()), atof(parts[1].c_str()));
 	} else if(v == "mini") {
 		double minIntensity = atof(argv[++idx]);
-		return new PointIntensityFilter(minIntensity, DBL_MAX);
+		return new PointIntensityFilter(minIntensity, geo::maxvalue<double>());
 	} else if(v == "maxi") {
 		double maxIntensity = atof(argv[++idx]);
-		return new PointIntensityFilter(-DBL_MAX, maxIntensity);
+		return new PointIntensityFilter(-geo::maxvalue<double>(), maxIntensity);
 	} else if(v == "i") {
 		std::string arg = argv[++idx];
 		std::vector<std::string> parts;
@@ -98,10 +98,10 @@ PointFilter* PCPointFilter::getFilter(const std::string& v, char** argv, int& id
 		return new PointIntensityFilter(atof(parts[0].c_str()), atof(parts[1].c_str()));
 	} else if(v == "mina") {
 		double minScanAngle = atof(argv[++idx]);
-		return new PointScanAngleFilter(minScanAngle, DBL_MAX);
+		return new PointScanAngleFilter(minScanAngle, geo::maxvalue<double>());
 	} else if(v == "maxa") {
 		double maxScanAngle = atof(argv[++idx]);
-		return new PointScanAngleFilter(-DBL_MAX, maxScanAngle);
+		return new PointScanAngleFilter(-geo::maxvalue<double>(), maxScanAngle);
 	} else if(v == "a") {
 		std::string arg = argv[++idx];
 		std::vector<std::string> parts;

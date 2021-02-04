@@ -97,7 +97,7 @@ std::vector<std::pair<std::string, std::string>> StdDevComputer::bandMeta() cons
 
 int MaxComputer::compute(double, double, const std::vector<geo::pc::Point>&, const std::vector<geo::pc::Point>& filtered, double, std::vector<double>& out) {
 	if(!filtered.empty()) {
-		double max = DBL_MIN;
+		double max = -geo::maxvalue<double>();
 		for(const geo::pc::Point& pt : filtered) {
 			if(pt.value() > max)
 				max = pt.value();
@@ -119,7 +119,7 @@ std::vector<std::pair<std::string, std::string>> MaxComputer::bandMeta() const {
 
 int MinComputer::compute(double, double, const std::vector<geo::pc::Point>&, const std::vector<geo::pc::Point>& filtered, double, std::vector<double>& out) {
 	if(!filtered.empty()) {
-		double min = DBL_MAX;
+		double min = geo::maxvalue<double>();
 		for(const geo::pc::Point& pt : filtered) {
 			if(pt.value() < min)
 				min = pt.value();
