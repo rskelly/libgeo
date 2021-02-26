@@ -1362,6 +1362,7 @@ public:
 		m_props = props;
 		m_props.setFilename(filename);
 		m_props.setWritable(true);
+		m_type = dataType2GDT(m_props.dataType());
 
 		// Create GDAL dataset.
 		char **opts = NULL;
@@ -1401,8 +1402,7 @@ public:
 
 		rem(filename);
 
-		m_ds = drv->Create(filename.c_str(), m_props.cols(), m_props.rows(), m_props.bands(),
-				dataType2GDT(m_props.dataType()), opts);
+		m_ds = drv->Create(filename.c_str(), m_props.cols(), m_props.rows(), m_props.bands(), m_type, opts);
 
 		if(opts)
 			CSLDestroy(opts);
@@ -3040,7 +3040,8 @@ public:
 
 	}
 
-	bool checkConnection(const std::string& conn) {
+	static bool checkConnection(const std::string& conn) {
+		GDALAllRegister();
 		GDALDataset* ds = (GDALDataset*) GDALOpenEx(conn.c_str(), GDAL_OF_VECTOR | GDAL_OF_UPDATE, nullptr, nullptr, nullptr);
 		if(!ds) {
 			return false;
