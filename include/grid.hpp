@@ -1363,6 +1363,7 @@ public:
 		m_props = props;
 		m_props.setFilename(filename);
 		m_props.setWritable(true);
+		m_type = dataType2GDT(m_props.dataType());
 
 		// Create GDAL dataset.
 		char **opts = NULL;
@@ -1402,8 +1403,7 @@ public:
 
 		rem(filename);
 
-		m_ds = drv->Create(filename.c_str(), m_props.cols(), m_props.rows(), m_props.bands(),
-				dataType2GDT(m_props.dataType()), opts);
+		m_ds = drv->Create(filename.c_str(), m_props.cols(), m_props.rows(), m_props.bands(), m_type, opts);
 
 		if(opts)
 			CSLDestroy(opts);
@@ -3041,6 +3041,17 @@ public:
 
 	}
 
+	static bool checkConnection(const std::string& conn) {
+		GDALAllRegister();
+		GDALDataset* ds = (GDALDataset*) GDALOpenEx(conn.c_str(), GDAL_OF_VECTOR | GDAL_OF_UPDATE, nullptr, nullptr, nullptr);
+		if(!ds) {
+			return false;
+		} else {
+			GDALClose(ds);
+			return true;
+		}
+	}
+
 	/**
 	 * \brief Vectorizes the raster to a database table.
 	 *
@@ -3071,8 +3082,10 @@ public:
 			g_runerr("Could not connect to database.");
 
 		OGRLayer* layer = ds->GetLayerByName(layerName.c_str());
-		if(!layer)
+		if(!layer) {
+			GDALClose(ds);
 			g_runerr("Could not find layer.");
+		}
 
 		// The polygonization context will be passed into the poly threads.
 		PolygonContext pc;
@@ -3086,8 +3099,11 @@ public:
 		pc.writeRunning = true;
 
 		// Start a transaction on the layer.
-		if(OGRERR_NONE != layer->StartTransaction())
+		if(OGRERR_NONE != layer->StartTransaction()) {
+			layer->Dereference();
+			GDALClose(ds);
 			g_runerr("Failed to start transaction.");
+		}
 
 		// Start the writer thread.
 		std::thread th(polyWriteToDB, &pc);
@@ -3115,8 +3131,12 @@ public:
 
 
 		// Commit and release the layer -- GDAL will take care of it. But close the dataset so that can happen.
-		if(OGRERR_NONE != layer->CommitTransaction())
+		if(OGRERR_NONE != layer->CommitTransaction()) {
+			layer->Dereference();
+			GDALClose(ds);
 			g_runerr("Failed to commit transaction.");
+		}
+
 		layer->Dereference();
 		GDALClose(ds);
 
