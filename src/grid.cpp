@@ -77,7 +77,7 @@ void geo::grid::detail::polyWriteToDB(PolygonContext* pc) {
 		OGRFeatureDefn* fdef = pc->layer->GetLayerDefn();
 		OGRFeature* feat = OGRFeature::CreateFeature(fdef); // Creates on the OGR heap.
 		feat->SetGeometryDirectly(ogeom);
-		feat->SetFID((GIntBig) id);
+		feat->SetFID(-1);
 		feat->SetField(pc->idField.c_str(), (GIntBig) id);
 		for(PolygonValue v : pc->fieldValues) {
 			switch(v.type) {
