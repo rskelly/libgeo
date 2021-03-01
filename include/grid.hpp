@@ -71,7 +71,7 @@ namespace grid {
 		PolygonValue(const std::string& name, float value) :
 			name(name), type(OFTReal), ivalue(0), dvalue((double) value) {}
 		PolygonValue(const std::string& name, const std::string& value) :
-			name(name), type(OFTReal), ivalue(0), dvalue(0), svalue(value) {}
+			name(name), type(OFTString), ivalue(0), dvalue(0), svalue(value) {}
 	};
 
 	class PolygonContext {
@@ -112,6 +112,7 @@ namespace grid {
 		std::condition_variable mcv;									///<! Condition variable for geometry merging.
 
 		std::string idField;											///<! The ID field.
+		std::string geomField;
 		std::vector<PolygonValue> fieldValues;							///<! A list of field values that will be saved with every poly in the set.
 		OGRLayer* layer;
 		std::mutex lmtx;												///<! Protects layer for writing.
@@ -2944,8 +2945,8 @@ public:
 	 */
 	void polygonizeToFile(const std::string& filename, const std::string& layerName,
 			const std::string& idField, const std::string& driver,
-			bool removeHoles = false, bool removeDangles = false, bool d3 = false,
 			const std::vector<PolygonValue>& fields = {},
+			bool removeHoles = false, bool removeDangles = false, bool d3 = false,
 			Monitor* monitor = nullptr) {
 
 		if(!monitor)
@@ -2953,8 +2954,8 @@ public:
 
 		const std::string& projection = props().projection();
 
-		polygonizeToFile(filename, layerName, idField, driver, projection, removeHoles, removeDangles,
-				d3, fields, monitor);
+		polygonizeToFile(filename, layerName, idField, driver, projection, fields, removeHoles, removeDangles,
+				d3, monitor);
 	}
 
 	/**
@@ -2973,8 +2974,8 @@ public:
 	 */
 	void polygonizeToFile(const std::string& filename, const std::string& layerName, const std::string& idField,
 			const std::string& driver, const std::string& projection,
-			bool removeHoles = false, bool removeDangles = false, bool d3 = false,
 			const std::vector<PolygonValue>& fieldValues = {},
+			bool removeHoles = false, bool removeDangles = false, bool d3 = false,
 			Monitor* monitor = nullptr) {
 
 		// Create the output dataset
@@ -3070,7 +3071,7 @@ public:
 	 * \param monitor A monitor instance. If null, default monitor is used.
 	 */
 	void polygonizeToTable(const std::string& conn, const std::string& layerName,
-			const std::string& idField,
+			const std::string& idField, const std::string& geomField,
 			const std::vector<PolygonValue>& fieldValues,
 			bool removeHoles = false, bool removeDangles = false, bool d3 = false,
 			Monitor* monitor = nullptr) {
@@ -3100,6 +3101,7 @@ public:
 		pc.monitor = monitor != nullptr ? monitor : getDefaultMonitor();
 		pc.layer = layer;
 		pc.idField = idField;
+		pc.geomField = geomField;
 		pc.fieldValues = fieldValues;
 		pc.writeRunning = true;
 
