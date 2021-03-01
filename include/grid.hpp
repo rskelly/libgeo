@@ -2973,7 +2973,7 @@ public:
 	void polygonizeToFile(const std::string& filename, const std::string& layerName, const std::string& idField,
 			const std::string& driver, const std::string& projection,
 			bool removeHoles = false, bool removeDangles = false, bool d3 = false,
-			const std::vector<PolygonValue>& fields = {},
+			const std::vector<PolygonValue>& fieldValues = {},
 			Monitor* monitor = nullptr) {
 
 		// Create the output dataset
@@ -2988,7 +2988,7 @@ public:
 		GDALDataset* ds;
 		OGRLayer* layer;
 
-		polyMakeDataset(filename, driver, layerName, idField, fields,
+		polyMakeDataset(filename, driver, layerName, idField, fieldValues,
 				sr, d3 ? wkbMultiPolygon25D : wkbMultiPolygon, &ds, &layer);
 
 		// Dispose of the spatial reference object.
@@ -2998,9 +2998,14 @@ public:
 		// The polygonization context will be passed into the poly threads.
 		PolygonContext pc;
 		pc.gctx = gctx;
+		pc.layer = layer;
 		pc.removeDangles = removeDangles;
 		pc.removeHoles = removeHoles;
 		pc.monitor = monitor != nullptr ? monitor : getDefaultMonitor();
+		pc.layer = layer;
+		pc.idField = idField;
+		pc.fieldValues = fieldValues;
+		pc.writeRunning = true;
 
 		// Start a transaction on the layer.
 		if(OGRERR_NONE != layer->StartTransaction())
@@ -3254,7 +3259,7 @@ public:
 			// Reset the list of IDs extant in the current row.
 			activeIds.clear();
 
-			// Note: Count's past the end to trigger writing the last cell.
+			// Note: Counts past the end to trigger writing the last cell.
 			for(int c = 1; c < pc->cols; ++c) {
 
 				if(pc->monitor->canceled())
