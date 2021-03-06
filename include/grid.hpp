@@ -82,6 +82,8 @@ namespace grid {
 		std::list<std::pair<int, std::vector<GEOSGeometry*>>> geomBuf;	// Buffer of final geometry parts for one ID.
 		std::list<std::pair<int, GEOSGeometry*>> geoms;					// Merged geoms for writing.
 
+		std::unordered_set<int> targetIDs;				///<! If only cells with certain values should be polygonized, this is the list.
+
 		bool mergeRunning;												///<! Control the geom merge thread.
 		bool writeRunning;												///<! Control the output thread.
 		geo::Monitor* monitor;
@@ -2947,6 +2949,7 @@ public:
 			const std::string& idField, const std::string& driver,
 			const std::vector<PolygonValue>& fields = {},
 			bool removeHoles = false, bool removeDangles = false, bool d3 = false,
+			const std::vector<int>& targetIDs = {},
 			Monitor* monitor = nullptr) {
 
 		if(!monitor)
@@ -2955,7 +2958,7 @@ public:
 		const std::string& projection = props().projection();
 
 		polygonizeToFile(filename, layerName, idField, driver, projection, fields, removeHoles, removeDangles,
-				d3, monitor);
+				d3, targetIDs, monitor);
 	}
 
 	/**
@@ -2976,6 +2979,7 @@ public:
 			const std::string& driver, const std::string& projection,
 			const std::vector<PolygonValue>& fieldValues = {},
 			bool removeHoles = false, bool removeDangles = false, bool d3 = false,
+			const std::vector<int>& targetIDs = {},
 			Monitor* monitor = nullptr) {
 
 		// Create the output dataset
@@ -3008,6 +3012,7 @@ public:
 		pc.idField = idField;
 		pc.fieldValues = fieldValues;
 		pc.writeRunning = true;
+		pc.targetIDs.insert(targetIDs.begin(), targetIDs.end());
 
 		// Start a transaction on the layer.
 		if(OGRERR_NONE != layer->StartTransaction())
@@ -3074,6 +3079,7 @@ public:
 			const std::string& idField, const std::string& geomField,
 			const std::vector<PolygonValue>& fieldValues,
 			bool removeHoles = false, bool removeDangles = false, bool d3 = false,
+			const std::vector<int>& targetIDs = {},
 			Monitor* monitor = nullptr) {
 
 		if(!monitor)
@@ -3104,6 +3110,7 @@ public:
 		pc.geomField = geomField;
 		pc.fieldValues = fieldValues;
 		pc.writeRunning = true;
+		pc.targetIDs.insert(targetIDs.begin(), targetIDs.end());
 
 		// Start a transaction on the layer.
 		if(OGRERR_NONE != layer->StartTransaction()) {
@@ -3233,6 +3240,10 @@ public:
 		// The list of geometries currently being built.
 		std::unordered_set<int> activeIds;
 
+		// Get the list of target IDs (may be empty).
+		const std::unordered_set<int> targetIDs = pc->targetIDs;
+		bool hasTargetIDs = !targetIDs.empty();
+
 		int statusStep = std::max(1, pc->rows / 40);
 
 		// Process raster.
@@ -3272,8 +3283,9 @@ public:
 				if(c == pc->cols - 1 || (v1 = buf[c]) != v0) {
 					// Update the right x coordinate.
 					x1 = pc->startX + c * pc->resX;
-					// If the value is a valid ID, create and the geometry and save it for writing.
-					if(v0 > 0) {
+					// If the value is a valid ID, and if there are no targets or the id is in the
+					// target list, create and the geometry and save it for writing.
+					if(v0 > 0 && (!hasTargetIDs || targetIDs.find(v0) != targetIDs.end())) {
 						GEOSGeometry* geom = polyMakeGeom(pc->gctx, x0, y0, x1, y1, eps);
 						geomParts[v0].push_back(geom);
 						activeIds.insert(v0);
