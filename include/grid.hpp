@@ -71,7 +71,7 @@ namespace grid {
 		PolygonValue(const std::string& name, float value) :
 			name(name), type(OFTReal), ivalue(0), dvalue((double) value) {}
 		PolygonValue(const std::string& name, const std::string& value) :
-			name(name), type(OFTReal), ivalue(0), dvalue(0), svalue(value) {}
+			name(name), type(OFTString), ivalue(0), dvalue(0), svalue(value) {}
 	};
 
 	class PolygonContext {
@@ -81,6 +81,8 @@ namespace grid {
 		// Data containers.
 		std::list<std::pair<int, std::vector<GEOSGeometry*>>> geomBuf;	// Buffer of final geometry parts for one ID.
 		std::list<std::pair<int, GEOSGeometry*>> geoms;					// Merged geoms for writing.
+
+		std::unordered_set<int> targetIDs;				///<! If only cells with certain values should be polygonized, this is the list.
 
 		bool mergeRunning;												///<! Control the geom merge thread.
 		bool writeRunning;												///<! Control the output thread.
@@ -112,6 +114,7 @@ namespace grid {
 		std::condition_variable mcv;									///<! Condition variable for geometry merging.
 
 		std::string idField;											///<! The ID field.
+		std::string geomField;
 		std::vector<PolygonValue> fieldValues;							///<! A list of field values that will be saved with every poly in the set.
 		OGRLayer* layer;
 		std::mutex lmtx;												///<! Protects layer for writing.
@@ -1180,6 +1183,7 @@ private:
 			destroy();
 		m_mapped = false;
 		m_size = (size_t) props().cols() * (size_t) props().rows() * (size_t) sizeof(T);
+		g_debug("Reserving " << m_size << " unmapped bytes.");
 		m_data = (T*) malloc(m_size);
 		if(!m_data) {
 			g_warn("Failed to allocate " << m_size << " bytes for grid.");
@@ -1362,6 +1366,7 @@ public:
 		m_props = props;
 		m_props.setFilename(filename);
 		m_props.setWritable(true);
+		m_type = dataType2GDT(m_props.dataType());
 
 		// Create GDAL dataset.
 		char **opts = NULL;
@@ -1401,8 +1406,7 @@ public:
 
 		rem(filename);
 
-		m_ds = drv->Create(filename.c_str(), m_props.cols(), m_props.rows(), m_props.bands(),
-				dataType2GDT(m_props.dataType()), opts);
+		m_ds = drv->Create(filename.c_str(), m_props.cols(), m_props.rows(), m_props.bands(), m_type, opts);
 
 		if(opts)
 			CSLDestroy(opts);
@@ -2943,8 +2947,9 @@ public:
 	 */
 	void polygonizeToFile(const std::string& filename, const std::string& layerName,
 			const std::string& idField, const std::string& driver,
-			bool removeHoles = false, bool removeDangles = false, bool d3 = false,
 			const std::vector<PolygonValue>& fields = {},
+			bool removeHoles = false, bool removeDangles = false, bool d3 = false,
+			const std::vector<int>& targetIDs = {},
 			Monitor* monitor = nullptr) {
 
 		if(!monitor)
@@ -2952,8 +2957,8 @@ public:
 
 		const std::string& projection = props().projection();
 
-		polygonizeToFile(filename, layerName, idField, driver, projection, removeHoles, removeDangles,
-				d3, fields, monitor);
+		polygonizeToFile(filename, layerName, idField, driver, projection, fields, removeHoles, removeDangles,
+				d3, targetIDs, monitor);
 	}
 
 	/**
@@ -2972,8 +2977,9 @@ public:
 	 */
 	void polygonizeToFile(const std::string& filename, const std::string& layerName, const std::string& idField,
 			const std::string& driver, const std::string& projection,
+			const std::vector<PolygonValue>& fieldValues = {},
 			bool removeHoles = false, bool removeDangles = false, bool d3 = false,
-			const std::vector<PolygonValue>& fields = {},
+			const std::vector<int>& targetIDs = {},
 			Monitor* monitor = nullptr) {
 
 		// Create the output dataset
@@ -2988,7 +2994,7 @@ public:
 		GDALDataset* ds;
 		OGRLayer* layer;
 
-		polyMakeDataset(filename, driver, layerName, idField, fields,
+		polyMakeDataset(filename, driver, layerName, idField, fieldValues,
 				sr, d3 ? wkbMultiPolygon25D : wkbMultiPolygon, &ds, &layer);
 
 		// Dispose of the spatial reference object.
@@ -2998,9 +3004,15 @@ public:
 		// The polygonization context will be passed into the poly threads.
 		PolygonContext pc;
 		pc.gctx = gctx;
+		pc.layer = layer;
 		pc.removeDangles = removeDangles;
 		pc.removeHoles = removeHoles;
 		pc.monitor = monitor != nullptr ? monitor : getDefaultMonitor();
+		pc.layer = layer;
+		pc.idField = idField;
+		pc.fieldValues = fieldValues;
+		pc.writeRunning = true;
+		pc.targetIDs.insert(targetIDs.begin(), targetIDs.end());
 
 		// Start a transaction on the layer.
 		if(OGRERR_NONE != layer->StartTransaction())
@@ -3040,6 +3052,17 @@ public:
 
 	}
 
+	static bool checkConnection(const std::string& conn) {
+		GDALAllRegister();
+		GDALDataset* ds = (GDALDataset*) GDALOpenEx(conn.c_str(), GDAL_OF_VECTOR | GDAL_OF_UPDATE, nullptr, nullptr, nullptr);
+		if(!ds) {
+			return false;
+		} else {
+			GDALClose(ds);
+			return true;
+		}
+	}
+
 	/**
 	 * \brief Vectorizes the raster to a database table.
 	 *
@@ -3053,9 +3076,10 @@ public:
 	 * \param monitor A monitor instance. If null, default monitor is used.
 	 */
 	void polygonizeToTable(const std::string& conn, const std::string& layerName,
-			const std::string& idField,
+			const std::string& idField, const std::string& geomField,
 			const std::vector<PolygonValue>& fieldValues,
 			bool removeHoles = false, bool removeDangles = false, bool d3 = false,
+			const std::vector<int>& targetIDs = {},
 			Monitor* monitor = nullptr) {
 
 		if(!monitor)
@@ -3070,8 +3094,10 @@ public:
 			g_runerr("Could not connect to database.");
 
 		OGRLayer* layer = ds->GetLayerByName(layerName.c_str());
-		if(!layer)
+		if(!layer) {
+			GDALClose(ds);
 			g_runerr("Could not find layer.");
+		}
 
 		// The polygonization context will be passed into the poly threads.
 		PolygonContext pc;
@@ -3081,12 +3107,17 @@ public:
 		pc.monitor = monitor != nullptr ? monitor : getDefaultMonitor();
 		pc.layer = layer;
 		pc.idField = idField;
+		pc.geomField = geomField;
 		pc.fieldValues = fieldValues;
 		pc.writeRunning = true;
+		pc.targetIDs.insert(targetIDs.begin(), targetIDs.end());
 
 		// Start a transaction on the layer.
-		if(OGRERR_NONE != layer->StartTransaction())
+		if(OGRERR_NONE != layer->StartTransaction()) {
+			layer->Dereference();
+			GDALClose(ds);
 			g_runerr("Failed to start transaction.");
+		}
 
 		// Start the writer thread.
 		std::thread th(polyWriteToDB, &pc);
@@ -3114,8 +3145,12 @@ public:
 
 
 		// Commit and release the layer -- GDAL will take care of it. But close the dataset so that can happen.
-		if(OGRERR_NONE != layer->CommitTransaction())
+		if(OGRERR_NONE != layer->CommitTransaction()) {
+			layer->Dereference();
+			GDALClose(ds);
 			g_runerr("Failed to commit transaction.");
+		}
+
 		layer->Dereference();
 		GDALClose(ds);
 
@@ -3205,6 +3240,10 @@ public:
 		// The list of geometries currently being built.
 		std::unordered_set<int> activeIds;
 
+		// Get the list of target IDs (may be empty).
+		const std::unordered_set<int> targetIDs = pc->targetIDs;
+		bool hasTargetIDs = !targetIDs.empty();
+
 		int statusStep = std::max(1, pc->rows / 40);
 
 		// Process raster.
@@ -3234,7 +3273,7 @@ public:
 			// Reset the list of IDs extant in the current row.
 			activeIds.clear();
 
-			// Note: Count's past the end to trigger writing the last cell.
+			// Note: Counts past the end to trigger writing the last cell.
 			for(int c = 1; c < pc->cols; ++c) {
 
 				if(pc->monitor->canceled())
@@ -3244,8 +3283,9 @@ public:
 				if(c == pc->cols - 1 || (v1 = buf[c]) != v0) {
 					// Update the right x coordinate.
 					x1 = pc->startX + c * pc->resX;
-					// If the value is a valid ID, create and the geometry and save it for writing.
-					if(v0 > 0) {
+					// If the value is a valid ID, and if there are no targets or the id is in the
+					// target list, create and the geometry and save it for writing.
+					if(v0 > 0 && (!hasTargetIDs || targetIDs.find(v0) != targetIDs.end())) {
 						GEOSGeometry* geom = polyMakeGeom(pc->gctx, x0, y0, x1, y1, eps);
 						geomParts[v0].push_back(geom);
 						activeIds.insert(v0);

@@ -76,8 +76,12 @@ void geo::grid::detail::polyWriteToDB(PolygonContext* pc) {
 		// Create and configure the feature. Feature owns the OGRGeometry.
 		OGRFeatureDefn* fdef = pc->layer->GetLayerDefn();
 		OGRFeature* feat = OGRFeature::CreateFeature(fdef); // Creates on the OGR heap.
-		feat->SetGeometryDirectly(ogeom);
-		feat->SetFID((GIntBig) id);
+		if(pc->geomField.empty()) {
+			feat->SetGeometryDirectly(ogeom);
+		} else {
+			feat->SetGeomFieldDirectly(feat->GetGeomFieldIndex(pc->geomField.c_str()), ogeom);
+		}
+		feat->SetFID(-1);
 		feat->SetField(pc->idField.c_str(), (GIntBig) id);
 		for(PolygonValue v : pc->fieldValues) {
 			switch(v.type) {
@@ -88,6 +92,7 @@ void geo::grid::detail::polyWriteToDB(PolygonContext* pc) {
 				feat->SetField(v.name.c_str(), v.dvalue);
 				break;
 			case OFTWideString:
+			case OFTString:
 				feat->SetField(v.name.c_str(), v.svalue.c_str());
 				break;
 			default:

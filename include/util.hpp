@@ -220,6 +220,11 @@ G_DLL_EXPORT std::string gettmpdir();
 G_DLL_EXPORT int pid();
 
 /**
+ * Return the name of a process with the given pid, or and empty string if it's not running.
+ */
+std::string procname(int pid);
+
+/**
  * Create a temporary directory and return the path.
  *
  * Attempts to put the directory in dir, otherwise in the system temp dir.

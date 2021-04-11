@@ -8,6 +8,7 @@
 #include <iostream>
 #include <sstream>
 #include <iomanip>
+#include <thread>
 
 #ifdef __GNUC__
 #define DEPRECATED __attribute__((deprecated))
@@ -179,10 +180,10 @@ namespace geo {
 
 #define g_log(x, y) { if(geo::loglevel() <= y) std::cerr << std::setprecision(12) << x << std::endl; }
 
-#define g_trace(x) g_log("TRACE:   " << x, G_LOG_TRACE)
-#define g_debug(x) g_log("DEBUG:   " << x, G_LOG_DEBUG)
+#define g_trace(x) g_log("TRACE  : " << x, G_LOG_TRACE)
+#define g_debug(x) g_log("DEBUG  : " << x, G_LOG_DEBUG)
 #define g_warn(x)  g_log("WARNING: " << x, G_LOG_WARN)
-#define g_error(x) g_log("ERROR:   " << x, G_LOG_ERROR)
+#define g_error(x) g_log("ERROR  : " << x, G_LOG_ERROR)
 
 #define g_argerr(x) {std::stringstream _ss; _ss << x; throw std::invalid_argument(_ss.str());}
 #define g_implerr(x) {std::stringstream _ss; _ss << x; throw std::runtime_error(_ss.str());}
