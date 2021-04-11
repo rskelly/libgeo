@@ -454,6 +454,13 @@ G_DLL_EXPORT double random(double min, double max);
 G_DLL_EXPORT uint64_t microtime();
 
 /**
+ * Return the clock time in seconds.
+ *
+ * \return The clock time in seconds.
+ */
+G_DLL_EXPORT double time();
+
+/**
  * \brief Get the distance from the point to the line.
  *
  * \param x The point x.

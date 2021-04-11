@@ -458,17 +458,12 @@ double geo::util::random(double min, double max) {
 }
 
 uint64_t geo::util::microtime() {
-#ifdef _WIN32
-	FILETIME ft;
-	GetSystemTimePreciseAsFileTime(&ft);
-	return ((uint64_t) ft.dwHighDateTime << 32) | ft.dwLowDateTime;
-#else
-	struct timeval t;
-	gettimeofday(&t, NULL);
-	return (uint64_t) t.tv_sec * 1000000 + t.tv_usec;
-#endif
+	return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
+double geo::util::time() {
+	return 0.000001 * std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+}
 
 double BivariateSpline::stddev(const std::vector<double>& v) const {
 	double mean = 0, var = 0;
