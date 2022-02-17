@@ -232,6 +232,7 @@ public:
 		reader.prepare(table);
 		hdr = reader.header();
 		size = hdr.pointCount();
+		load();
 	}
 
 	void load() {
