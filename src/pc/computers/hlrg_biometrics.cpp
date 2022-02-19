@@ -177,7 +177,7 @@ int HLRGBiometricsComputer::compute(double x, double y, const std::vector<geo::p
 			thresh = f->minZ;
 	}
 	if(std::isnan(thresh))
-		g_runerr("A threshold must be given for HRLG biometrics, even if it's zero. Use -f:hlrg-bio:minz=<z>");
+		g_runerr("A threshold must be given for HRLG biometrics, even if it's zero. Use -f:hlrg-bio:minz <z>");
 
 	std::vector<geo::pc::Point> _allpts(filtered);
 	int count = _allpts.size();
