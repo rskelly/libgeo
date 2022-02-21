@@ -107,7 +107,8 @@ namespace grid {
 
 		bool removeHoles;
 		bool removeDangles;
-
+		int threads;
+		
 		std::mutex gmtx;												///<! Mutext for geometry writing.
 		std::condition_variable gcv;									///<! Condition variable for geometry writing.
 		std::mutex mmtx;												///<! Mutex for geometry merging.
@@ -1431,8 +1432,10 @@ public:
 
 		// Set the metadata if there is any.
 		const std::vector<std::string>& bandMeta = m_props.bandMetadata();
-		const char* metaName = m_props.bandMetaName().c_str();
-		m_ds->GetRasterBand(1)->SetMetadataItem(metaName, bandMeta[0].c_str(), "");
+		if(!bandMeta.empty()) {
+			const char* metaName = m_props.bandMetaName().c_str();
+			m_ds->GetRasterBand(1)->SetMetadataItem(metaName, bandMeta[0].c_str(), "");
+		}
 
 		// Map the raster into virtual memory.
 
@@ -2235,11 +2238,11 @@ public:
 	 * \param band The source band.
 	 * \return The number of elements written.
 	 */
-	size_t readFromVector(std::vector<T>& vec, int col, int row, int cols, int rows, int band) {
+	size_t readFromVector(std::vector<T>& vec, int col, int row, int cols, int rows) {
 		for(int r = 0; r < rows; ++r) {
 			for(int c = 0; c < cols; ++c) {
 				if(!(c + col < 0 || r + row < 0 || c + col >= props().cols() || r + row >= props().rows()))
-					set(col + c, row + r, vec[r * cols + c], band);
+					set(col + c, row + r, vec[r * cols + c]);
 			}
 		}
 		return cols * rows;
@@ -2950,7 +2953,7 @@ public:
 			const std::vector<PolygonValue>& fields = {},
 			bool removeHoles = false, bool removeDangles = false, bool d3 = false,
 			const std::vector<int>& targetIDs = {},
-			Monitor* monitor = nullptr) {
+			Monitor* monitor = nullptr, int threads = 1) {
 
 		if(!monitor)
 			monitor = getDefaultMonitor();
@@ -2958,7 +2961,7 @@ public:
 		const std::string& projection = props().projection();
 
 		polygonizeToFile(filename, layerName, idField, driver, projection, fields, removeHoles, removeDangles,
-				d3, targetIDs, monitor);
+				d3, targetIDs, monitor, threads);
 	}
 
 	/**
@@ -2980,7 +2983,7 @@ public:
 			const std::vector<PolygonValue>& fieldValues = {},
 			bool removeHoles = false, bool removeDangles = false, bool d3 = false,
 			const std::vector<int>& targetIDs = {},
-			Monitor* monitor = nullptr) {
+			Monitor* monitor = nullptr, int threads = 1) {
 
 		// Create the output dataset
 		GEOSContextHandle_t gctx = OGRGeometry::createGEOSContext();
@@ -3013,6 +3016,7 @@ public:
 		pc.fieldValues = fieldValues;
 		pc.writeRunning = true;
 		pc.targetIDs.insert(targetIDs.begin(), targetIDs.end());
+		pc.threads = threads;
 
 		// Start a transaction on the layer.
 		if(OGRERR_NONE != layer->StartTransaction())
@@ -3080,7 +3084,7 @@ public:
 			const std::vector<PolygonValue>& fieldValues,
 			bool removeHoles = false, bool removeDangles = false, bool d3 = false,
 			const std::vector<int>& targetIDs = {},
-			Monitor* monitor = nullptr) {
+			Monitor* monitor = nullptr, int threads = 1) {
 
 		if(!monitor)
 			monitor = getDefaultMonitor();
@@ -3111,6 +3115,7 @@ public:
 		pc.fieldValues = fieldValues;
 		pc.writeRunning = true;
 		pc.targetIDs.insert(targetIDs.begin(), targetIDs.end());
+		pc.threads = threads;
 
 		// Start a transaction on the layer.
 		if(OGRERR_NONE != layer->StartTransaction()) {
@@ -3170,11 +3175,12 @@ public:
 	 * \param monitor A Monitor for progress and cancelation.
 	 */
 	template <class C>
-	void polygonize(C& callback, bool removeHoles = false, bool removeDangles = false, Monitor* monitor = nullptr) {
+	void polygonize(C& callback, bool removeHoles = false, bool removeDangles = false, Monitor* monitor = nullptr, int threads = 1) {
 		PolygonContext pc;
 		pc.removeDangles = removeDangles;
 		pc.removeHoles = removeHoles;
 		pc.monitor = monitor;
+		pc.threads = threads;
 		polygonize(callback, &pc);
 	}
 
@@ -3228,7 +3234,7 @@ public:
 		pc->mergeRunning = true;
 
 		// Start merge and write threads.
-		int nth = 2;
+		int nth = std::min(1, pc->threads - 2);
 		std::vector<std::thread> th;
 		for(int i = 0; i < nth; ++i)
 			th.emplace_back(polyMerge<C>, &callback, pc);
