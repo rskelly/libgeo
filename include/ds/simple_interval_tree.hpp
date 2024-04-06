@@ -12,7 +12,7 @@
 #include <list>
 #include <cmath>
 
-namespace geo {
+namespace dijital {
 
 	namespace ds {
 
@@ -104,6 +104,6 @@ namespace geo {
 
 	} // ds
 
-} // geo
+} // dijital
 
 #endif /* _SIMPLE_INTERVAL_TREE_HPP_ */

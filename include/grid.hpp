@@ -47,9 +47,9 @@
 // Debug. Forces grid to use file-backed mapping regardless of file size.
 //#define GRID_FORCE_MAPPED 1
 
-using namespace geo::util;
+using namespace dijital::util;
 
-namespace geo {
+namespace dijital {
 namespace grid {
 
 	/**
@@ -86,7 +86,6 @@ namespace grid {
 
 		bool mergeRunning;												///<! Control the geom merge thread.
 		bool writeRunning;												///<! Control the output thread.
-		geo::Monitor* monitor;
 
 		// Extract some grid properties.
 		int cols;
@@ -122,7 +121,6 @@ namespace grid {
 		PolygonContext() :
 			gctx(nullptr),
 			mergeRunning(false), writeRunning(false),
-			monitor(nullptr),
 			cols(0), rows(0),
 			resX(0), resY(0),
 			startX(0), startY(0),
@@ -224,13 +222,13 @@ namespace detail {
 		GEOSGeometry* geom = nullptr;
 		int id;
 
-		while(!pc->monitor->canceled() && (pc->mergeRunning || !pc->geomBuf.empty())) {
+		while(!Monitor::get().canceled() && (pc->mergeRunning || !pc->geomBuf.empty())) {
 
 			// Get an ID and the list of polys from the queue.
 			{
 				std::unique_lock<std::mutex> lk(pc->mmtx);
 				// Wait for a notification if the queue is empty.
-				while(!pc->monitor->canceled() && pc->mergeRunning && pc->geomBuf.empty())
+				while(!Monitor::get().canceled() && pc->mergeRunning && pc->geomBuf.empty())
 					pc->mcv.wait(lk);
 				// If the wakeup is spurious, skip.
 				if(pc->geomBuf.empty())
@@ -244,21 +242,21 @@ namespace detail {
 			if(polys.empty())
 				continue;
 
-			if(pc->monitor->canceled()) {
+			if(Monitor::get().canceled()) {
 				for(GEOSGeometry* p : polys)
 					GEOSGeom_destroy_r(pc->gctx, p);
 				continue;
 			}
 
 			{
-				pc->monitor->status(-1, "Merging polygons. This could take a long time.");
+				Monitor::get().status(-1, "Merging polygons. This could take a long time.");
 				GEOSGeometry* multi = GEOSGeom_createCollection_r(pc->gctx, GEOS_GEOMETRYCOLLECTION, polys.data(), polys.size());
 				geom = GEOSUnaryUnion_r(pc->gctx, multi);
 				GEOSGeom_destroy_r(pc->gctx, multi);
 			}
 			polys.clear();
 
-			if(pc->monitor->canceled()) {
+			if(Monitor::get().canceled()) {
 				GEOSGeom_destroy_r(pc->gctx, geom);
 				continue;
 			}
@@ -266,7 +264,7 @@ namespace detail {
 			// If we're removing dangles, throw away all but the
 			// largest single polygon. If it was originally a polygon, there are no dangles.
 			int numGeoms;
-			if(!pc->monitor->canceled() && pc->removeDangles
+			if(!Monitor::get().canceled() && pc->removeDangles
 					&& (numGeoms = GEOSGetNumGeometries_r(pc->gctx, geom)) > 1) {
 				size_t idx = 0;
 				double a, area = 0;
@@ -284,7 +282,7 @@ namespace detail {
 			}
 
 			// If we're removing holes, extract the exterior rings of all constituent polygons.
-			if(!pc->monitor->canceled() && pc->removeHoles) {
+			if(!Monitor::get().canceled() && pc->removeHoles) {
 				std::vector<GEOSGeometry*> geoms0;
 				for(int i = 0; i < GEOSGetNumGeometries_r(pc->gctx, geom); ++i) {
 					const GEOSGeometry* p = GEOSGetGeometryN_r(pc->gctx, geom, i);
@@ -300,7 +298,7 @@ namespace detail {
 			}
 
 			// If the result is not a multi, make it one.
-			if(!pc->monitor->canceled() && GEOSGeomTypeId_r(pc->gctx, geom) != GEOSGeomTypes::GEOS_MULTIPOLYGON) {
+			if(!Monitor::get().canceled() && GEOSGeomTypeId_r(pc->gctx, geom) != GEOSGeomTypes::GEOS_MULTIPOLYGON) {
 				std::vector<GEOSGeometry*> geoms0;
 				geoms0.push_back(geom);
 				// Collection keeps ownership of the geom.
@@ -364,7 +362,6 @@ namespace detail {
 	 */
 	struct gdalprg {
 		int p;
-		geo::Monitor* m;
 	};
 
 	/**
@@ -374,7 +371,7 @@ namespace detail {
 
 } // detail
 
-using namespace geo::grid::detail;
+using namespace dijital::grid::detail;
 
 /**
  * \brief A class containing the properties of a raster.
@@ -500,7 +497,7 @@ public:
 		double y0 = m_trans[3];
 		double x1 = x0 + m_trans[1] * m_cols;
 		double y1 = y0 + m_trans[5] * m_rows;
-		return Bounds<double>(geo::min(x0, x1), geo::min(y0, y1), geo::max(x0, x1), geo::max(y0, y1));
+		return Bounds<double>(dijital::min(x0, x1), dijital::min(y0, y1), dijital::max(x0, x1), dijital::max(y0, y1));
 	}
 
 	/**
@@ -1307,7 +1304,7 @@ public:
 		m_data(nullptr),
 		m_dirty(false),
 		m_band(0) {
-		geo::grid::init();
+		dijital::grid::init();
 	}
 
 	/**
@@ -1449,9 +1446,9 @@ public:
 	 * \param filename The path to the file.
 	 * \param writable True if the file is to be writable.
 	 */
-	Band(const std::string& filename, int band, bool writable, bool mapped, Monitor* monitor = nullptr) :
+	Band(const std::string& filename, int band, bool writable, bool mapped) :
 		Band() {
-		init(filename, band, writable, mapped, monitor);
+		init(filename, band, writable, mapped);
 	}
 
 	/**
@@ -1460,13 +1457,10 @@ public:
 	 * \param filename The path to the file.
 	 * \param writable True if the file is to be writable.
 	 */
-	void init(const std::string& filename, int band, bool writable, bool mapped, Monitor* monitor = nullptr) {
+	void init(const std::string& filename, int band, bool writable, bool mapped) {
 
 		if (filename.empty())
 			g_argerr("Filename must be given.");
-
-		if(!monitor)
-			monitor = getDefaultMonitor();
 
 		// Attempt to open the dataset.
 
@@ -1527,7 +1521,7 @@ public:
 		}
 
 		// Read the raster by rows equivalent in height to the block height.
-		monitor->status(0.0f, "Loading raster from file...");
+		Monitor::get().status(0.0f, "Loading raster from file...");
 
 		int cols = props().cols();
 		int rows = props().rows();
@@ -1536,17 +1530,16 @@ public:
 		INIT_RASTERIO_EXTRA_ARG(arg);
 		struct gdalprg prg;
 		prg.p = 0;
-		prg.m = monitor;
 		arg.pfnProgress = gdalProgress;
 		arg.pProgressData = &prg;
 
 		if(CE_None != bnd->RasterIO(GF_Read, 0, 0, cols, rows,
 				m_data, cols, rows, m_type, 0, 0, &arg)) {
 			// If the load was deliberately canceled, don't raise an error.
-			if(!monitor->canceled()) {
+			if(Monitor::get().canceled()) {
 				g_runerr("Failed to copy raster row.");
 			} else {
-				monitor->status(0.0f, "Load canceled.");
+				Monitor::get().status(0.0f, "Load canceled.");
 			}
 		}
 
@@ -1623,7 +1616,7 @@ public:
 
 	template <class U>
 	static void mergeBands(std::vector<Band<U>*>& bandList, const std::string& filename,
-			const std::string& driver, bool deleteOriginal, Monitor* monitor = nullptr) {
+			const std::string& driver, bool deleteOriginal) {
 		rem(filename);
 		const GridProps& props = bandList.front()->props();
 		int bands = (int) bandList.size();
@@ -1656,7 +1649,6 @@ public:
 		INIT_RASTERIO_EXTRA_ARG(arg);
 		struct gdalprg prg;
 		prg.p = 0;
-		prg.m = monitor ? monitor : getDefaultMonitor();
 		arg.pfnProgress = gdalProgress;
 		arg.pProgressData = &prg;
 
@@ -1697,7 +1689,7 @@ public:
 		CSLDestroy(opts);
 	}
 
-	void save(const std::string& filename, const std::string& driver = "GTiff", Monitor* monitor = nullptr) {
+	void save(const std::string& filename, const std::string& driver = "GTiff") {
 		rem(filename);
 		int cols = props().cols();
 		int rows = props().rows();
@@ -1711,7 +1703,6 @@ public:
 		INIT_RASTERIO_EXTRA_ARG(arg);
 		struct gdalprg prg;
 		prg.p = 0;
-		prg.m = monitor ? monitor : getDefaultMonitor();
 		arg.pfnProgress = gdalProgress;
 		arg.pProgressData = &prg;
 
@@ -1987,7 +1978,7 @@ public:
 		// Fill the buffer with nodata for empty rows/ends.
 		std::fill(buf.begin(), buf.end(), nodata);
 
-		int endr = geo::min((size_t) r + h, rows);
+		int endr = dijital::min((size_t) r + h, rows);
 		for(size_t rr = 0; r < endr; ++rr, ++r) {
 			std::memcpy(buf.data() + cb, m_data + ((size_t) r * cols + c), w * sizeof(T));
 			std::memcpy(tile + (rr + rb) * tw, buf.data(), tw * sizeof(T));
@@ -2047,8 +2038,8 @@ public:
 		int k = 1;
 		st.sum = 0;
 		st.count = 0;
-		st.min = geo::maxvalue<double>();
-		st.max = geo::minvalue<double>();
+		st.min = dijital::maxvalue<double>();
+		st.max = dijital::minvalue<double>();
 		// Welford's method for variance.
 		int rows = gp.rows();
 		int cols = gp.cols();
@@ -2315,7 +2306,7 @@ public:
 		int cols = gp.cols();
 		for(int row = 0; row < rows; ++row) {
 			for(int col = 0; col < cols; ++col) {
-				if ((v = get<double>(col, row)) != nodata && !std::isnan(v) && v < geo::maxvalue<double>()) {
+				if ((v = get<double>(col, row)) != nodata && !std::isnan(v) && v < dijital::maxvalue<double>()) {
 					set(col, row, ((v - mean) / stdDev));
 				} else {
 					set(col, row, nodata);
@@ -2387,10 +2378,10 @@ public:
 		int cols = gp.cols();
 		int rows = gp.rows();
 		size_t size = gp.size();
-		int minc = geo::maxvalue<int>();
-		int minr = geo::maxvalue<int>();
-		int maxc = geo::minvalue<int>();
-		int maxr = geo::minvalue<int>();
+		int minc = dijital::maxvalue<int>();
+		int minr = dijital::maxvalue<int>();
+		int maxc = dijital::minvalue<int>();
+		int maxr = dijital::minvalue<int>();
 		int area = 0;
 
 		std::queue<Cell> q;
@@ -2412,10 +2403,10 @@ public:
 
 			if (!visited.at(idx) && op.shouldFill(col, row)) {
 
-				minc = geo::min(col, minc);
-				maxc = geo::max(col, maxc);
-				minr = geo::min(row, minr);
-				maxr = geo::max(row, maxr);
+				minc = dijital::min(col, minc);
+				maxc = dijital::max(col, maxc);
+				minr = dijital::min(row, minr);
+				maxr = dijital::max(row, maxr);
 				++area;
 				op.fill(col, row);
 				visited.at(idx) = true;
@@ -2429,7 +2420,7 @@ public:
 				for (c = col - 1; c >= 0; --c) {
 					idx = (size_t) row * cols + c;
 					if (!visited.at(idx) && op.shouldFill(c, row)) {
-						minc = geo::min(c, minc);
+						minc = dijital::min(c, minc);
 						++area;
 						op.fill(c, row);
 						visited.at(idx) = true;
@@ -2450,7 +2441,7 @@ public:
 				for (c = col + 1; c < cols; ++c) {
 					idx = (size_t) row * cols + c;
 					if (!visited.at(idx) && op.shouldFill(c, row)) {
-						maxc = geo::max(c, maxc);
+						maxc = dijital::max(c, maxc);
 						++area;
 						op.fill(c, row);
 						visited.at(idx) = true;
@@ -2490,16 +2481,13 @@ public:
 	 * \param smoothed The smoothed grid.
 	 * \param sigma    The standard deviation.
 	 * \param size     The window size.
-	 * \param monitor  A reference to the Monitor.
 	 */
-	void smooth(Band<T>& smoothed, double sigma = 0.84089642, int size = 3, geo::Monitor* monitor = nullptr) {
-		if(!monitor)
-			monitor = getDefaultMonitor();
+	void smooth(Band<T>& smoothed, double sigma = 0.84089642, int size = 3) {
 
 		const GridProps& ogp = props();
 		const GridProps& sgp = smoothed.props();
 
-		monitor->status(0.0f, "Smoothing...");
+		Monitor::get().status(0.0f, "Smoothing...");
 
 		if (sigma <= 0)
 			g_argerr("Sigma must be > 0.");
@@ -2514,7 +2502,7 @@ public:
 		std::vector<T> weights(size * size);
 		Band::gaussianWeights(weights.data(), size, sigma);
 
-		if(monitor->canceled())
+		if(Monitor::get().canceled())
 			return;
 
 		T k, v;
@@ -2527,9 +2515,9 @@ public:
 		// TODO: This is much faster when done in 2 passes.
 		int statusStep = std::max(1, gr / 25);
 		for(int r = 0; r < gr; ++r) {
-			if(r % statusStep == 0)
-				monitor->status(0.02 + ((float) r / gr - 0.02));
-			if(monitor->canceled())
+			//if(r % statusStep == 0)
+			Monitor::get().status(0.02 + ((float) r / gr - 0.02));
+			if(Monitor::get().canceled())
 				return;
 			for(int c = 0; c < gc; ++c) {
 				T n, s = 0;
@@ -2552,7 +2540,7 @@ public:
 			}
 		}
 
-		monitor->status(1.0);
+		Monitor::get().status(1.0);
 	}
 
 	/**
@@ -2627,9 +2615,9 @@ public:
 
 					double dp, a = 0, b = 0;
 					int cnt = 0;
-					for(int r0 = geo::max(0, r - maxDist); r0 < geo::min(rows, r + maxDist + 1); ++r0) {
-						for(int c0 = geo::max(0, c - maxDist); c0 < geo::min(cols, c + maxDist + 1); ++c0) {
-							if((c0 == c && r0 == r) || (d = geo::sq(c0 - c) + geo::sq(r0 - r)) > maxDist ||
+					for(int r0 = dijital::max(0, r - maxDist); r0 < dijital::min(rows, r + maxDist + 1); ++r0) {
+						for(int c0 = dijital::max(0, c - maxDist); c0 < dijital::min(cols, c + maxDist + 1); ++c0) {
+							if((c0 == c && r0 == r) || (d = dijital::sq(c0 - c) + dijital::sq(r0 - r)) > maxDist ||
 									(v = input.get(c0, r0)) == nodata)
 								continue;
 							dp = 1.0 / std::pow(d, exp);
@@ -2655,8 +2643,8 @@ public:
 					// Find all the pixels which were filled
 					std::vector<std::tuple<int, int, double> > vpx;
 					std::vector<std::tuple<int, int> > npx;
-					for(int r0 = geo::max(0, outminr - 1); r0 < geo::min(rows, outmaxr + 2); ++r0) {
-						for(int c0 = geo::max(0, outminc - 1); c0 < geo::min(cols, outmaxc + 2); ++c0) {
+					for(int r0 = dijital::max(0, outminr - 1); r0 < dijital::min(rows, outmaxr + 2); ++r0) {
+						for(int c0 = dijital::max(0, outminc - 1); c0 < dijital::min(cols, outmaxc + 2); ++c0) {
 							v = input.get(c0, r0);
 							if(v == 99999) {
 								npx.push_back(std::make_tuple(c0, r0));
@@ -2679,7 +2667,7 @@ public:
 							pc = std::get<0>(vp);
 							pr = std::get<1>(vp);
 							pv = std::get<2>(vp);
-							d = geo::sq(pc - nc) + geo::sq(pr - nr);
+							d = dijital::sq(pc - nc) + dijital::sq(pr - nr);
 							dp = 1.0 / std::pow(d, exp);
 							a += dp * pv;
 							b += dp;
@@ -2794,20 +2782,15 @@ public:
 
 	/**
 	 * \brief Flush the raster data to the file.
-	 *
-	 * \param monitor An optional Monitor object.
 	 */
-	void flush(Monitor* monitor = nullptr) {
+	void flush() {
 
 		if(!m_dirty || !m_ds || !props().writable())
 			return;
 
-		if(!monitor)
-			monitor = getDefaultMonitor();
-
 		static std::mutex mtx;
 		{
-			monitor->status(0.0f, "Flushing to file...");
+			Monitor::get().status(0.0f, "Flushing to file...");
 			std::lock_guard<std::mutex> lk(mtx);
 			int cols = props().cols();
 			int rows = props().rows();
@@ -2817,17 +2800,16 @@ public:
 			INIT_RASTERIO_EXTRA_ARG(arg);
 			struct gdalprg prg;
 			prg.p = 0;
-			prg.m = monitor;
 			arg.pfnProgress = gdalProgress;
 			arg.pProgressData = &prg;
 
 			if(CE_None != band->RasterIO(GF_Write, 0, 0, cols, rows,
 					m_data, cols, rows, gdalType(), 0, 0, &arg)) {
 				// If the load was deliberately canceled, don't raise an error.
-				if(!monitor->canceled()) {
+				if(!Monitor::get().canceled()) {
 					g_runerr("Failed to write to raster.");
 				} else {
-					monitor->status(0.0f, "Load canceled.");
+					Monitor::get().status(0.0f, "Load canceled.");
 				}
 			}
 
@@ -2839,9 +2821,9 @@ public:
 	/**
 	 * \brief Destroy the raster.
 	 */
-	void destroy(Monitor* monitor = nullptr)  {
+	void destroy()  {
 
-		flush(monitor);
+		flush();
 
 		static std::mutex mtx;
 		{
@@ -2949,16 +2931,12 @@ public:
 			const std::string& idField, const std::string& driver,
 			const std::vector<PolygonValue>& fields = {},
 			bool removeHoles = false, bool removeDangles = false, bool d3 = false,
-			const std::vector<int>& targetIDs = {},
-			Monitor* monitor = nullptr) {
-
-		if(!monitor)
-			monitor = getDefaultMonitor();
+			const std::vector<int>& targetIDs = {}) {
 
 		const std::string& projection = props().projection();
 
 		polygonizeToFile(filename, layerName, idField, driver, projection, fields, removeHoles, removeDangles,
-				d3, targetIDs, monitor);
+				d3, targetIDs);
 	}
 
 	/**
@@ -2979,8 +2957,7 @@ public:
 			const std::string& driver, const std::string& projection,
 			const std::vector<PolygonValue>& fieldValues = {},
 			bool removeHoles = false, bool removeDangles = false, bool d3 = false,
-			const std::vector<int>& targetIDs = {},
-			Monitor* monitor = nullptr) {
+			const std::vector<int>& targetIDs = {}) {
 
 		// Create the output dataset
 		GEOSContextHandle_t gctx = OGRGeometry::createGEOSContext();
@@ -3007,7 +2984,6 @@ public:
 		pc.layer = layer;
 		pc.removeDangles = removeDangles;
 		pc.removeHoles = removeHoles;
-		pc.monitor = monitor != nullptr ? monitor : getDefaultMonitor();
 		pc.layer = layer;
 		pc.idField = idField;
 		pc.fieldValues = fieldValues;
@@ -3073,17 +3049,12 @@ public:
 	 * \param removeHoles Preserve only the boundary of each polygon.
 	 * \param removeDangles Remove dangling parts of each polygon.
 	 * \param d3 True to produce a 3D (2.5D) geometry.
-	 * \param monitor A monitor instance. If null, default monitor is used.
 	 */
 	void polygonizeToTable(const std::string& conn, const std::string& layerName,
 			const std::string& idField, const std::string& geomField,
 			const std::vector<PolygonValue>& fieldValues,
 			bool removeHoles = false, bool removeDangles = false, bool d3 = false,
-			const std::vector<int>& targetIDs = {},
-			Monitor* monitor = nullptr) {
-
-		if(!monitor)
-			monitor = getDefaultMonitor();
+			const std::vector<int>& targetIDs = {}) {
 
 		// Create the output dataset
 		GEOSContextHandle_t gctx = OGRGeometry::createGEOSContext();
@@ -3104,7 +3075,6 @@ public:
 		pc.gctx = gctx;
 		pc.removeDangles = removeDangles;
 		pc.removeHoles = removeHoles;
-		pc.monitor = monitor != nullptr ? monitor : getDefaultMonitor();
 		pc.layer = layer;
 		pc.idField = idField;
 		pc.geomField = geomField;
@@ -3167,14 +3137,12 @@ public:
 	 * \param callback The callback functor.
 	 * \param removeHoles If set to true, holes are removed from polygons.
 	 * \param removeDangles If set to true, degeneracies are removed from polygons, leaving the main body.
-	 * \param monitor A Monitor for progress and cancelation.
 	 */
 	template <class C>
-	void polygonize(C& callback, bool removeHoles = false, bool removeDangles = false, Monitor* monitor = nullptr) {
+	void polygonize(C& callback, bool removeHoles = false, bool removeDangles = false) {
 		PolygonContext pc;
 		pc.removeDangles = removeDangles;
 		pc.removeHoles = removeHoles;
-		pc.monitor = monitor;
 		polygonize(callback, &pc);
 	}
 
@@ -3201,8 +3169,6 @@ public:
 			remap(Interleave::BIL);
 
 		flush();
-
-		pc->monitor = pc->monitor != nullptr ? pc->monitor : getDefaultMonitor();
 
 		bool destroyGeos = false;
 		if(!pc->gctx) {
@@ -3249,12 +3215,12 @@ public:
 		// Process raster.
 		for(int tr = 0; tr < pc->rows; ++tr) {
 
-			if(pc->monitor->canceled()) break;
+			if(Monitor::get().canceled()) break;
 
 			if(tr % statusStep == 0)
-				pc->monitor->status((float) tr / pc->rows, "Polygonizing...");
+				Monitor::get().status((float) tr / pc->rows, "Polygonizing...");
 
-			while(pc->geomBuf.size() > 10000 && !pc->monitor->canceled())
+			while(pc->geomBuf.size() > 10000 && !Monitor::get().canceled())
 				std::this_thread::yield();
 
 			// Load the row buffer.
@@ -3276,7 +3242,7 @@ public:
 			// Note: Counts past the end to trigger writing the last cell.
 			for(int c = 1; c < pc->cols; ++c) {
 
-				if(pc->monitor->canceled())
+				if(Monitor::get().canceled())
 					break;
 
 				// If the current cell value differs from the previous one...
@@ -3297,7 +3263,7 @@ public:
 			}
 
 			// IDs that are in the geoms array and not in the current row are ready to be finalized.
-			if(!pc->monitor->canceled()) {
+			if(!Monitor::get().canceled()) {
 				std::lock_guard<std::mutex> lk(pc->mmtx);
 				std::vector<int> rem;
 				for(const auto& it : geomParts) {
@@ -3315,7 +3281,7 @@ public:
 		}
 
 		// Finalize all remaining geometries.
-		if(!pc->monitor->canceled()) {
+		if(!Monitor::get().canceled()) {
 			std::lock_guard<std::mutex> lk(pc->mmtx);
 			for(const auto& it : geomParts) {
 				pc->geomBuf.push_back(std::make_pair(it.first, std::move(geomParts[it.first])));
@@ -3332,7 +3298,7 @@ public:
 				th[i].join();
 		}
 
-		pc->monitor->status(1.0, "Finished polygonization");
+		Monitor::get().status(1.0, "Finished polygonization");
 
 		// Destroy the context if it was only created in this call.
 		if(destroyGeos)
@@ -3393,7 +3359,7 @@ public:
 		cprops.setBands(1);
 		int bands = props.bands();
 		for(int i = 0; i < bands; ++i)
-			m_bands.emplace_back(new Band<T>(geo::util::tmpfile("raster"), cprops, mapped));
+			m_bands.emplace_back(new Band<T>(dijital::util::tmpfile("raster"), cprops, mapped));
 	}
 
 	/**

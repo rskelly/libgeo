@@ -4,10 +4,10 @@
 #include "geo.hpp"
 #include "util.hpp"
 
-using namespace geo::db;
-using namespace geo::util;
+using namespace dijital::db;
+using namespace dijital::util;
 
-namespace geo {
+namespace dijital {
 
 	namespace db {
 
@@ -71,9 +71,9 @@ namespace geo {
 
 		} // util
 	} // db
-} // geo
+} // dijital
 
-using namespace geo::db::util;
+using namespace dijital::db::util;
 
 DB::DB(const std::string& file, const std::string& layer, const std::string& driver,
 		const std::unordered_map<std::string, FieldType>& fields,

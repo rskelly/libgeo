@@ -35,7 +35,7 @@
 #include "util.hpp"
 
 
-using namespace geo::util;
+using namespace dijital::util;
 
 namespace fs = std::filesystem;
 
@@ -59,7 +59,7 @@ namespace {
 } // anon
 
 
-FileType geo::util::getFileType(const std::string& filename) {
+FileType dijital::util::getFileType(const std::string& filename) {
 	std::string ext;
 	{
 		size_t p = filename.find('.');
@@ -94,7 +94,7 @@ FileType geo::util::getFileType(const std::string& filename) {
 	return FileType::Unknown;
 }
 
-std::string geo::util::fileTypeAsString(FileType type) {
+std::string dijital::util::fileTypeAsString(FileType type) {
 	switch(type) {
 	case FileType::GTiff: return "GTiff";
 	case FileType::ENVI: return "ENVI";
@@ -105,7 +105,7 @@ std::string geo::util::fileTypeAsString(FileType type) {
 	}
 }
 
-FileType geo::util::fileTypeFromString(const std::string& type) {
+FileType dijital::util::fileTypeFromString(const std::string& type) {
 	if(type == "GTiff") {
 		return FileType::GTiff;
 	} else if(type == "ENVI") {
@@ -121,7 +121,7 @@ FileType geo::util::fileTypeFromString(const std::string& type) {
 	}
 }
 
-std::string geo::util::normMethodAsString(NormMethod method) {
+std::string dijital::util::normMethodAsString(NormMethod method) {
 	switch(method) {
 	case NormMethod::ConvexHull:
 		return "Convex Hull";
@@ -135,7 +135,7 @@ std::string geo::util::normMethodAsString(NormMethod method) {
 	}
 }
 
-NormMethod geo::util::normMethodFromString(const std::string& method) {
+NormMethod dijital::util::normMethodFromString(const std::string& method) {
 	if(method == normMethodAsString(NormMethod::ConvexHull)) {
 		return NormMethod::ConvexHull;
 	} else if(method == normMethodAsString(NormMethod::ConvexHullLongestSeg)) {
@@ -147,11 +147,11 @@ NormMethod geo::util::normMethodFromString(const std::string& method) {
 	}
 }
 
-bool geo::util::isnonzero(const double& v) {
+bool dijital::util::isnonzero(const double& v) {
 	return v != 0;
 }
 
-bool geo::util::checkValidInputFiles(const std::vector<std::string>& files) {
+bool dijital::util::checkValidInputFiles(const std::vector<std::string>& files) {
 	if(files.empty()) {
 		g_warn("Input file list is empty.");
 		return false;
@@ -170,7 +170,7 @@ bool geo::util::checkValidInputFiles(const std::vector<std::string>& files) {
 	return invalid == 0;
 }
 
-bool geo::util::safeToWrite(const std::string& path, bool force) {
+bool dijital::util::safeToWrite(const std::string& path, bool force) {
 	if(path.empty() || isdir(path))
 		return false;
 	if(isfile(path))
@@ -178,19 +178,19 @@ bool geo::util::safeToWrite(const std::string& path, bool force) {
 	return true;
 }
 
-bool geo::util::exists(const std::string& path) {
+bool dijital::util::exists(const std::string& path) {
 	return isdir(path) || isfile(path);
 }
 
-bool geo::util::isdir(const std::string& path) {
+bool dijital::util::isdir(const std::string& path) {
 	return !path.empty() && fs::is_directory(path);
 }
 
-bool geo::util::isfile(const std::string& path) {
+bool dijital::util::isfile(const std::string& path) {
 	return !path.empty() && fs::is_regular_file(path);
 }
 
-bool geo::util::rem(const std::string& dir) {
+bool dijital::util::rem(const std::string& dir) {
 	try {
 		fs::path p(dir);
 		fs::remove_all(p);
@@ -201,7 +201,7 @@ bool geo::util::rem(const std::string& dir) {
 	return true;
 }
 
-std::vector<std::string> geo::util::glob(const std::string& path) {
+std::vector<std::string> dijital::util::glob(const std::string& path) {
 	std::vector<std::string> files;
 #ifdef _WIN32
 	std::string p = parent(path);
@@ -239,7 +239,7 @@ std::vector<std::string> geo::util::glob(const std::string& path) {
     return files;
 }
 
-std::string geo::util::parent(const std::string& path) {
+std::string dijital::util::parent(const std::string& path) {
 	std::string _p = path;
 
 	while(_p.size() > 0 && _p.back() == pathsep)
@@ -256,18 +256,18 @@ std::string geo::util::parent(const std::string& path) {
 
 }
 
-size_t geo::util::filesize(const std::string& f) {
+size_t dijital::util::filesize(const std::string& f) {
 	fs::path p(f);
 	return fs::file_size(p);
 }
 
-bool geo::util::rename(const std::string& from, const std::string& to) {
+bool dijital::util::rename(const std::string& from, const std::string& to) {
 	if (isdir(to))
 		g_runerr(to << " is a directory.")
 	return fs::copy_file(from, to);
 }
 
-std::string geo::util::join(const std::string& a, const std::string& b) {
+std::string dijital::util::join(const std::string& a, const std::string& b) {
 	if(b.empty()) {
 		return a.empty() ? "" : a;
 	} else if(a.empty()) {
@@ -289,7 +289,7 @@ std::string geo::util::join(const std::string& a, const std::string& b) {
 	return _a + pathsep + _b;
 }
 
-std::string geo::util::basename(const std::string& path) {
+std::string dijital::util::basename(const std::string& path) {
 	std::string _p = path;
 
 	while(_p.size() > 0 && _p.back() == pathsep)
@@ -303,19 +303,19 @@ std::string geo::util::basename(const std::string& path) {
 	return _p.substr(a + 1, b - a - 1);
 }
 
-std::string geo::util::extension(const std::string& path) {
+std::string dijital::util::extension(const std::string& path) {
 	size_t pos = path.find_last_of('.');
 	if(pos < std::string::npos)
 		return path.substr(pos, std::string::npos);
 	return path;
 }
 
-std::string geo::util::gettmpdir() {
+std::string dijital::util::gettmpdir() {
 	fs::path p = fs::temp_directory_path();
 	return p.string();
 }
 
-int geo::util::pid() {
+int dijital::util::pid() {
 #ifdef _WIN32
 	return GetCurrentProcessId();
 #else
@@ -323,7 +323,7 @@ int geo::util::pid() {
 #endif
 }
 
-std::string geo::util::procname(int pid) {
+std::string dijital::util::procname(int pid) {
 	// Source: http://stackoverflow.com/questions/15545341/process-name-from-its-pid-in-linux
 	std::string ret;
 	char procfile[256];
@@ -338,7 +338,7 @@ std::string geo::util::procname(int pid) {
 	return ret;
 }
 
-std::string geo::util::tmpdir(const std::string& prefix, const std::string& dir) {
+std::string dijital::util::tmpdir(const std::string& prefix, const std::string& dir) {
 	// Assemble the target directory, check and attempt to create if needed.
 	std::string tdir = join(gettmpdir(), dir);
 	if(!isdir(tdir)) {
@@ -356,7 +356,7 @@ std::string geo::util::tmpdir(const std::string& prefix, const std::string& dir)
 	g_runerr("Failed to make temporary directory.");
 }
 
-std::string geo::util::tmpfile(const std::string& prefix, const std::string& dir) {
+std::string dijital::util::tmpfile(const std::string& prefix, const std::string& dir) {
 	// Assemble the target directory, check and attempt to create if needed.
 	std::string tdir = join(gettmpdir(), dir);
 	if(!isdir(tdir)) {
@@ -375,7 +375,7 @@ std::string geo::util::tmpfile(const std::string& prefix, const std::string& dir
 	g_runerr("Failed to create non-extant filename.");
 }
 
-bool geo::util::makedir(const std::string& path) {
+bool dijital::util::makedir(const std::string& path) {
 	if(isdir(path))
 		return true;
 	bool res = fs::create_directories(path);
@@ -384,20 +384,20 @@ bool geo::util::makedir(const std::string& path) {
 	return res;
 }
 
-std::string geo::util::sanitize(const std::string& str) {
+std::string dijital::util::sanitize(const std::string& str) {
 	std::regex repl("([^0-9A-Za-z]+)");
 	std::stringstream ss;
 	std::regex_replace(std::ostreambuf_iterator<char>(ss), str.begin(), str.end(), repl, "_");
 	return ss.str();
 }
 
-std::string geo::util::lowercase(const std::string& str) {
+std::string dijital::util::lowercase(const std::string& str) {
 	std::string out;
 	std::transform(str.begin(), str.end(), std::back_inserter(out), ::tolower);
 	return out;
 }
 
-int geo::util::gdalTypeSize(GDALDataType type) {
+int dijital::util::gdalTypeSize(GDALDataType type) {
 	switch(type) {
 	case GDT_Float32:
 	case GDT_Int32:
@@ -411,7 +411,7 @@ int geo::util::gdalTypeSize(GDALDataType type) {
 	}
 }
 
-std::string geo::util::projectionFromSRID(int srid) {
+std::string dijital::util::projectionFromSRID(int srid) {
 	std::string out;
 	OGRSpatialReference osr;
 	if((OGRERR_NONE == osr.importFromEPSG(srid))) {
@@ -458,7 +458,7 @@ TmpFile::~TmpFile() {
 
 constexpr uint32_t MAX_UINT32 = 32768;
 
-uint64_t geo::util::morton(uint32_t x, uint32_t y) {
+uint64_t dijital::util::morton(uint32_t x, uint32_t y) {
 	if(x >= MAX_UINT32)
 		g_runerr("x coordinate is too large for bit shuffling: " << x)
 	if(y >= MAX_UINT32)
@@ -468,15 +468,15 @@ uint64_t geo::util::morton(uint32_t x, uint32_t y) {
 	return xa | (ya << 1);
 }
 
-double geo::util::random(double min, double max) {
+double dijital::util::random(double min, double max) {
 	return min + ((double) rand() / RAND_MAX) * (max - min);
 }
 
-uint64_t geo::util::microtime() {
+uint64_t dijital::util::microtime() {
 	return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
-double geo::util::time() {
+double dijital::util::time() {
 	return 0.000001 * std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
@@ -522,7 +522,7 @@ int BivariateSpline::init(double& smooth, const std::vector<double>& x, const st
 	int nyest = (int) std::ceil(ky + 1.0 + std::sqrt(m / 2.0));
 	if(nyest < 2 * ky + 2)
 		throw std::runtime_error("nyest too small.");
-	int nmax = geo::max(geo::max(m, nxest), nyest);
+	int nmax = dijital::max(dijital::max(m, nxest), nyest);
 
 	m_c.resize((nxest - kx - 1) * (nyest - ky - 1));
 	m_tx.resize(m);
@@ -532,8 +532,8 @@ int BivariateSpline::init(double& smooth, const std::vector<double>& x, const st
 
 	int u = nxest - kx - 1;
 	int v = nyest - ky - 1;
-	int km = geo::max(kx, ky) + 1;
-	int ne = geo::max(nxest, nyest);
+	int km = dijital::max(kx, ky) + 1;
+	int ne = dijital::max(nxest, nyest);
 	int bx = kx * v + ky + 1;
 	int by = ky * u + kx +1;
 	int b1, b2;
@@ -659,7 +659,7 @@ int SmoothingSpline::init(double& smooth, const std::vector<double>& x, const st
 		throw std::runtime_error("x array size must be greater than or equal to (kx + 1).");
 
 	int nest = m + k + 1;
-	//int nmax = geo::max(m, nest);
+	//int nmax = dijital::max(m, nest);
 
 	m_c.resize(nest);
 	m_tx.resize(nest);
@@ -741,7 +741,7 @@ const std::vector<double>& SmoothingSpline::coefficients() const {
 	return m_c;
 }
 
-using namespace geo::util::csv;
+using namespace dijital::util::csv;
 
 int CSVValue::asInt() const {
 	if(t == Int) {
@@ -922,7 +922,7 @@ std::string Stopwatch::time() {
 }
 
 
-void geo::util::saveGrid(const std::string& file, const std::vector<double> grid,
+void dijital::util::saveGrid(const std::string& file, const std::vector<double> grid,
 		int cols, int rows, double minx, double miny, double xres, double yres,
 		const std::string& proj) {
 	GDALAllRegister();

@@ -13,14 +13,14 @@
 
 bool gdalInited = false;
 
-void geo::grid::init() {
+void dijital::grid::init() {
 	if(!gdalInited) {
 		GDALAllRegister();
 		gdalInited = true;
 	}
 }
 
-Interleave geo::grid::interleaveFromString(const std::string& str) {
+Interleave dijital::grid::interleaveFromString(const std::string& str) {
 	std::string lower;
 	std::transform(str.begin(), str.end(), lower.begin(), ::tolower);
 	if(lower == "band") {
@@ -30,7 +30,7 @@ Interleave geo::grid::interleaveFromString(const std::string& str) {
 	}
 }
 
-size_t geo::grid::detail::minValue(std::unordered_map<size_t, double>& m) {
+size_t dijital::grid::detail::minValue(std::unordered_map<size_t, double>& m) {
 	double min = std::numeric_limits<double>::max();
 	size_t key = 0;
 	for(const auto& it : m) {
@@ -43,18 +43,18 @@ size_t geo::grid::detail::minValue(std::unordered_map<size_t, double>& m) {
 }
 
 
-void geo::grid::detail::polyWriteToDB(PolygonContext* pc) {
+void dijital::grid::detail::polyWriteToDB(PolygonContext* pc) {
 
 	GEOSGeometry* geom = nullptr;
 	int id;
 
-	while(!pc->monitor->canceled() && (pc->writeRunning || !pc->geoms.empty())) {
+	while(!Monitor::get().canceled() && (pc->writeRunning || !pc->geoms.empty())) {
 
 		// Get an ID and the list of polys from the queue.
 		{
 			// Wait for if the queue is empty.
 			std::unique_lock<std::mutex> lk(pc->gmtx);
-			while (!pc->monitor->canceled() && pc->writeRunning && pc->geoms.empty())
+			while (!Monitor::get().canceled() && pc->writeRunning && pc->geoms.empty())
 				pc->gcv.wait(lk);
 			// If the wakeup is spurious, skip.
 			if(pc->geoms.empty())
@@ -65,7 +65,7 @@ void geo::grid::detail::polyWriteToDB(PolygonContext* pc) {
 			pc->geoms.pop_front();
 		}
 
-		if(pc->monitor->canceled()) {
+		if(Monitor::get().canceled()) {
 			GEOSGeom_destroy_r(pc->gctx, geom);
 			continue;
 		}
@@ -115,7 +115,7 @@ void geo::grid::detail::polyWriteToDB(PolygonContext* pc) {
 	}
 }
 
-void geo::grid::detail::printGEOSGeom(GEOSGeometry* geom, GEOSContextHandle_t gctx) {
+void dijital::grid::detail::printGEOSGeom(GEOSGeometry* geom, GEOSContextHandle_t gctx) {
 	GEOSWKTWriter* wtr = GEOSWKTWriter_create_r(gctx);
 	char* a = GEOSWKTWriter_write_r(gctx, wtr, geom);
 	g_warn(a);
@@ -123,7 +123,7 @@ void geo::grid::detail::printGEOSGeom(GEOSGeometry* geom, GEOSContextHandle_t gc
 	GEOSWKTWriter_destroy_r(gctx, wtr);
 }
 
-GEOSGeometry* geo::grid::detail::polyMakeGeom(GEOSContextHandle_t gctx, double x0, double y0, double x1, double y1, double eps, int dims) {
+GEOSGeometry* dijital::grid::detail::polyMakeGeom(GEOSContextHandle_t gctx, double x0, double y0, double x1, double y1, double eps, int dims) {
 
 	// Build the geometry.
 	GEOSCoordSequence* seq = GEOSCoordSeq_create_r(gctx, 5, dims);
@@ -144,7 +144,7 @@ GEOSGeometry* geo::grid::detail::polyMakeGeom(GEOSContextHandle_t gctx, double x
 	return prec;
 }
 
-void geo::grid::detail::polyMakeDataset(const std::string& filename, const std::string& driver,
+void dijital::grid::detail::polyMakeDataset(const std::string& filename, const std::string& driver,
 		const std::string& layerName, const std::string& idField,
 		const std::vector<PolygonValue>& fields,
 		OGRSpatialReference* sr, OGRwkbGeometryType gType,
@@ -201,7 +201,7 @@ void geo::grid::detail::polyMakeDataset(const std::string& filename, const std::
 
 }
 
-int geo::grid::detail::getTypeSize(DataType type) {
+int dijital::grid::detail::getTypeSize(DataType type) {
 	switch(type) {
 	case DataType::Byte: return sizeof(uint8_t);
 	case DataType::Float32: return sizeof(float);
@@ -215,7 +215,7 @@ int geo::grid::detail::getTypeSize(DataType type) {
 	}
 }
 
-GDALDataType geo::grid::detail::dataType2GDT(DataType type) {
+GDALDataType dijital::grid::detail::dataType2GDT(DataType type) {
 	switch(type) {
 	case DataType::Byte:  	return GDT_Byte;
 	case DataType::UInt16: 	return GDT_UInt16;
@@ -231,7 +231,7 @@ GDALDataType geo::grid::detail::dataType2GDT(DataType type) {
 	return GDT_Unknown;
 }
 
-DataType geo::grid::detail::gdt2DataType(GDALDataType type) {
+DataType dijital::grid::detail::gdt2DataType(GDALDataType type) {
 	switch(type) {
 	case GDT_Byte:	  	return DataType::Byte;
 	case GDT_UInt16: 	return DataType::UInt16;
@@ -252,7 +252,7 @@ DataType geo::grid::detail::gdt2DataType(GDALDataType type) {
 	return DataType::None;
 }
 
-void geo::grid::detail::fixWriteBounds(int& cols, int& rows, int& srcCol, int& srcRow,
+void dijital::grid::detail::fixWriteBounds(int& cols, int& rows, int& srcCol, int& srcRow,
 		int& dstCol, int& dstRow, int rcols, int rrows, int gcols, int grows) {
 
 	if(cols <= 0)
@@ -291,7 +291,7 @@ void geo::grid::detail::fixWriteBounds(int& cols, int& rows, int& srcCol, int& s
 
 }
 
-bool geo::grid::detail::fixCoords(int& srcCol, int& srcRow, int& dstCol, int& dstRow,
+bool dijital::grid::detail::fixCoords(int& srcCol, int& srcRow, int& dstCol, int& dstRow,
 		int& cols, int& rows, int srcCols, int srcRows, int dstCols, int dstRows) {
 
 	if(cols <= 0) cols = srcCols;
@@ -336,15 +336,12 @@ bool geo::grid::detail::fixCoords(int& srcCol, int& srcRow, int& dstCol, int& ds
 	return true;
 }
 
-int geo::grid::detail::gdalProgress(double dfComplete, const char *pszMessage, void *pProgressArg) {
+int dijital::grid::detail::gdalProgress(double dfComplete, const char* pszMessage, void*pProgressArg) {
 	struct gdalprg* prg = (struct gdalprg*) pProgressArg;
 	int p0 = (int) (dfComplete * 100);
 	if(prg->p != p0 && p0 % 10 == 0) {
-		static_cast<Monitor*>(prg->m)->status((float) dfComplete, std::string(pszMessage));
+		Monitor::get().status((float) dfComplete, std::string(pszMessage));
 		prg->p = p0;
 	}
-	Monitor* m = prg->m;
-	if(!m)
-		m = getDefaultMonitor();
-	return m->canceled() ? 0 : 1;
+	return Monitor::get().canceled() ? 0 : 1;
 };

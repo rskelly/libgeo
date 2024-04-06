@@ -42,7 +42,7 @@ namespace {
 } // anon
 
 
-namespace geo {
+namespace dijital {
 namespace util {
 
 /**
@@ -479,7 +479,7 @@ G_DLL_EXPORT double time();
 template <class T>
 G_DLL_EXPORT T linedist(T x, T y, T x1, T y1, T x2, T y2) {
 	return std::abs((y2 - y1) * x - (y2 - y1) * y + x2 * y1 - y2 * x1) /
-		std::sqrt(geo::sq(y2 - y1) + geo::sq(x2 - x1));
+		std::sqrt(dijital::sq(y2 - y1) + dijital::sq(x2 - x1));
 }
 
 template <class T> 
@@ -502,12 +502,12 @@ public:
 		m_minz(minz), m_maxz(maxz) {}
 
 	void set(T minx, T miny, T maxx, T maxy, T minz = 0, T maxz = 0) {
-		m_minx = geo::min(minx, maxx);
-		m_miny = geo::min(miny, maxy);
-		m_minz = geo::min(minz, maxz);
-		m_maxx = geo::max(minx, maxx);
-		m_maxy = geo::max(miny, maxy);
-		m_maxz = geo::max(minz, maxz);
+		m_minx = dijital::min(minx, maxx);
+		m_miny = dijital::min(miny, maxy);
+		m_minz = dijital::min(minz, maxz);
+		m_maxx = dijital::max(minx, maxx);
+		m_maxy = dijital::max(miny, maxy);
+		m_maxz = dijital::max(minz, maxz);
 	}
 
 	void assign(const Bounds<T>& bounds) {
@@ -522,7 +522,7 @@ public:
 		return contains(x, y) && z >= m_minz && z < m_maxz;
 	}
 
-	bool contains(const geo::util::Bounds<T>& b, int dims = 2) const {
+	bool contains(const dijital::util::Bounds<T>& b, int dims = 2) const {
 		if (dims == 3) {
 			return contains(b.minx(), b.miny(), b.minz())
 				&& contains(b.maxx(), b.maxy(), b.maxz());
@@ -532,7 +532,7 @@ public:
 		}
 	}
 
-	bool intersects(const geo::util::Bounds<T>& b, int dims = 2) const {
+	bool intersects(const dijital::util::Bounds<T>& b, int dims = 2) const {
 		if (dims == 3) {
 			return !(b.maxx() < minx() || b.maxy() < miny() || b.minx() > maxx()
 				|| b.miny() > maxy() || b.minz() > maxz() || b.maxz() < minz());
@@ -544,14 +544,14 @@ public:
 	}
 	
 	Bounds intersection(const Bounds<T>& other) const {
-		return Bounds(geo::max(minx(), other.minx()), geo::max(miny(), other.miny()),
-			geo::min(maxx(), other.maxx()), geo::min(maxy(), other.maxy()));
+		return Bounds(dijital::max(minx(), other.minx()), dijital::max(miny(), other.miny()),
+			dijital::min(maxx(), other.maxx()), dijital::min(maxy(), other.maxy()));
 	}
 
 	void cube() {
-		T max = geo::max(width(), height());
+		T max = dijital::max(width(), height());
 		if (m_maxz != maxvalue<T>()) {
-			max = geo::max(max, depth()) / 2.0;
+			max = dijital::max(max, depth()) / 2.0;
 			set(midx() - max, midy() - max, midx() + max, midy() + max, midz() - max, midz() + max);
 		}
 		else {
@@ -638,11 +638,11 @@ public:
 	}
 
 	int maxCol(T resolution) const {
-		return (int)geo::abs(width() / resolution);
+		return (int)dijital::abs(width() / resolution);
 	}
 
 	int maxRow(T resolution) const {
-		return (int)geo::abs(height() / resolution);
+		return (int)dijital::abs(height() / resolution);
 	}
 
 	int toCol(T x, T resolution) const {
@@ -686,27 +686,27 @@ public:
 	}
 
 	void extend(const Bounds &b) {
-		m_minx = geo::min(b.minx(), m_minx);
-		m_maxx = geo::max(b.maxx(), m_maxx);
-		m_miny = geo::min(b.miny(), m_miny);
-		m_maxy = geo::max(b.maxy(), m_maxy);
-		m_minz = geo::min(b.minz(), m_minz);
-		m_maxz = geo::max(b.maxz(), m_maxz);
+		m_minx = dijital::min(b.minx(), m_minx);
+		m_maxx = dijital::max(b.maxx(), m_maxx);
+		m_miny = dijital::min(b.miny(), m_miny);
+		m_maxy = dijital::max(b.maxy(), m_maxy);
+		m_minz = dijital::min(b.minz(), m_minz);
+		m_maxz = dijital::max(b.maxz(), m_maxz);
 	}
 
 	void extendX(T x) {
-		m_minx = geo::min(x, m_minx);
-		m_maxx = geo::max(x, m_maxx);
+		m_minx = dijital::min(x, m_minx);
+		m_maxx = dijital::max(x, m_maxx);
 	}
 
 	void extendY(T y) {
-		m_miny = geo::min(y, m_miny);
-		m_maxy = geo::max(y, m_maxy);
+		m_miny = dijital::min(y, m_miny);
+		m_maxy = dijital::max(y, m_maxy);
 	}
 
 	void extendZ(T z) {
-		m_minz = geo::min(z, m_minz);
-		m_maxz = geo::max(z, m_maxz);
+		m_minz = dijital::min(z, m_minz);
+		m_maxz = dijital::max(z, m_maxz);
 	}
 
 	void extend(T x, T y) {
@@ -790,8 +790,8 @@ public:
 	}
 
     void align(T x, T y, T xres, T yres) {
-		xres = geo::abs(xres);
-		yres = geo::abs(yres);
+		xres = dijital::abs(xres);
+		yres = dijital::abs(yres);
 		while (x < m_minx)
 			x += xres;
 		while (x > m_minx)
@@ -1068,6 +1068,6 @@ public:
 };
 
 } // util
-} // geo
+} // dijital
 
 #endif /* INCLUDE_UTIL_HPP_ */

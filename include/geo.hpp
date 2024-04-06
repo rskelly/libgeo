@@ -9,6 +9,7 @@
 #include <sstream>
 #include <iomanip>
 #include <thread>
+#include <mutex>
 
 #ifdef __GNUC__
 #define DEPRECATED __attribute__((deprecated))
@@ -34,7 +35,7 @@ constexpr int G_LOG_WARN = 3;
 constexpr int G_LOG_ERROR = 2;
 constexpr int G_LOG_NONE = 0;
 
-namespace geo {
+namespace dijital {
 	
 	G_DLL_EXPORT int loglevel();
 
@@ -86,6 +87,11 @@ namespace geo {
 	}
 
 
+	class Monitor;
+
+	static std::mutex __monitor_mtx;
+	static Monitor* __monitor;
+
 	/**
 	 * Monitors and controls the operation of a running program.
 	 * Provides access to status-tracking functions, and cancelation flags.
@@ -96,14 +102,24 @@ namespace geo {
 		float m_start;
 		float m_end;
 		float m_lastStatus;
-		Monitor* m_monitor;
+
+		Monitor() :
+			m_cancel(false),
+			m_start(0),
+			m_end(0),
+			m_lastStatus(0) {}
 
 	public:
 
-		/**
-		 * \brief Initialize a Monitor whose progress range is 0-1 (0-100%).
-		 */
-		Monitor() : Monitor(nullptr, 0, 1) {}
+		static Monitor& get() {
+			// TODO: Race condition.
+			if(!__monitor) {
+				std::lock_guard<std::mutex> lk(__monitor_mtx);
+				if(!__monitor)
+					__monitor = new Monitor();
+			}
+			return *__monitor;
+		}
 
 		/**
 		 * \brief Initialize a Monitor whose progress range is {start} to {end}.
@@ -114,71 +130,50 @@ namespace geo {
 		 * \param start The starting status.
 		 * \param end The ending status.
 		 */
-		Monitor(Monitor* monitor, float start, float end) :
-			m_cancel(false),
-			m_start(start), m_end(end),
-			m_lastStatus(start),
-			m_monitor(monitor) {
+		void init(float start, float end) {
+			m_cancel = false;
+			m_start = start;
+			m_end = end;
+			m_lastStatus = start;
 		}
 
 		/**
 		 * \brief Return true if the cancel flag is set.
 		 */
-		virtual bool canceled() const {
-			if (m_monitor) {
-				return m_monitor->canceled();
-			}
-			else {
-				return m_cancel;
-			}
+		bool canceled() const {
+			return m_cancel;
 		}
 
-		virtual void cancel() {
-			if (m_monitor) {
-				m_monitor->cancel();
-			}
-			else {
-				m_cancel = true;
-			}
+		void cancel() {
+			m_cancel = true;
 		}
 
-		virtual void setCanceled(bool cancel) {
-			if(m_monitor) {
-				m_monitor->setCanceled(cancel);
-			} else {
-				m_cancel = cancel;
-			}
+		void setCanceled(bool cancel) {
+			m_cancel = cancel;
 		}
 
-		virtual void status(float status, const std::string& message = "") {
+		void status(float status, const std::string& message = "") {
 			if(status < 0)
 				status = m_lastStatus;
 			m_lastStatus = status;
 			std::cout << std::setprecision(1) << std::fixed << message << " " << (m_start + status * (m_end - m_start)) * 100.0f << "%\n";
 		}
 
-		virtual void error(const std::string& err) {
+		void error(const std::string& err) {
 			std::cerr << err << "\n";
 		}
 
-		virtual void exception(const std::exception* ex) {
+		void exception(const std::exception* ex) {
 			error(ex == nullptr ? "Unknown exception" : ex->what());
 		}
 
-		virtual ~Monitor() {}
+		~Monitor() {}
 	};
-
-	/**
-	 * \brief Return a default Monitor object if none is available elsewhere.
-	 *
-	 * \return A pointer to a global Monitor object.
-	 */
-	Monitor* getDefaultMonitor();
 
 } // geo
 
 
-#define g_log(x, y) { if(geo::loglevel() <= y) std::cerr << std::setprecision(12) << x << std::endl; }
+#define g_log(x, y) { if(dijital::loglevel() <= y) std::cerr << std::setprecision(12) << x << std::endl; }
 
 #define g_trace(x) g_log("TRACE  : " << x, G_LOG_TRACE)
 #define g_debug(x) g_log("DEBUG  : " << x, G_LOG_DEBUG)

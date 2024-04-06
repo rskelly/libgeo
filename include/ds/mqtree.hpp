@@ -38,9 +38,9 @@ typedef int mode_t;
 
 #define BUF_SIZE 1024
 
-using namespace geo::util;
+using namespace dijital::util;
 
-namespace geo {
+namespace dijital {
 namespace ds {
 
 /**
@@ -535,7 +535,7 @@ public:
 				lrunode<T>* n = m_tree->lru().get(m_key, path());
 				const std::vector<T>& c = n->cache();
 				for(const T& item : c) {
-					d = geo::sq(item.x() - pt.x()) + geo::sq(item.y() - pt.y());
+					d = dijital::sq(item.x() - pt.x()) + dijital::sq(item.y() - pt.y());
 					if(d <= r2) {
 						piter = item;
 						++count;
@@ -590,7 +590,7 @@ public:
 				double d3 = linedist(pt.x(), pt.y(), minx, maxy, maxx, maxy);
 				return std::min(std::min(d0, d1), std::min(d2, d3));
 			} else {
-				return std::sqrt(geo::sq(item.x() - pt.x()) + geo::sq(item.y() - pt.y()));
+				return std::sqrt(dijital::sq(item.x() - pt.x()) + dijital::sq(item.y() - pt.y()));
 			}
 		}
 
@@ -734,12 +734,12 @@ public:
 	 * \param cacheSize The LRU nodes stored in memory. Smaller for less memory/more disk use.
 	 * \param maxDepth The maximum depth of the tree. Zero is no limit.
 	 */
-	mqtree<T>(double minx, double miny, double maxx, double maxy, int cacheSize, int maxDepth = 100) :
+	mqtree<T>(double minx, double miny, double maxx, double maxy, int cacheSize = 4096, int maxDepth = 100) :
 		mqtree<T>() {
 		init(minx, miny, maxx, maxy, cacheSize, maxDepth);
 	}
 
-	void init(double minx, double miny, double maxx, double maxy, int cacheSize, int maxDepth = 100) {
+	void init(double minx, double miny, double maxx, double maxy, int cacheSize = 4096, int maxDepth = 100) {
 		m_maxDepth = maxDepth;
 		m_lru.size(cacheSize);
 
@@ -747,7 +747,7 @@ public:
 		m_rootPath = util::tmpdir("mqtree");
 
 		// Get the side length of the table region.
-		double side = geo::max(maxx - minx, maxy - miny);
+		double side = dijital::max(maxx - minx, maxy - miny);
 
 		// Get the block size for IO.
 #ifdef _WIN32

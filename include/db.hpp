@@ -19,9 +19,9 @@
 #include "geo.hpp"
 #include "util.hpp"
 
-using namespace geo::util;
+using namespace dijital::util;
 
-namespace geo {
+namespace dijital {
 
     namespace db {
 
@@ -198,7 +198,7 @@ namespace geo {
 
     } // db
 
-} // geo
+} // dijital
 
 #endif
 

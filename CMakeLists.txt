@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.12)
+cmake_minimum_required(VERSION 3.10)
 
 option (WITH_CGAL "Include CGAL. Valgrind will puke with CGAL (rounding) so turn it off to use it." ON)
 option (ARM64 "Compile for 64 bit ARM" OFF)
