@@ -1420,8 +1420,10 @@ public:
 		// Set projection.
 
 		std::string proj = m_props.projection();
-		if (!proj.empty())
-			m_ds->SetProjection(proj.c_str());
+		if (!proj.empty()) {
+			const char* p = proj.c_str();
+			m_ds->SetProjection(p);
+		}
 
 		if(m_props.nodataSet())
 			m_ds->GetRasterBand(1)->SetNoDataValue(m_props.nodata());
@@ -1691,6 +1693,7 @@ public:
 
 	void save(const std::string& filename, const std::string& driver = "GTiff") {
 		rem(filename);
+
 		int cols = props().cols();
 		int rows = props().rows();
 		double nodata = props().nodata();
@@ -1718,8 +1721,23 @@ public:
 
 		GDALDriverManager* dm = GetGDALDriverManager();
 		GDALDriver* drv = dm->GetDriverByName(driver.c_str());
+		if(!drv) {
+			int dcnt = dm->GetDriverCount();
+			std::string ext2(lowercase(extension(filename).substr(1)));
+			for(int i = 0; i < dcnt; ++i) {
+				GDALDriver* d = dm->GetDriver(i);
+				const char* ext = GDALGetMetadataItem(d, GDAL_DMD_EXTENSION, "");
+				if(!ext)
+					continue;
+				std::string ext1(ext);
+				if(lowercase(ext1) == ext2) {
+					drv = d;
+					break;
+				}
+			}
+		}
 		if(!drv)
-			g_runerr("Driver not found: " << driver);
+			g_runerr("Driver not found for file " << filename << ": " << driver);
 		GDALDataset* ds = drv->Create(filename.c_str(), cols, rows, 1, dataType2GDT(type), opts);
 		ds->SetGeoTransform(trans);
 		ds->SetProjection(projection.c_str());
@@ -2813,7 +2831,7 @@ public:
 				}
 			}
 
-			m_ds->FlushCache();
+			// TODO: m_ds->FlushCache();
 			m_dirty = false;
 		}
 	}
